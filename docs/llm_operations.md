@@ -16,6 +16,7 @@ This is the first file an LLM should read when working in this repository. It ex
 - A minimal browser UI exists for inspection and manual seeding.
 - LLM generation is stubbed only. There is no autonomous expansion loop yet.
 - Image generation is not implemented yet beyond asset/job placeholders.
+- Local background removal is wired through a Hugging Face-compatible tool path.
 
 ## Repo Layout
 - `app/main.py`: FastAPI app factory, JSON API routes, and HTML routes
@@ -24,8 +25,11 @@ This is the first file an LLM should read when working in this repository. It ex
 - `app/services/canon.py`: canonical entity lookup, dedupe, facts, and relations
 - `app/services/story_graph.py`: story nodes, choices, node-entity links, and jobs
 - `app/services/generation.py`: LLM generation stub for later structured prompting
+- `app/services/assets.py`: asset job schema, Hugging Face model download helper, and background removal
 - `app/templates/`: browser UI templates
 - `app/static/styles.css`: UI styling
+- `app/tools/remove_background.py`: command-line helper for RMBG background removal
+- `app/tools/download_hf_model.py`: command-line helper for prefetching Hugging Face model repos
 - `tests/test_app.py`: integration tests for bootstrap, canon continuity, and choice graph storage
 
 ## Core Data Model
@@ -86,10 +90,20 @@ This is the first file an LLM should read when working in this repository. It ex
 - `GET /objects`
 - `GET /story-nodes`
 - `GET /choices`
+- `GET /assets`
 - `POST /story-nodes`
 - `POST /choices`
 - `GET /jobs`
 - `POST /jobs/generation-stub`
+- `POST /assets/request`
+- `POST /assets/remove-background`
+
+## Asset Workflow
+- Use `POST /assets/request` to store a structured asset-generation request even before a full image generator is wired in.
+- Use `POST /assets/remove-background` or `python -m app.tools.remove_background --input path\to\image.png` to create transparent cutouts from source images.
+- Default background-removal model: `briaai/RMBG-2.0`.
+- Licensing warning: the Hugging Face RMBG-2.0 weights are non-commercial under the model card license, so keep that constraint in mind.
+- Access warning: `briaai/RMBG-2.0` is gated on Hugging Face, so accept the model terms and run `hf auth login` before trying to download or infer with it.
 
 ## Example Usage
 ### Seed a barn and cabin

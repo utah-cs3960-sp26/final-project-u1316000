@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid two-up">
+    <article class="card">
+        <h2>Assets</h2>
+        <p class="lede">Asset requests are queued through JSON, while background removal can run locally with a Hugging Face RMBG model.</p>
+        {% if assets %}
+            <table>
+                <thead>
+                    <tr><th>ID</th><th>Kind</th><th>Entity</th><th>Path</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                    {% for asset in assets %}
+                    <tr>
+                        <td>{{ asset.id }}</td>
+                        <td>{{ asset.asset_kind }}</td>
+                        <td>{{ asset.entity_type }} {{ asset.entity_id }}</td>
+                        <td>{{ asset.file_path }}</td>
+                        <td>{{ asset.status }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">No assets stored yet.</p>
+        {% endif %}
+    </article>
+
+    <article class="card">
+        <h2>Request Schema</h2>
+        <p class="meta">POST <code>/assets/request</code></p>
+        <pre><code>{{ asset_request_example | tojson(indent=2) }}</code></pre>
+        <p class="meta">POST <code>/assets/remove-background</code></p>
+        <pre><code>{{ background_removal_example | tojson(indent=2) }}</code></pre>
+        <p class="meta">CLI: <code>python -m app.tools.remove_background --input path\to\image.png</code></p>
+    </article>
+</section>
+{% endblock %}

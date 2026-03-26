@@ -43,11 +43,15 @@
                     <span class="stem"></span>
                 </div>
                 <div class="grass-band"></div>
+                {% if player_cutout_url %}
+                <img class="player-cutout" src="{{ player_cutout_url }}" alt="The tall gnome player character">
+                {% else %}
                 <div class="player-silhouette">
                     <span class="tophat"></span>
                     <span class="head"></span>
                     <span class="body"></span>
                 </div>
+                {% endif %}
             </div>
 
             <div class="hud-top">
@@ -77,4 +81,3 @@
     <script src="{{ url_for('static', path='/player.js') }}"></script>
 </body>
 </html>
-

@@ -13,6 +13,8 @@ from fastapi.templating import Jinja2Templates
 from app.config import Settings
 from app.database import bootstrap_database, connect
 from app.models import ChoiceCreate, GenerationPayload, StoryNodeCreate, WorldSeed
+from app.models import AssetRequest, BackgroundRemovalRequest
+from app.services.assets import AssetService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
@@ -132,25 +134,31 @@ def get_db(request: Request) -> sqlite3.Connection:
 def create_app(database_path: str | Path | None = None) -> FastAPI:
     settings = Settings.from_env(database_path)
     bootstrap_database(settings.database_path)
+    project_root = Path(__file__).resolve().parent.parent
+    asset_root = project_root / "data" / "assets"
 
     app = FastAPI(title="CYOA Prototype")
     app.state.settings = settings
+    app.state.project_root = project_root
     app.state.llm_generation = LLMGenerationService()
 
     templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+    app.mount("/media", StaticFiles(directory=str(asset_root)), name="media")
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
         canon = CanonResolver(db)
         story = StoryGraphService(db)
+        assets = AssetService(db, project_root)
         context = {
             "request": request,
             "counts": story.counts(),
             "locations": canon.list_locations()[:5],
             "characters": canon.list_characters()[:5],
             "objects": canon.list_objects()[:5],
+            "assets": assets.list_assets()[:5],
             "nodes": story.list_story_nodes()[:5],
             "jobs": story.list_jobs()[:5],
             "db_path": str(settings.database_path),
@@ -159,6 +167,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/play", response_class=HTMLResponse)
     def player_view(request: Request) -> HTMLResponse:
+        player_cutout = asset_root / "cutouts" / "player-main-cutout.png"
         return templates.TemplateResponse(
             request,
             "player.html",
@@ -166,6 +175,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "request": request,
                 "story_data": PLAYER_DEMO_STORY,
                 "title": PLAYER_DEMO_STORY["title"],
+                "player_cutout_url": "/media/cutouts/player-main-cutout.png" if player_cutout.exists() else None,
             },
         )
 
@@ -310,6 +320,42 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             request,
             "objects.html",
             {"request": request, "objects": canon.list_objects()},
+        )
+
+    @app.get("/ui/assets", response_class=HTMLResponse)
+    def assets_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+        assets = AssetService(db, project_root)
+        directories = assets.ensure_asset_directories()
+        return templates.TemplateResponse(
+            request,
+            "assets.html",
+            {
+                "request": request,
+                "assets": assets.list_assets(),
+                "asset_request_example": {
+                    "job_type": "generate_portrait",
+                    "asset_kind": "portrait",
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "model_repo": "stabilityai/stable-diffusion-xl-base-1.0",
+                    "prompt": "A mysterious gnome in a black tophat, storybook portrait, transparent background",
+                    "negative_prompt": "blurry, extra fingers, watermark",
+                    "width": 1024,
+                    "height": 1024,
+                    "steps": 28,
+                    "guidance_scale": 6.5,
+                    "seed": 7,
+                    "metadata": {"style": "storybook", "reuse": True},
+                },
+                "background_removal_example": {
+                    "source_image_path": str(directories["source"] / "example.png"),
+                    "output_name": "example-cutout.png",
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "model_repo": "briaai/RMBG-2.0",
+                    "device": "auto",
+                },
+            },
         )
 
     @app.get("/ui/story", response_class=HTMLResponse)
@@ -513,6 +559,10 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def get_jobs(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
         return StoryGraphService(db).list_jobs()
 
+    @app.get("/assets")
+    def get_assets(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
+        return AssetService(db, project_root).list_assets()
+
     @app.post("/story-nodes")
     def create_story_node(payload: StoryNodeCreate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         story = StoryGraphService(db)
@@ -554,6 +604,54 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         )
         prompt = app.state.llm_generation.build_prompt(context)
         return story.create_job(job_type="llm_stub", payload_json=json.dumps({"context": context, "prompt": prompt}))
+
+    @app.post("/assets/request")
+    def create_asset_request(payload: AssetRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        assets = AssetService(db, project_root)
+        assets.ensure_asset_directories()
+        normalized_payload = payload.model_dump()
+        if not normalized_payload.get("model_repo"):
+            if payload.job_type == "remove_background":
+                normalized_payload["model_repo"] = "briaai/RMBG-2.0"
+        return assets.enqueue_asset_job(normalized_payload)
+
+    @app.post("/assets/remove-background")
+    def remove_background(payload: BackgroundRemovalRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        assets = AssetService(db, project_root)
+        try:
+            output_path = assets.remove_background(
+                source_image_path=payload.source_image_path,
+                output_name=payload.output_name,
+                model_repo=payload.model_repo,
+                device=payload.device,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Background removal failed: {exc}. "
+                    "If this is a gated Hugging Face repo such as briaai/RMBG-2.0, "
+                    "log in with `hf auth login` and accept the model terms first."
+                ),
+            ) from exc
+        if payload.entity_type is not None and payload.entity_id is not None:
+            asset_record = assets.add_asset(
+                entity_type=payload.entity_type,
+                entity_id=payload.entity_id,
+                asset_kind="cutout",
+                file_path=output_path,
+                prompt_text=json.dumps(payload.model_dump()),
+            )
+        else:
+            asset_record = {
+                "entity_type": payload.entity_type,
+                "entity_id": payload.entity_id,
+                "asset_kind": "cutout",
+                "file_path": output_path,
+            }
+        return {"output_path": output_path, "asset": asset_record}
 
     return app
 

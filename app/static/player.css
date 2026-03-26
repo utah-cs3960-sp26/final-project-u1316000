@@ -197,6 +197,18 @@ button {
     opacity: 0.78;
 }
 
+.player-cutout {
+    position: absolute;
+    left: 50%;
+    bottom: 16%;
+    z-index: 1;
+    width: min(28vw, 26rem);
+    max-height: 68vh;
+    transform: translateX(-50%);
+    filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.35));
+    pointer-events: none;
+}
+
 .player-silhouette .tophat,
 .player-silhouette .head,
 .player-silhouette .body {
@@ -449,9 +461,13 @@ button {
         font-size: 1.08rem;
     }
 
+    .player-cutout {
+        width: min(54vw, 18rem);
+        bottom: 22%;
+    }
+
     .dialogue-footer {
         flex-direction: column;
         align-items: flex-start;
     }
 }
-

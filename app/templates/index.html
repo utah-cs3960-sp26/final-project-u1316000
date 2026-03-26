@@ -26,6 +26,7 @@
             <li>Manual world seeding plus JSON APIs for later LLM-driven automation.</li>
             <li>Reusable asset/job records without image generation turned on yet.</li>
             <li>A separate browser-based player demo at <a href="/play">/play</a>.</li>
+            <li>Asset request schema plus local Hugging Face background-removal tooling.</li>
         </ul>
     </article>
 </section>
@@ -77,6 +78,18 @@
             </ul>
         {% else %}
             <p class="empty">No story nodes yet.</p>
+        {% endif %}
+    </article>
+    <article class="card">
+        <h3>Recent Assets</h3>
+        {% if assets %}
+            <ul>
+            {% for asset in assets %}
+                <li><strong>{{ asset.asset_kind }}</strong> - {{ asset.file_path }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No generated or imported assets yet.</p>
         {% endif %}
     </article>
 </section>

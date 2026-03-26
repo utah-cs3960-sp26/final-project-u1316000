@@ -174,6 +174,38 @@ def test_objects_are_persisted_and_listed(tmp_path: Path) -> None:
     assert story_response.json()["entities"][0]["entity_type"] == "object"
 
 
+def test_asset_request_is_queued(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/assets/request",
+        json={
+            "job_type": "generate_portrait",
+            "asset_kind": "portrait",
+            "entity_type": "character",
+            "entity_id": 12,
+            "model_repo": "stabilityai/stable-diffusion-xl-base-1.0",
+            "prompt": "Tall gnome with a tophat, painted portrait",
+            "width": 1024,
+            "height": 1024,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["job_type"] == "asset_request"
+
+
+def test_background_removal_rejects_missing_input(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/assets/remove-background",
+        json={
+            "source_image_path": str(tmp_path / "missing.png"),
+            "entity_type": "object",
+            "entity_id": 1,
+        },
+    )
+    assert response.status_code == 400
+
+
 def test_duplicate_location_is_not_recreated(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/seed-world", json={"locations": [{"name": "Cabin"}]})
@@ -193,6 +225,9 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     objects_page = client.get("/ui/objects")
     assert objects_page.status_code == 200
     assert "Objects" in objects_page.text
+    assets_page = client.get("/ui/assets")
+    assert assets_page.status_code == 200
+    assert "/assets/request" in assets_page.text
     player_page = client.get("/play")
     assert player_page.status_code == 200
     assert "Restart Adventure" in player_page.text

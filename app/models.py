@@ -84,3 +84,35 @@ class GenerationPayload(BaseModel):
     branch_key: str = "default"
     open_hooks: list[str] = Field(default_factory=list)
     focus_entity_ids: list[int] = Field(default_factory=list)
+
+
+AssetJobType = Literal["generate_background", "generate_portrait", "generate_object", "remove_background"]
+AssetKind = Literal["background", "portrait", "object_render", "cutout"]
+AssetEntityType = Literal["location", "character", "object"]
+
+
+class AssetRequest(BaseModel):
+    job_type: AssetJobType
+    asset_kind: AssetKind
+    entity_type: AssetEntityType | None = None
+    entity_id: int | None = None
+    model_repo: str | None = None
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    width: int | None = None
+    height: int | None = None
+    steps: int | None = None
+    guidance_scale: float | None = None
+    seed: int | None = None
+    source_image_path: str | None = None
+    output_name: str | None = None
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class BackgroundRemovalRequest(BaseModel):
+    source_image_path: str
+    output_name: str | None = None
+    entity_type: AssetEntityType | None = None
+    entity_id: int | None = None
+    model_repo: str = "briaai/RMBG-2.0"
+    device: Literal["auto", "cpu", "cuda"] = "auto"

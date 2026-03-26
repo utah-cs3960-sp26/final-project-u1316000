@@ -13,6 +13,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
 - LLM generation stub for future structured scene expansion.
+- Asset request schema and a local Hugging Face background-removal path.
 
 ## What Is Not Built Yet
 - No SQLite-backed player progression or scene rendering pipeline yet.
@@ -39,6 +40,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `/ui/characters` canonical characters
 - `/ui/objects` canonical objects
 - `/ui/story` story nodes and choices
+- `/ui/assets` assets and image-job schema examples
 - `/ui/jobs` generation job placeholders
 
 ## Current Player Demo
@@ -52,9 +54,12 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/services/canon.py` canonical entity lookup, dedupe, facts, and relations
 - `app/services/story_graph.py` story nodes, choices, node-entity links, and jobs
 - `app/services/generation.py` future LLM generation interface
+- `app/services/assets.py` asset metadata, job queueing, Hugging Face model download, and background removal
 - `app/templates/` console UI templates
 - `app/static/styles.css` console styling
 - `docs/llm_operations.md` primary onboarding guide for future AIs and humans
+- `app/tools/remove_background.py` CLI tool for local background removal
+- `app/tools/download_hf_model.py` CLI tool for downloading model repos into the local cache
 - `tests/test_app.py` integration tests
 
 ## Mental Model
@@ -69,6 +74,17 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Treat locked facts as hard canon and avoid contradicting them automatically.
 - Reuse existing locations, characters, and objects whenever possible.
 - Keep operator-facing tools separate from any eventual player-facing UI.
+
+## Asset Pipeline Notes
+- `POST /assets/request` stores an image-job payload in `generation_jobs`.
+- `POST /assets/remove-background` runs local background removal and can store the resulting cutout in `assets`.
+- The default background-removal model is `briaai/RMBG-2.0`.
+- Important license note: the Hugging Face RMBG-2.0 weights are source-available for non-commercial use, not general commercial use.
+- Important access note: `briaai/RMBG-2.0` is gated on Hugging Face. You need to accept the model terms and authenticate first.
+- Helpful commands:
+  - `python -m app.tools.download_hf_model --repo briaai/RMBG-2.0`
+  - `hf auth login`
+  - `python -m app.tools.remove_background --input path\to\image.png`
 
 ## Docs
 - Primary onboarding guide: [docs/llm_operations.md](docs/llm_operations.md)
