@@ -31,6 +31,7 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
     assert {
         "locations",
         "characters",
+        "objects",
         "relations",
         "facts",
         "story_nodes",
@@ -128,6 +129,51 @@ def test_story_nodes_choices_and_entity_reuse(tmp_path: Path) -> None:
     assert nodes[0]["choices"][0]["to_node_id"] == second_node_id
 
 
+def test_objects_are_persisted_and_listed(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/seed-world",
+        json={
+            "locations": [{"name": "Barn"}],
+            "objects": [
+                {
+                    "name": "Brass Compass",
+                    "default_location_name": "Barn",
+                    "canonical_summary": "A scratched compass with a twitching needle.",
+                }
+            ],
+            "facts": [
+                {
+                    "entity_type": "object",
+                    "entity_name": "Brass Compass",
+                    "fact_text": "Its needle points toward unfinished promises.",
+                    "is_locked": True,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    objects_response = client.get("/objects")
+    assert objects_response.status_code == 200
+    objects = objects_response.json()
+    assert len(objects) == 1
+    assert objects[0]["name"] == "Brass Compass"
+
+    story_response = client.post(
+        "/story-nodes",
+        json={
+            "title": "Inventory Check",
+            "scene_text": "You turn the brass compass over in your hand.",
+            "referenced_entities": [
+                {"entity_type": "object", "entity_id": objects[0]["id"], "role": "held"}
+            ],
+        },
+    )
+    assert story_response.status_code == 200
+    assert story_response.json()["entities"][0]["entity_type"] == "object"
+
+
 def test_duplicate_location_is_not_recreated(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/seed-world", json={"locations": [{"name": "Cabin"}]})
@@ -144,3 +190,10 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     seed_page = client.get("/ui/seed")
     assert seed_page.status_code == 200
     assert "Manual World Seeding" in seed_page.text
+    objects_page = client.get("/ui/objects")
+    assert objects_page.status_code == 200
+    assert "Objects" in objects_page.text
+    player_page = client.get("/play")
+    assert player_page.status_code == 200
+    assert "Restart Adventure" in player_page.text
+    assert "Mushroom Field" in player_page.text

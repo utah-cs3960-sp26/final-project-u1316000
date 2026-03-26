@@ -20,6 +20,15 @@
             <label>Home Location Name <input type="text" name="home_location_name"></label>
             <button type="submit">Save Character</button>
         </form>
+
+        <form method="post" action="/ui/seed/object" class="stack">
+            <h3>Add Object</h3>
+            <label>Name <input type="text" name="name" required></label>
+            <label>Description <textarea name="description" rows="3"></textarea></label>
+            <label>Canonical Summary <textarea name="canonical_summary" rows="3"></textarea></label>
+            <label>Default Location Name <input type="text" name="default_location_name"></label>
+            <button type="submit">Save Object</button>
+        </form>
     </article>
 
     <article class="card">
@@ -29,6 +38,7 @@
                 <select name="subject_type">
                     <option value="location">location</option>
                     <option value="character">character</option>
+                    <option value="object">object</option>
                 </select>
             </label>
             <label>Subject Name <input type="text" name="subject_name" required></label>
@@ -37,6 +47,7 @@
                 <select name="object_type">
                     <option value="location">location</option>
                     <option value="character">character</option>
+                    <option value="object">object</option>
                 </select>
             </label>
             <label>Object Name <input type="text" name="object_name" required></label>
@@ -51,6 +62,7 @@
                     <option value="world">world</option>
                     <option value="location">location</option>
                     <option value="character">character</option>
+                    <option value="object">object</option>
                 </select>
             </label>
             <label>Entity Name <input type="text" name="entity_name" placeholder="Leave blank for world facts"></label>
@@ -65,13 +77,16 @@
 <section class="grid two-up">
     <article class="card">
         <h3>Current Canon</h3>
-        {% if locations or characters %}
+        {% if locations or characters or objects %}
             <ul>
             {% for location in locations %}
                 <li><strong>Location:</strong> {{ location.name }}</li>
             {% endfor %}
             {% for character in characters %}
                 <li><strong>Character:</strong> {{ character.name }}</li>
+            {% endfor %}
+            {% for object in objects %}
+                <li><strong>Object:</strong> {{ object.name }}</li>
             {% endfor %}
             </ul>
         {% else %}

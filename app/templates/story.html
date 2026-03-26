@@ -9,7 +9,7 @@
             <label>Scene Text <textarea name="scene_text" rows="6" required></textarea></label>
             <label>Summary <textarea name="summary" rows="3"></textarea></label>
             <label>Entity Refs
-                <input type="text" name="entity_refs" placeholder="location:1, character:2">
+                <input type="text" name="entity_refs" placeholder="location:1, character:2, object:3">
             </label>
             <button type="submit">Create Story Node</button>
         </form>
@@ -67,6 +67,7 @@
     <h2>Entity Reference Helper</h2>
     <p class="meta">Locations: {% for location in locations %}location:{{ location.id }} ({{ location.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
     <p class="meta">Characters: {% for character in characters %}character:{{ character.id }} ({{ character.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+    <p class="meta">Objects: {% for object in objects %}object:{{ object.id }} ({{ object.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
 </section>
 {% endblock %}
 

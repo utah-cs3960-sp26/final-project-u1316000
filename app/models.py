@@ -5,8 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-EntityType = Literal["world", "location", "character", "item"]
-RelationEntityType = Literal["location", "character", "item"]
+EntityType = Literal["world", "location", "character", "object"]
+RelationEntityType = Literal["location", "character", "object"]
 
 
 class LocationSeed(BaseModel):
@@ -20,6 +20,13 @@ class CharacterSeed(BaseModel):
     description: str | None = None
     canonical_summary: str | None = None
     home_location_name: str | None = None
+
+
+class ObjectSeed(BaseModel):
+    name: str
+    description: str | None = None
+    canonical_summary: str | None = None
+    default_location_name: str | None = None
 
 
 class RelationSeed(BaseModel):
@@ -45,6 +52,7 @@ class WorldSeed(BaseModel):
     locked_rules: list[str] = Field(default_factory=list)
     locations: list[LocationSeed] = Field(default_factory=list)
     characters: list[CharacterSeed] = Field(default_factory=list)
+    objects: list[ObjectSeed] = Field(default_factory=list)
     relations: list[RelationSeed] = Field(default_factory=list)
     facts: list[FactSeed] = Field(default_factory=list)
 
@@ -76,4 +84,3 @@ class GenerationPayload(BaseModel):
     branch_key: str = "default"
     open_hooks: list[str] = Field(default_factory=list)
     focus_entity_ids: list[int] = Field(default_factory=list)
-

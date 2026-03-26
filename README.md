@@ -9,13 +9,13 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Not yet a player-facing game client.
 
 ## Current Capabilities
-- SQLite schema for locations, characters, relations, facts, story nodes, choices, assets, and generation jobs.
+- SQLite schema for locations, characters, objects, relations, facts, story nodes, choices, assets, and generation jobs.
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
 - LLM generation stub for future structured scene expansion.
 
 ## What Is Not Built Yet
-- No player-facing presentation layer.
+- No SQLite-backed player progression or scene rendering pipeline yet.
 - No autonomous story expansion loop.
 - No dialogue playback UI beyond raw story node text inspection.
 - No image generation or scene compositing workflow yet.
@@ -33,11 +33,17 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 
 ## Useful Pages
 - `/` overview dashboard
+- `/play` player-view prototype
 - `/ui/seed` manual world seeding
 - `/ui/locations` canonical locations
 - `/ui/characters` canonical characters
+- `/ui/objects` canonical objects
 - `/ui/story` story nodes and choices
 - `/ui/jobs` generation job placeholders
+
+## Current Player Demo
+- `/play` is a hardcoded prototype scene for testing the player-facing layout.
+- It is separate from the SQLite-backed story graph and exists only as a front-end demo for now.
 
 ## Repo Layout
 - `app/main.py` FastAPI app factory, HTML routes, and JSON API routes
@@ -53,6 +59,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 
 ## Mental Model
 - The **world graph** stores reusable canon such as locations, characters, relations, and facts.
+- Objects are first-class canon so persistent items can be reused across branches and asset generation.
 - The **choice graph** stores scenes and the choices that connect them.
 - A story node should reference canonical entity IDs rather than duplicating world data in prose.
 - Continuity comes from reusing canonical entities instead of recreating them in each branch.
@@ -60,7 +67,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 ## Working Conventions
 - Use SQLite as the source of truth.
 - Treat locked facts as hard canon and avoid contradicting them automatically.
-- Reuse existing locations and characters whenever possible.
+- Reuse existing locations, characters, and objects whenever possible.
 - Keep operator-facing tools separate from any eventual player-facing UI.
 
 ## Docs

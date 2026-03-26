@@ -34,6 +34,17 @@ class CanonResolver:
             """,
         )
 
+    def list_objects(self) -> list[dict[str, Any]]:
+        return fetch_all(
+            self.connection,
+            """
+            SELECT o.*, l.name AS default_location_name
+            FROM objects o
+            LEFT JOIN locations l ON l.id = o.default_location_id
+            ORDER BY o.name
+            """,
+        )
+
     def list_facts(self) -> list[dict[str, Any]]:
         return fetch_all(self.connection, "SELECT * FROM facts ORDER BY id")
 
@@ -48,11 +59,18 @@ class CanonResolver:
         slug = self.slugify(name)
         return fetch_one(self.connection, "SELECT * FROM characters WHERE slug = ?", (slug,))
 
+    def find_object_by_name(self, name: str) -> dict[str, Any] | None:
+        slug = self.slugify(name)
+        return fetch_one(self.connection, "SELECT * FROM objects WHERE slug = ?", (slug,))
+
     def get_location(self, location_id: int) -> dict[str, Any] | None:
         return fetch_one(self.connection, "SELECT * FROM locations WHERE id = ?", (location_id,))
 
     def get_character(self, character_id: int) -> dict[str, Any] | None:
         return fetch_one(self.connection, "SELECT * FROM characters WHERE id = ?", (character_id,))
+
+    def get_object(self, object_id: int) -> dict[str, Any] | None:
+        return fetch_one(self.connection, "SELECT * FROM objects WHERE id = ?", (object_id,))
 
     def create_or_get_location(
         self,
@@ -105,6 +123,36 @@ class CanonResolver:
         )
         self.connection.commit()
         return self.get_character(cursor.lastrowid) or {}
+
+    def create_or_get_object(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        canonical_summary: str | None = None,
+        default_location_id: int | None = None,
+    ) -> dict[str, Any]:
+        existing = self.find_object_by_name(name)
+        if existing is not None:
+            if default_location_id and not existing.get("default_location_id"):
+                self.connection.execute(
+                    "UPDATE objects SET default_location_id = ? WHERE id = ?",
+                    (default_location_id, existing["id"]),
+                )
+                self.connection.commit()
+                existing = self.get_object(existing["id"])
+            return existing or {}
+
+        slug = self.slugify(name)
+        cursor = self.connection.execute(
+            """
+            INSERT INTO objects (slug, name, description, default_location_id, canonical_summary)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (slug, name.strip(), description, default_location_id, canonical_summary),
+        )
+        self.connection.commit()
+        return self.get_object(cursor.lastrowid) or {}
 
     def add_relation(
         self,
@@ -161,6 +209,8 @@ class CanonResolver:
             record = self.find_location_by_name(name)
         elif entity_type == "character":
             record = self.find_character_by_name(name)
+        elif entity_type == "object":
+            record = self.find_object_by_name(name)
         else:
             raise ValueError(f"Unsupported entity type: {entity_type}")
 
@@ -184,4 +234,3 @@ class CanonResolver:
             """,
             (relation_type, anchor_location_id),
         )
-

@@ -25,6 +25,7 @@
             <li>Story nodes and choice edges stored as a graph in SQLite.</li>
             <li>Manual world seeding plus JSON APIs for later LLM-driven automation.</li>
             <li>Reusable asset/job records without image generation turned on yet.</li>
+            <li>A separate browser-based player demo at <a href="/play">/play</a>.</li>
         </ul>
     </article>
 </section>
@@ -52,6 +53,18 @@
             </ul>
         {% else %}
             <p class="empty">No canonical characters yet.</p>
+        {% endif %}
+    </article>
+    <article class="card">
+        <h3>Recent Objects</h3>
+        {% if objects %}
+            <ul>
+            {% for object in objects %}
+                <li><strong>{{ object.name }}</strong>{% if object.default_location_name %} - usually found at {{ object.default_location_name }}{% endif %}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No canonical objects yet.</p>
         {% endif %}
     </article>
     <article class="card">

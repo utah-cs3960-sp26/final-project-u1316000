@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2>Objects</h2>
+    {% if objects %}
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Name</th><th>Default Location</th><th>Description</th><th>Summary</th></tr>
+            </thead>
+            <tbody>
+                {% for object in objects %}
+                <tr>
+                    <td>{{ object.id }}</td>
+                    <td>{{ object.name }}</td>
+                    <td>{{ object.default_location_name or "" }}</td>
+                    <td>{{ object.description or "" }}</td>
+                    <td>{{ object.canonical_summary or "" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="empty">No objects seeded yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -18,6 +18,108 @@ from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
 
 
+PLAYER_DEMO_STORY: dict[str, Any] = {
+    "title": "The Tall Gnome Awakens",
+    "start_scene": "opening",
+    "scenes": {
+        "opening": {
+            "location": "Mushroom Field",
+            "lines": [
+                {
+                    "speaker": "Narrator",
+                    "text": "Cold dew clings to your coat as you wake in a field of larger-than-life mushrooms, their pale caps towering overhead like quiet moons hung on crooked stems.",
+                },
+                {
+                    "speaker": "You",
+                    "text": "You push yourself upright and discover your body is wrong in a very specific way: you are still unmistakably a gnome, but stretched to the size of a human.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "The memory of how you arrived here refuses to surface. There is only a raw blankness behind your eyes, like a torn page where a name should be.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "Your normal hat is gone. In its place sits a black tophat beaded with mist, wrapped in a silver ribbon stitched with symbols that feel insultingly familiar.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "You lift your left hand toward the dawn and freeze. Five thumbs stare back at you, flexing with eerie coordination, as if they have always belonged there.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "Beyond the mushroom trunks, something metallic taps three careful beats. In the grass nearby, silver tracks, your strange hat, and your impossible hand all seem to demand attention at once.",
+                },
+            ],
+            "choices": [
+                {
+                    "label": "Examine the silver tracks in the grass",
+                    "target": "tracks",
+                },
+                {
+                    "label": "Inspect the tophat and its silver ribbon",
+                    "target": "hat",
+                },
+                {
+                    "label": "Study your five-thumbed left hand",
+                    "target": "hand",
+                },
+            ],
+        },
+        "tracks": {
+            "location": "Mushroom Field",
+            "lines": [
+                {
+                    "speaker": "Narrator",
+                    "text": "You kneel beside the silver tracks and find they are not footprints at all, but two narrow grooves pressed into the earth as though a tiny carriage had rolled through the field with no horse to pull it.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "The grooves stop beneath the largest mushroom in sight, where someone has tied a strip of velvet to the stem at exactly your eye level.",
+                },
+                {
+                    "speaker": "You",
+                    "text": "You do not remember leaving it there, but the knot is one your hands know how to tie.",
+                },
+            ],
+        },
+        "hat": {
+            "location": "Mushroom Field",
+            "lines": [
+                {
+                    "speaker": "Narrator",
+                    "text": "The tophat fits too well. Inside the brim, the silver ribbon has been stitched through with tiny letters: NOT YOUR FIRST NAME.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "Tucked in the band is a pressed violet and a sliver of mirror. When you angle the mirror just right, a second version of your face seems to blink a fraction too late.",
+                },
+                {
+                    "speaker": "You",
+                    "text": "Whoever replaced your old hat knew exactly what would frighten you and exactly what would make you keep walking.",
+                },
+            ],
+        },
+        "hand": {
+            "location": "Mushroom Field",
+            "lines": [
+                {
+                    "speaker": "Narrator",
+                    "text": "You spread your left hand and watch the five thumbs curl inward in sequence, each one stopping as if it were matching a rhythm your head can almost hear.",
+                },
+                {
+                    "speaker": "Narrator",
+                    "text": "In the wet soil, you find a half-buried stone plate shaped with five thumb-sized hollows. It looks less like a warning than a lock waiting for you to remember the key.",
+                },
+                {
+                    "speaker": "You",
+                    "text": "Whatever happened to you, it did not happen by accident.",
+                },
+            ],
+        },
+    },
+}
+
+
 def get_db(request: Request) -> sqlite3.Connection:
     database_path = request.app.state.settings.database_path
     connection = connect(database_path)
@@ -48,11 +150,24 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             "counts": story.counts(),
             "locations": canon.list_locations()[:5],
             "characters": canon.list_characters()[:5],
+            "objects": canon.list_objects()[:5],
             "nodes": story.list_story_nodes()[:5],
             "jobs": story.list_jobs()[:5],
             "db_path": str(settings.database_path),
         }
         return templates.TemplateResponse(request, "index.html", context)
+
+    @app.get("/play", response_class=HTMLResponse)
+    def player_view(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "player.html",
+            {
+                "request": request,
+                "story_data": PLAYER_DEMO_STORY,
+                "title": PLAYER_DEMO_STORY["title"],
+            },
+        )
 
     @app.get("/ui/seed", response_class=HTMLResponse)
     def seed_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
@@ -61,6 +176,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             "request": request,
             "locations": canon.list_locations(),
             "characters": canon.list_characters(),
+            "objects": canon.list_objects(),
             "relations": canon.list_relations(),
             "facts": canon.list_facts(),
         }
@@ -99,6 +215,27 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             description=description or None,
             canonical_summary=canonical_summary or None,
             home_location_id=home_location_id,
+        )
+        return RedirectResponse("/ui/seed", status_code=303)
+
+    @app.post("/ui/seed/object")
+    def seed_object(
+        name: str = Form(...),
+        description: str = Form(""),
+        canonical_summary: str = Form(""),
+        default_location_name: str = Form(""),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> RedirectResponse:
+        canon = CanonResolver(db)
+        default_location_id = None
+        if default_location_name.strip():
+            default_location = canon.create_or_get_location(name=default_location_name.strip())
+            default_location_id = int(default_location["id"])
+        canon.create_or_get_object(
+            name=name,
+            description=description or None,
+            canonical_summary=canonical_summary or None,
+            default_location_id=default_location_id,
         )
         return RedirectResponse("/ui/seed", status_code=303)
 
@@ -166,6 +303,15 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             {"request": request, "characters": canon.list_characters()},
         )
 
+    @app.get("/ui/objects", response_class=HTMLResponse)
+    def objects_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+        canon = CanonResolver(db)
+        return templates.TemplateResponse(
+            request,
+            "objects.html",
+            {"request": request, "objects": canon.list_objects()},
+        )
+
     @app.get("/ui/story", response_class=HTMLResponse)
     def story_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
         story = StoryGraphService(db)
@@ -178,6 +324,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "nodes": story.list_story_nodes(),
                 "locations": canon.list_locations(),
                 "characters": canon.list_characters(),
+                "objects": canon.list_objects(),
             },
         )
 
@@ -240,6 +387,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         canon = CanonResolver(db)
         created_locations: list[dict[str, Any]] = []
         created_characters: list[dict[str, Any]] = []
+        created_objects: list[dict[str, Any]] = []
         created_relations: list[dict[str, Any]] = []
         created_facts: list[dict[str, Any]] = []
 
@@ -263,6 +411,20 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     description=character.description,
                     canonical_summary=character.canonical_summary,
                     home_location_id=home_location_id,
+                )
+            )
+
+        for object_record in payload.objects:
+            default_location_id = None
+            if object_record.default_location_name:
+                location = canon.create_or_get_location(name=object_record.default_location_name)
+                default_location_id = int(location["id"])
+            created_objects.append(
+                canon.create_or_get_object(
+                    name=object_record.name,
+                    description=object_record.description,
+                    canonical_summary=object_record.canonical_summary,
+                    default_location_id=default_location_id,
                 )
             )
 
@@ -322,6 +484,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         return {
             "created_locations": created_locations,
             "created_characters": created_characters,
+            "created_objects": created_objects,
             "created_relations": created_relations,
             "created_facts": created_facts,
         }
@@ -333,6 +496,10 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     @app.get("/characters")
     def get_characters(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
         return CanonResolver(db).list_characters()
+
+    @app.get("/objects")
+    def get_objects(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
+        return CanonResolver(db).list_objects()
 
     @app.get("/story-nodes")
     def get_story_nodes(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:

@@ -7,7 +7,7 @@ This is the first file an LLM should read when working in this repository. It ex
 - Do not start the story automatically.
 - Preserve continuity across branches by storing canonical world state in SQLite.
 - Treat the story as two connected graphs:
-  - a **world graph** of locations, characters, facts, and relations
+  - a **world graph** of locations, characters, objects, facts, and relations
   - a **choice graph** of story nodes and player-facing choice edges
 
 ## Current Milestone
@@ -32,6 +32,7 @@ This is the first file an LLM should read when working in this repository. It ex
 ### Canonical world tables
 - `locations`: canonical places such as barns, cabins, roads, forests
 - `characters`: recurring people or creatures
+- `objects`: recurring items, props, tools, keepsakes, keys, and other persistent things
 - `relations`: directed links such as `north_of`, `lives_in`, `knows`
 - `facts`: statements about entities or world rules
 - `assets`: reusable portrait/background/cutout metadata
@@ -52,7 +53,7 @@ This is the first file an LLM should read when working in this repository. It ex
 
 ## Continuity Rules
 - Reuse canonical entities whenever possible.
-- Before creating a location or character, check whether it already exists by normalized name.
+- Before creating a location, character, or object, check whether it already exists by normalized name.
 - Spatial continuity is explicit. Example:
   - if the cabin is north of the barn, store one `relations` row where:
     - subject = cabin
@@ -68,7 +69,7 @@ This is the first file an LLM should read when working in this repository. It ex
    - open the UI at `http://127.0.0.1:8000`
    - inspect `/ui/seed`, `/ui/story`, and the JSON endpoints
 3. Before adding new canon:
-   - look for an existing location or character by normalized name
+   - look for an existing location, character, or object by normalized name
    - inspect nearby relations and existing facts
 4. When adding story content later:
    - create or reuse canonical entities first
@@ -82,6 +83,7 @@ This is the first file an LLM should read when working in this repository. It ex
 - `POST /seed-world`
 - `GET /locations`
 - `GET /characters`
+- `GET /objects`
 - `GET /story-nodes`
 - `GET /choices`
 - `POST /story-nodes`
@@ -131,4 +133,3 @@ This is the first file an LLM should read when working in this repository. It ex
 - No story should be pre-seeded unless explicitly requested later.
 - Keep SQLite as the source of truth for continuity.
 - Prefer exact entity reuse over fuzzy reinvention.
-

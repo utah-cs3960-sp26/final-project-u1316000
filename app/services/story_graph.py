@@ -134,6 +134,7 @@ class StoryGraphService:
         table_names = [
             "locations",
             "characters",
+            "objects",
             "relations",
             "facts",
             "story_nodes",
@@ -146,4 +147,3 @@ class StoryGraphService:
             row = fetch_one(self.connection, f"SELECT COUNT(*) AS count FROM {table_name}")
             counts[table_name] = int(row["count"]) if row else 0
         return counts
-
