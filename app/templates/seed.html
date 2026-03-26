@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid two-up">
+    <article class="card">
+        <h2>Manual World Seeding</h2>
+        <p class="lede">Use these forms to establish canon before any LLM-driven expansion starts.</p>
+        <form method="post" action="/ui/seed/location" class="stack">
+            <h3>Add Location</h3>
+            <label>Name <input type="text" name="name" required></label>
+            <label>Description <textarea name="description" rows="3"></textarea></label>
+            <label>Canonical Summary <textarea name="canonical_summary" rows="3"></textarea></label>
+            <button type="submit">Save Location</button>
+        </form>
+
+        <form method="post" action="/ui/seed/character" class="stack">
+            <h3>Add Character</h3>
+            <label>Name <input type="text" name="name" required></label>
+            <label>Description <textarea name="description" rows="3"></textarea></label>
+            <label>Canonical Summary <textarea name="canonical_summary" rows="3"></textarea></label>
+            <label>Home Location Name <input type="text" name="home_location_name"></label>
+            <button type="submit">Save Character</button>
+        </form>
+    </article>
+
+    <article class="card">
+        <form method="post" action="/ui/seed/relation" class="stack">
+            <h3>Add Relation</h3>
+            <label>Subject Type
+                <select name="subject_type">
+                    <option value="location">location</option>
+                    <option value="character">character</option>
+                </select>
+            </label>
+            <label>Subject Name <input type="text" name="subject_name" required></label>
+            <label>Relation Type <input type="text" name="relation_type" placeholder="north_of" required></label>
+            <label>Object Type
+                <select name="object_type">
+                    <option value="location">location</option>
+                    <option value="character">character</option>
+                </select>
+            </label>
+            <label>Object Name <input type="text" name="object_name" required></label>
+            <label>Notes <textarea name="notes" rows="2"></textarea></label>
+            <button type="submit">Save Relation</button>
+        </form>
+
+        <form method="post" action="/ui/seed/fact" class="stack">
+            <h3>Add Fact</h3>
+            <label>Entity Type
+                <select name="entity_type">
+                    <option value="world">world</option>
+                    <option value="location">location</option>
+                    <option value="character">character</option>
+                </select>
+            </label>
+            <label>Entity Name <input type="text" name="entity_name" placeholder="Leave blank for world facts"></label>
+            <label>Fact Text <textarea name="fact_text" rows="3" required></textarea></label>
+            <label>Source <input type="text" name="source" value="manual"></label>
+            <label class="checkbox"><input type="checkbox" name="is_locked" value="true"> Locked canon</label>
+            <button type="submit">Save Fact</button>
+        </form>
+    </article>
+</section>
+
+<section class="grid two-up">
+    <article class="card">
+        <h3>Current Canon</h3>
+        {% if locations or characters %}
+            <ul>
+            {% for location in locations %}
+                <li><strong>Location:</strong> {{ location.name }}</li>
+            {% endfor %}
+            {% for character in characters %}
+                <li><strong>Character:</strong> {{ character.name }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No canonical entities yet.</p>
+        {% endif %}
+    </article>
+    <article class="card">
+        <h3>Relations and Facts</h3>
+        {% if relations or facts %}
+            <ul>
+            {% for relation in relations %}
+                <li>{{ relation.subject_type }} {{ relation.subject_id }} {{ relation.relation_type }} {{ relation.object_type }} {{ relation.object_id }}</li>
+            {% endfor %}
+            {% for fact in facts %}
+                <li>{{ fact.entity_type }} {{ fact.entity_id }}: {{ fact.fact_text }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No relations or facts yet.</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

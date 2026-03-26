@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title if title else "CYOA Prototype" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">SQLite-Backed Prototype</p>
+            <h1><a href="/">CYOA World Console</a></h1>
+        </div>
+        <nav>
+            <a href="/">Overview</a>
+            <a href="/ui/seed">Seed World</a>
+            <a href="/ui/locations">Locations</a>
+            <a href="/ui/characters">Characters</a>
+            <a href="/ui/story">Story Graph</a>
+            <a href="/ui/jobs">Jobs</a>
+        </nav>
+    </header>
+    <main class="page-shell">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
+

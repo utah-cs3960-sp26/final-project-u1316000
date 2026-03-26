@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid two-up">
+    <article class="card">
+        <h2>Create Placeholder Story Node</h2>
+        <form method="post" action="/ui/story/node" class="stack">
+            <label>Branch Key <input type="text" name="branch_key" value="default"></label>
+            <label>Title <input type="text" name="title"></label>
+            <label>Scene Text <textarea name="scene_text" rows="6" required></textarea></label>
+            <label>Summary <textarea name="summary" rows="3"></textarea></label>
+            <label>Entity Refs
+                <input type="text" name="entity_refs" placeholder="location:1, character:2">
+            </label>
+            <button type="submit">Create Story Node</button>
+        </form>
+    </article>
+
+    <article class="card">
+        <h2>Create Choice Edge</h2>
+        <form method="post" action="/ui/story/choice" class="stack">
+            <label>From Node ID <input type="number" name="from_node_id" min="1" required></label>
+            <label>Choice Text <input type="text" name="choice_text" required></label>
+            <label>To Node ID <input type="number" name="to_node_id" min="0"></label>
+            <label>Status <input type="text" name="status" value="open"></label>
+            <label>Notes <textarea name="notes" rows="2"></textarea></label>
+            <button type="submit">Create Choice</button>
+        </form>
+    </article>
+</section>
+
+<section class="card">
+    <h2>Story Nodes</h2>
+    {% if nodes %}
+        <div class="stack">
+        {% for node in nodes %}
+            <article class="subcard">
+                <h3>#{{ node.id }} {% if node.title %}{{ node.title }}{% endif %}</h3>
+                <p>{{ node.scene_text }}</p>
+                {% if node.summary %}
+                    <p class="meta">Summary: {{ node.summary }}</p>
+                {% endif %}
+                {% if node.entities %}
+                    <p class="meta">Entities:
+                        {% for entity in node.entities %}
+                            {{ entity.entity_type }}:{{ entity.entity_id }}{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </p>
+                {% endif %}
+                {% if node.choices %}
+                    <ul>
+                    {% for choice in node.choices %}
+                        <li>{{ choice.choice_text }} -> {% if choice.to_node_id %}#{{ choice.to_node_id }}{% else %}(open){% endif %}</li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty">No outgoing choices yet.</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+        </div>
+    {% else %}
+        <p class="empty">No story nodes yet.</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2>Entity Reference Helper</h2>
+    <p class="meta">Locations: {% for location in locations %}location:{{ location.id }} ({{ location.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+    <p class="meta">Characters: {% for character in characters %}character:{{ character.id }} ({{ character.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+</section>
+{% endblock %}
+

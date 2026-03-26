@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2>Characters</h2>
+    {% if characters %}
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Name</th><th>Home</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                {% for character in characters %}
+                <tr>
+                    <td>{{ character.id }}</td>
+                    <td>{{ character.name }}</td>
+                    <td>{{ character.home_location_name or "" }}</td>
+                    <td>{{ character.description or "" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="empty">No characters seeded yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

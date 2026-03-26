@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2>Locations</h2>
+    {% if locations %}
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Name</th><th>Description</th><th>Summary</th></tr>
+            </thead>
+            <tbody>
+                {% for location in locations %}
+                <tr>
+                    <td>{{ location.id }}</td>
+                    <td>{{ location.name }}</td>
+                    <td>{{ location.description or "" }}</td>
+                    <td>{{ location.canonical_summary or "" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="empty">No locations seeded yet.</p>
+    {% endif %}
+</section>
+{% endblock %}
+

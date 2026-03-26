@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2>Generation Jobs</h2>
+    <p class="lede">This table is ready for future LLM expansion runs. Jobs can already be stored as placeholders, but the autonomous loop is intentionally inactive.</p>
+    {% if jobs %}
+        <table>
+            <thead>
+                <tr><th>ID</th><th>Type</th><th>Status</th><th>Payload</th><th>Created</th></tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td>{{ job.id }}</td>
+                    <td>{{ job.job_type }}</td>
+                    <td>{{ job.status }}</td>
+                    <td><code>{{ job.payload_json or "" }}</code></td>
+                    <td>{{ job.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="empty">No generation jobs have been queued yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

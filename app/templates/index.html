@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Status</p>
+        <h2>Prototype bootstrap is live.</h2>
+        <p class="lede">This console tracks canonical world data, story graph structure, and future LLM generation jobs without starting a story automatically.</p>
+        <p class="meta">Database: {{ db_path }}</p>
+    </div>
+</section>
+
+<section class="grid two-up">
+    <article class="card">
+        <h3>Table Counts</h3>
+        <ul class="stats">
+            {% for key, value in counts.items() %}
+            <li><span>{{ key }}</span><strong>{{ value }}</strong></li>
+            {% endfor %}
+        </ul>
+    </article>
+    <article class="card">
+        <h3>What This Build Supports</h3>
+        <ul>
+            <li>Canonical locations, characters, facts, and spatial relations.</li>
+            <li>Story nodes and choice edges stored as a graph in SQLite.</li>
+            <li>Manual world seeding plus JSON APIs for later LLM-driven automation.</li>
+            <li>Reusable asset/job records without image generation turned on yet.</li>
+        </ul>
+    </article>
+</section>
+
+<section class="grid three-up">
+    <article class="card">
+        <h3>Recent Locations</h3>
+        {% if locations %}
+            <ul>
+            {% for location in locations %}
+                <li><strong>{{ location.name }}</strong>{% if location.canonical_summary %} - {{ location.canonical_summary }}{% endif %}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No canonical locations yet.</p>
+        {% endif %}
+    </article>
+    <article class="card">
+        <h3>Recent Characters</h3>
+        {% if characters %}
+            <ul>
+            {% for character in characters %}
+                <li><strong>{{ character.name }}</strong>{% if character.home_location_name %} - lives at {{ character.home_location_name }}{% endif %}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No canonical characters yet.</p>
+        {% endif %}
+    </article>
+    <article class="card">
+        <h3>Story Graph</h3>
+        {% if nodes %}
+            <ul>
+            {% for node in nodes %}
+                <li><strong>#{{ node.id }}</strong>{% if node.title %} - {{ node.title }}{% endif %} ({{ node.choices | length }} choices)</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="empty">No story nodes yet.</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}
