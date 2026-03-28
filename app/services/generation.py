@@ -37,6 +37,10 @@ class LLMGenerationService:
         blocked_major_hooks = branch_state.list_ineligible_hooks(branch_key, importance="major")
         branch = branch_state.sync_branch_progress(branch_key)
         current_node = story_graph.get_story_node(current_node_id) if current_node_id is not None else None
+        merge_candidates = story_graph.list_merge_candidates(
+            branch_key,
+            exclude_node_ids=[current_node_id] if current_node_id is not None else None,
+        )
 
         relevant_locations = [location for location in canon.list_locations() if location["id"] in focus_entity_ids]
         relevant_characters = [character for character in canon.list_characters() if character["id"] in focus_entity_ids]
@@ -74,6 +78,7 @@ class LLMGenerationService:
             "eligible_major_hooks": eligible_major_hooks,
             "blocked_major_hooks": blocked_major_hooks,
             "recurring_entities": recurring_entities,
+            "merge_candidates": merge_candidates,
             "requested_choice_count": requested_choice_count,
         }
 
@@ -85,6 +90,7 @@ class LLMGenerationService:
             "Persistent affordances and inventory items remain available in the branch unless explicitly changed.\n"
             "Treat requested_choice_count as a target, not a rigid quota. Usually return 2 or 3 choices, sometimes 1 for a forced beat, and only occasionally 4 or more when the scene genuinely blooms.\n"
             "Cycles are allowed. Careful merges are allowed when branch-local consequences still make sense; do not collapse branches that now depend on different local state.\n"
+            "If a quick merge is appropriate, a generated choice may include target_node_id pointing at one of the provided merge_candidates.\n"
             "Use scene_present_entities and hidden_on_lines when actors or objects should appear, disappear, or swap focus during the same scene.\n"
             "If a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, make the need for art obvious so the post-apply asset pass can generate it once real IDs exist.\n"
             "Return structured JSON only with these top-level keys:\n"
@@ -100,6 +106,7 @@ class LLMGenerationService:
         candidate: GenerationCandidate,
         branch_state_service: BranchStateService,
         canon: CanonResolver,
+        story_graph: StoryGraphService,
     ) -> dict[str, Any]:
         branch = branch_state_service.sync_branch_progress(candidate.branch_key)
         current_depth = int(branch["branch_depth"])
@@ -154,6 +161,16 @@ class LLMGenerationService:
                 issues.append(
                     f"Choice '{choice.choice_text}' requires unavailable affordances: {', '.join(missing_affordances)}."
                 )
+            if choice.target_node_id is not None:
+                target_node = story_graph.get_story_node(choice.target_node_id)
+                if target_node is None:
+                    issues.append(
+                        f"Choice '{choice.choice_text}' points to unknown target_node_id {choice.target_node_id}."
+                    )
+                elif target_node["branch_key"] != candidate.branch_key:
+                    issues.append(
+                        f"Choice '{choice.choice_text}' points to target_node_id {choice.target_node_id} in a different branch."
+                    )
 
         locked_world_facts = [fact["fact_text"].strip().lower() for fact in canon.list_facts() if fact["is_locked"]]
         for fact in candidate.fact_updates:

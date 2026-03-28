@@ -623,6 +623,7 @@ def test_generation_validation_rejects_missing_affordance_choice(tmp_path: Path)
 def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/reset-opening-canon")
+    client.post("/story/seed-opening-story")
     preview_response = client.post(
         "/jobs/generation-preview",
         json={
@@ -637,6 +638,8 @@ def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path
     assert data["job"]["job_type"] == "llm_generation_preview"
     assert data["context"]["story_bible"]["title"] == "The Tall Gnome's Impossible Hat"
     assert data["context"]["branch_state"]["branch_key"] == "default"
+    assert "merge_candidates" in data["context"]
+    assert len(data["context"]["merge_candidates"]) >= 1
     assert "Major mysteries must not resolve" in data["prompt"]
 
 
@@ -700,6 +703,44 @@ def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path
 
     branch_state = client.get("/branches/default/state").json()
     assert any(tag["tag"] == "velvet-mushroom-found" for tag in branch_state["tags"])
+
+
+def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed = client.post("/story/seed-opening-story").json()
+    assert seed["start_node_id"] >= 1
+
+    nodes = client.get("/story-nodes").json()
+    hand_node = next(node for node in nodes if node["title"] == "Five Thumbs")
+    velvet_node = next(node for node in nodes if node["title"] == "Silver Tracks")
+    frontier_item = next(item for item in client.get("/frontier").json() if item["from_node_id"] == hand_node["id"])
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "A Small Omen",
+                "scene_summary": "The inspection reveals a clue and then narrows back toward an existing branch.",
+                "scene_text": "The plate rings softly, pointing your attention back toward the silver grooves.",
+                "choices": [
+                    {
+                        "choice_text": "Follow the grooves after all",
+                        "target_node_id": velvet_node["id"],
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    created_choice = data["created_choices"][0]
+    assert created_choice["to_node_id"] == velvet_node["id"]
+    assert created_choice["status"] == "fulfilled"
 
 
 def test_apply_generation_rejects_invalid_candidate_without_partial_write(tmp_path: Path) -> None:

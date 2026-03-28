@@ -74,7 +74,8 @@
       "Do not force three new branches every scene.",
       "Let some scenes narrow, some widen, and some loop back into existing problems or places.",
       "Use quick merges for minor inspection choices, small lore reveals, or brief character beats before a larger event that would happen either way.",
-      "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge."
+      "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge.",
+      "For manual testing and review, the useful pre-change URL is /play?branch_key=<branch_key>&scene=<from_node_id>."
     ]
   },
   "visual_policy": {

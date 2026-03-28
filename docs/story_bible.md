@@ -38,6 +38,8 @@ This file is the human-readable story bible for the current prototype. The machi
   - optional extra information before a larger event that would happen either way
 - Use quick merges to prevent meaningless branch explosion when the real dramatic structure is still converging.
 - Do not use a quick merge when the detour should create lasting branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge that must change the next scene.
+- When testing or reviewing a worker run, the useful "before" URL is the scene URL for the parent choice state:
+  - `/play?branch_key=<branch_key>&scene=<from_node_id>`
 
 ## Weirdness Rules
 - Assumptions should never dominate the setting.

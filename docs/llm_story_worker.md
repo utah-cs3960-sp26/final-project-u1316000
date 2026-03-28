@@ -66,14 +66,17 @@ This is the single file the story-expansion loop should point the LLM at every r
 2. Ask the backend which branch end to work on:
    - `GET /frontier`
 3. Pick one frontier item.
-4. Build the generation context:
+4. Record the pre-change test URL for the exact state you are expanding:
+   - `/play?branch_key=<branch_key>&scene=<from_node_id>`
+   - when you finish the run, always print or report that URL so a human can quickly reopen the state before your change
+5. Build the generation context:
    - `POST /jobs/generation-preview`
-5. Return one structured `GenerationCandidate`.
-6. Validate it:
+6. Return one structured `GenerationCandidate`.
+7. Validate it:
    - `POST /jobs/validate-generation`
-7. Only if valid, apply it:
+8. Only if valid, apply it:
    - `POST /jobs/apply-generation`
-8. After apply, generate required missing visuals:
+9. After apply, generate required missing visuals:
    - new recurring character -> `portrait`
    - new visually distinct linked location -> `background`
    - new reusable visually important object -> `object_render`
@@ -115,11 +118,13 @@ Strongly recommended fields:
 - `scene_text` can be a compact prose summary of the scene.
 - `dialogue_lines` should be used when the scene is meant to play with multi-line RPG dialogue.
 - `choices` should be the player-facing options from the newly created scene.
+- A choice may optionally include `target_node_id` when you want a quick merge into an already existing scene in the same branch.
 - Choice count guidance:
   - default to `2` or `3`
   - `1` is acceptable for a forced continuation
   - `4+` should be rare and scene-justified
 - `requested_choice_count` from preview is a target, not a strict contract.
+- If preview provides `merge_candidates`, you may use one of those node IDs as a choice `target_node_id` for a careful quick merge.
 - Put exactly one primary location in `entity_references` with role `current_scene` when the backdrop should change.
 - Treat that `current_scene` location as the scene's background-driving place for player playback.
 - Use `scene_present_entities` for everyone or everything the player should actually see in the current scene.

@@ -880,10 +880,12 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def validate_generation_candidate(payload: GenerationCandidate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         canon = CanonResolver(db)
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        story = StoryGraphService(db)
         result = app.state.llm_generation.validate_candidate(
             candidate=payload,
             branch_state_service=branch_state,
             canon=canon,
+            story_graph=story,
         )
         return result
 
@@ -894,15 +896,16 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
 
         canon = CanonResolver(db)
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        story = StoryGraphService(db)
         validation = app.state.llm_generation.validate_candidate(
             candidate=payload.candidate,
             branch_state_service=branch_state,
             canon=canon,
+            story_graph=story,
         )
         if not validation["valid"]:
             raise HTTPException(status_code=400, detail={"validation": validation})
 
-        story = StoryGraphService(db)
         try:
             result = story.apply_generation_candidate(
                 request_branch_key=payload.branch_key,

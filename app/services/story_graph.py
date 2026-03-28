@@ -119,6 +119,44 @@ class StoryGraphService:
             "scenes": scenes,
         }
 
+    def list_merge_candidates(
+        self,
+        branch_key: str,
+        *,
+        exclude_node_ids: list[int] | None = None,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        excluded = set(exclude_node_ids or [])
+        rows = fetch_all(
+            self.connection,
+            """
+            SELECT id, title, summary, scene_text
+            FROM story_nodes
+            WHERE branch_key = ?
+            ORDER BY id ASC
+            """,
+            (branch_key,),
+        )
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            node_id = int(row["id"])
+            if node_id in excluded:
+                continue
+            choices = fetch_all(
+                self.connection,
+                "SELECT id, choice_text, to_node_id FROM choices WHERE from_node_id = ? ORDER BY id",
+                (node_id,),
+            )
+            candidates.append(
+                {
+                    "node_id": node_id,
+                    "title": row["title"],
+                    "summary": row["summary"] or row["scene_text"][:180],
+                    "choice_count": len(choices),
+                }
+            )
+        return candidates[:limit]
+
     def list_jobs(self) -> list[dict[str, Any]]:
         return fetch_all(self.connection, "SELECT * FROM generation_jobs ORDER BY id DESC")
 
@@ -354,15 +392,29 @@ class StoryGraphService:
 
             created_choices: list[dict[str, Any]] = []
             for choice in candidate.choices:
+                target_node_id = choice.target_node_id
+                if target_node_id is not None:
+                    target_node = self.get_story_node(target_node_id)
+                    if target_node is None:
+                        raise ValueError(f"Unknown merge target node id: {target_node_id}")
+                    if target_node["branch_key"] != request_branch_key:
+                        raise ValueError("Merged choice target must belong to the same branch.")
                 created_choices.append(
                     self.create_choice(
                         from_node_id=new_node_id,
                         choice_text=choice.choice_text,
-                        to_node_id=None,
-                        status="open",
+                        to_node_id=target_node_id,
+                        status="fulfilled" if target_node_id is not None else "open",
                         notes=(
-                            json.dumps({"required_affordances": choice.required_affordances, "notes": choice.notes})
+                            json.dumps(
+                                {
+                                    "required_affordances": choice.required_affordances,
+                                    "notes": choice.notes,
+                                    "target_node_id": target_node_id,
+                                }
+                            )
                             if choice.required_affordances or choice.notes
+                            or target_node_id is not None
                             else None
                         ),
                         commit=False,

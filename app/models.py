@@ -181,6 +181,7 @@ class GeneratedChoice(BaseModel):
     choice_text: str
     notes: str | None = None
     required_affordances: list[str] = Field(default_factory=list)
+    target_node_id: int | None = None
 
 
 class HookProposal(BaseModel):
