@@ -70,6 +70,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `docs/llm_operations.md` primary onboarding guide for future AIs and humans
 - `docs/story_bible.md` human-readable tone and pacing guide
 - `app/tools/snapshot_db.py` CLI tool for taking a manual SQLite snapshot before a story session
+- `app/tools/prepare_story_run.py` CLI tool for preparing one compact story-worker packet for the next scene expansion
 - `app/tools/remove_background.py` CLI tool for local background removal
 - `app/tools/download_hf_model.py` CLI tool for downloading model repos into the local cache
 - `tests/test_app.py` integration tests
@@ -110,6 +111,8 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Stakes, danger, failure, and death are allowed in story generation, but they should be used deliberately rather than as a default.
 - If you want one rollback point before a session, create it manually with:
   - `python -m app.tools.snapshot_db --name before-session`
+- If you want to hand a fresh thread one compact story-run packet instead of making it inspect the repo first, use:
+  - `python -m app.tools.prepare_story_run`
 
 ## Asset Pipeline Notes
 - `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.

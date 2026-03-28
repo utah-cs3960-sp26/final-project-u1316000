@@ -480,6 +480,26 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/hooks", response_class=HTMLResponse)
+    def hooks_page(
+        request: Request,
+        branch_key: str = Query("default"),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> HTMLResponse:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        branch = branch_state.get_branch_state(branch_key)
+        hooks = branch_state.list_hooks_with_readiness(branch_key)
+        return templates.TemplateResponse(
+            request,
+            "hooks.html",
+            {
+                "request": request,
+                "branch_key": branch_key,
+                "branch": branch,
+                "hooks": hooks,
+            },
+        )
+
     @app.post("/ui/story/node")
     def create_story_node_form(
         branch_key: str = Form("default"),
@@ -714,6 +734,11 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def get_branch_state(branch_key: str, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
         return branch_state.get_branch_state(branch_key)
+
+    @app.get("/branches/{branch_key}/hooks")
+    def get_branch_hooks(branch_key: str, db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.list_hooks_with_readiness(branch_key)
 
     @app.get("/frontier")
     def get_frontier(

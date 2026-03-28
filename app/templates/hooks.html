@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Hooks</p>
+        <h2>Branch hook pacing and payoff readiness.</h2>
+        <p class="lede">Hooks are unresolved mysteries, suspicious clues, unanswered questions, and other story threads meant to matter later.</p>
+    </div>
+    <form method="get" action="/ui/hooks" class="stack">
+        <label>Branch Key <input type="text" name="branch_key" value="{{ branch_key }}"></label>
+        <button type="submit">View Hooks</button>
+    </form>
+</section>
+
+<section class="card">
+    <h2>Branch Summary</h2>
+    <p class="meta">Branch: <strong>{{ branch.branch_key }}</strong></p>
+    <p class="meta">Depth: <strong>{{ branch.branch_depth }}</strong></p>
+    <p class="meta">Act Phase: <strong>{{ branch.act_phase }}</strong></p>
+</section>
+
+<section class="card">
+    <h2>Hooks</h2>
+    {% if hooks %}
+        <div class="stack">
+        {% for hook in hooks %}
+            <article class="subcard">
+                <h3>#{{ hook.id }} · {{ hook.hook_type }} · {{ hook.importance }}</h3>
+                <p>{{ hook.summary }}</p>
+                <p class="meta">Status: {{ hook.status }}</p>
+                <p class="meta">Introduced at depth {{ hook.introduced_at_depth }} · Min payoff distance {{ hook.min_distance_to_payoff }}</p>
+                <p class="meta">Payoff required depth: {{ hook.readiness.required_depth }} · Remaining distance: {{ hook.readiness.remaining_distance }}</p>
+                <p class="meta">Distance ready: {{ "yes" if hook.readiness.distance_ready else "no" }} · Conditions ready: {{ "yes" if hook.readiness.conditions_ready else "no" }} · Eligible now: {{ "yes" if hook.readiness.eligible else "no" }}</p>
+                {% if hook.linked_entity_type and hook.linked_entity_id %}
+                    <p class="meta">Linked entity: {{ hook.linked_entity_type }}:{{ hook.linked_entity_id }}</p>
+                {% endif %}
+                {% if hook.required_clue_tags %}
+                    <p class="meta">Required clue tags: {{ hook.required_clue_tags | join(", ") }}</p>
+                {% endif %}
+                {% if hook.required_state_tags %}
+                    <p class="meta">Required state tags: {{ hook.required_state_tags | join(", ") }}</p>
+                {% endif %}
+                {% if hook.readiness.missing_clue_tags %}
+                    <p class="meta">Missing clue tags: {{ hook.readiness.missing_clue_tags | join(", ") }}</p>
+                {% endif %}
+                {% if hook.readiness.missing_state_tags %}
+                    <p class="meta">Missing state tags: {{ hook.readiness.missing_state_tags | join(", ") }}</p>
+                {% endif %}
+                {% if hook.notes %}
+                    <p class="meta">Notes: {{ hook.notes }}</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+        </div>
+    {% else %}
+        <p class="empty">No hooks found for this branch.</p>
+    {% endif %}
+</section>
+{% endblock %}

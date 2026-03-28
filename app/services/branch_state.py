@@ -418,13 +418,35 @@ class BranchStateService:
             row["required_state_tags"] = json.loads(row["required_state_tags_json"] or "[]")
         return rows
 
+    def list_hooks_with_readiness(
+        self,
+        branch_key: str,
+        *,
+        statuses: list[str] | None = None,
+        importance: str | None = None,
+    ) -> list[dict[str, Any]]:
+        branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
+        clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
+        hooks = self.list_hooks(branch_key, statuses=statuses, importance=importance)
+        for hook in hooks:
+            hook["readiness"] = self._hook_readiness(
+                hook,
+                int(branch["branch_depth"]),
+                state_tags,
+                clue_tags,
+            )
+        return hooks
+
     def list_eligible_hooks(self, branch_key: str, importance: str | None = None) -> list[dict[str, Any]]:
         branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
         state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
         eligible: list[dict[str, Any]] = []
         for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready"], importance=importance):
-            if self._hook_is_eligible(hook, branch["branch_depth"], state_tags, clue_tags):
+            readiness = self._hook_readiness(hook, branch["branch_depth"], state_tags, clue_tags)
+            hook["readiness"] = readiness
+            if readiness["eligible"]:
                 eligible.append(hook)
         return eligible
 
@@ -434,7 +456,9 @@ class BranchStateService:
         clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
         ineligible: list[dict[str, Any]] = []
         for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready", "blocked"], importance=importance):
-            if not self._hook_is_eligible(hook, branch["branch_depth"], state_tags, clue_tags):
+            readiness = self._hook_readiness(hook, branch["branch_depth"], state_tags, clue_tags)
+            hook["readiness"] = readiness
+            if not readiness["eligible"]:
                 ineligible.append(hook)
         return ineligible
 
@@ -460,11 +484,32 @@ class BranchStateService:
         state_tags: set[str],
         clue_tags: set[str],
     ) -> bool:
-        distance_ready = branch_depth >= int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"])
+        return self._hook_readiness(hook, branch_depth, state_tags, clue_tags)["eligible"]
+
+    def _hook_readiness(
+        self,
+        hook: dict[str, Any],
+        branch_depth: int,
+        state_tags: set[str],
+        clue_tags: set[str],
+    ) -> dict[str, Any]:
+        required_depth = int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"])
+        distance_ready = branch_depth >= required_depth
         required_state_tags = set(hook.get("required_state_tags", []))
         required_clue_tags = set(hook.get("required_clue_tags", []))
-        conditions_ready = required_state_tags.issubset(state_tags) and required_clue_tags.issubset(clue_tags)
-        return distance_ready and conditions_ready and hook["status"] != "resolved"
+        missing_state_tags = sorted(required_state_tags - state_tags)
+        missing_clue_tags = sorted(required_clue_tags - clue_tags)
+        conditions_ready = not missing_state_tags and not missing_clue_tags
+        return {
+            "eligible": distance_ready and conditions_ready and hook["status"] != "resolved",
+            "distance_ready": distance_ready,
+            "required_depth": required_depth,
+            "current_depth": branch_depth,
+            "remaining_distance": max(required_depth - branch_depth, 0),
+            "conditions_ready": conditions_ready,
+            "missing_state_tags": missing_state_tags,
+            "missing_clue_tags": missing_clue_tags,
+        }
 
     def _affordance_row(self, affordance_id: int) -> dict[str, Any] | None:
         affordance = fetch_one(self.connection, "SELECT * FROM unlocked_affordances WHERE id = ?", (affordance_id,))

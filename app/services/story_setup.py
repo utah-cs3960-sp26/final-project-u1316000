@@ -108,8 +108,16 @@ class StorySetupService:
             node for node in self.story_graph.list_story_nodes()
             if node["branch_key"] == branch_key
         ]
+        reset = self.soft_reset_opening_canon()
+        protagonist_id = int(reset["protagonist"]["id"])
+        location_id = int(reset["opening_location"]["id"])
         if existing_nodes:
             start_node = min(existing_nodes, key=lambda node: int(node["id"]))
+            self._ensure_opening_hooks(
+                branch_key=branch_key,
+                protagonist_id=protagonist_id,
+                location_id=location_id,
+            )
             self.branch_state.sync_branch_progress(branch_key, latest_story_node_id=int(existing_nodes[-1]["id"]))
             return {
                 "branch_key": branch_key,
@@ -118,9 +126,6 @@ class StorySetupService:
                 "existing": True,
             }
 
-        reset = self.soft_reset_opening_canon()
-        location_id = int(reset["opening_location"]["id"])
-        protagonist_id = int(reset["protagonist"]["id"])
         hero_present = [
             {
                 "entity_type": "character",
@@ -227,6 +232,11 @@ class StorySetupService:
         ])
 
         latest_node_id = max(int(tracks["id"]), int(hat["id"]), int(hand["id"]))
+        self._ensure_opening_hooks(
+            branch_key=branch_key,
+            protagonist_id=protagonist_id,
+            location_id=location_id,
+        )
         self.branch_state.sync_branch_progress(branch_key, latest_story_node_id=latest_node_id)
         return {
             "branch_key": branch_key,
@@ -312,3 +322,49 @@ class StorySetupService:
             is_locked=True,
             source=source,
         )
+
+    def _ensure_opening_hooks(self, *, branch_key: str, protagonist_id: int, location_id: int) -> None:
+        existing_hooks = self.branch_state.list_hooks(branch_key)
+        existing_summaries = {hook["summary"].strip().lower() for hook in existing_hooks}
+        desired_hooks = [
+            {
+                "hook_type": "identity_mystery",
+                "importance": "major",
+                "summary": (
+                    "The striped bucket hat, the lost first name, the amnesia, and waking in the Mushroom Field "
+                    "all point to the same hidden past event."
+                ),
+                "linked_entity_type": "character",
+                "linked_entity_id": protagonist_id,
+                "introduced_at_depth": 0,
+                "min_distance_to_payoff": 20,
+                "required_clue_tags": [],
+                "required_state_tags": [],
+                "status": "active",
+                "notes": (
+                    "This is a long-range major hook. Do not pay it off early just because a later clue feels tempting."
+                ),
+            },
+            {
+                "hook_type": "body_mystery",
+                "importance": "major",
+                "summary": (
+                    "The five-thumbed left hand and the protagonist's altered body suggest deliberate transformation, "
+                    "tampering, or design."
+                ),
+                "linked_entity_type": "character",
+                "linked_entity_id": protagonist_id,
+                "introduced_at_depth": 0,
+                "min_distance_to_payoff": 20,
+                "required_clue_tags": [],
+                "required_state_tags": [],
+                "status": "active",
+                "notes": (
+                    "This is a long-range major hook tied to the protagonist's body and should not be solved in the opening stretch."
+                ),
+            },
+        ]
+        for hook in desired_hooks:
+            if hook["summary"].strip().lower() in existing_summaries:
+                continue
+            self.branch_state.create_hook(branch_key=branch_key, **hook)

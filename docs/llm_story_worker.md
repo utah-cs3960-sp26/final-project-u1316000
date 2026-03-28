@@ -20,6 +20,9 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Your normal job is to act like a story worker: look at one open branch end, understand the current canon and branch state, and write the next scene in structured JSON.
 - You are mainly helping the story grow while preserving continuity, pacing, tone, hooks, and persistent consequences.
 - Only touch code or docs if the human explicitly asks for codebase changes or if the loop is clearly blocked by a missing tool, schema, or bug.
+- Assume the story loop is already wired through in this repo.
+- Do not spend time rediscovering whether `/frontier`, `/jobs/generation-preview`, `/jobs/validate-generation`, and `/jobs/apply-generation` exist. They do.
+- Your job is to continue the story, not audit the codebase.
 
 ## Goal
 - Expand the story one scene at a time.
@@ -28,6 +31,20 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Delay major payoffs until the branch state and hook gating actually allow them.
 - Carry the visual side forward too when the scene genuinely needs new art.
 - Stakes, danger, and even death are allowed, but they are not required for a good scene or arc.
+
+## What Counts As A Hook
+- A hook is any unresolved mystery, unanswered question, suspicious clue, ominous promise, unknown identity, unexplained cause, or strange thread that should matter later.
+- If the player should later wonder:
+  - `Who was that?`
+  - `What caused that?`
+  - `Why did that happen?`
+  - `What is this clue really pointing at?`
+  - `What will this odd system/person/object turn out to mean?`
+  then it is usually a hook.
+- Small atmospheric weirdness does not always need a hook.
+- But if you intend the thing to pay off later, recur later, or guide future choices, it should become a hook now.
+- If you introduce a placeholder mystery entity such as `Unseen Voice`, `Unknown Figure`, or any unnamed recurring presence, create a hook immediately.
+- When possible, tie that hook to the current scene location or another relevant entity with `linked_entity_type` and `linked_entity_id`.
 
 ## Source Of Truth
 - Global canon:
@@ -54,6 +71,7 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Do not resolve major hooks early.
 - Do not forget branch-local affordances, inventory, or relationship changes.
 - Do not casually duplicate world entities.
+- Do not introduce a meaningful unresolved mystery and then fail to register it as a hook.
 - Keep notes, clues, unlocked capabilities, and player consequences branch-local unless they become true world canon.
 - Strange things should matter. Do not add randomness with no continuity or consequence.
 - Death is available as a consequence, but do not treat lethality as the default way to make scenes meaningful.
@@ -63,35 +81,54 @@ This is the single file the story-expansion loop should point the LLM at every r
 
 ## Per-Run Workflow
 1. Read this file.
-2. Ask the backend which branch end to work on:
+2. Prefer the one-command prep path first:
+   - `python -m app.tools.prepare_story_run`
+3. Use the returned packet as your source of truth for the current run.
+4. If the prep command is unavailable or the human explicitly wants the manual path, ask the backend which branch end to work on:
    - `GET /frontier`
-3. Pick one frontier item.
-4. Record the pre-change test URL for the exact state you are expanding:
+5. Pick one frontier item.
+6. Record the pre-change test URL for the exact state you are expanding:
    - `/play?branch_key=<branch_key>&scene=<from_node_id>`
    - when you finish the run, always print or report that URL so a human can quickly reopen the state before your change
-5. Build the generation context:
+7. Build the generation context:
    - `POST /jobs/generation-preview`
-6. Return one structured `GenerationCandidate`.
-7. Validate it:
+8. Return one structured `GenerationCandidate`.
+9. Validate it:
    - `POST /jobs/validate-generation`
-8. Only if valid, apply it:
+10. Only if valid, apply it:
    - `POST /jobs/apply-generation`
-9. After apply, generate required missing visuals:
+11. After apply, generate required missing visuals:
    - new recurring character -> `portrait`
    - new visually distinct linked location -> `background`
    - new reusable visually important object -> `object_render`
+12. Stop after reporting:
+   - the pre-change URL
+   - what node/choice you expanded
+   - whether any new art was required
+
+## Hook Payoff Gating
+- `min_distance_to_payoff` is real and enforced.
+- The preview packet tells you how close a hook is to being payable:
+  - `eligible_major_hooks` are the major hooks that are safe to advance toward payoff now
+  - `blocked_major_hooks` are still too early or still missing required clue/state tags
+- If a major hook is blocked, do not resolve it. Deepen it, echo it, or add clues instead.
+- For any hook, not just major ones:
+  - do not mark it resolved until both distance and required tags are satisfied
+  - if you need a later payoff, add or preserve the needed clue/state tags now
+- A good rule of thumb:
+  - `eligible_major_hooks` may be advanced carefully
+  - `blocked_major_hooks` may be teased, complicated, or enriched, but not paid off
 
 ## Recommended Loop Contract
-1. `GET /frontier?limit=1&mode=auto`
-2. Use the returned `choice_id`, `from_node_id`, `branch_key`, and branch summary.
-3. `POST /jobs/generation-preview`
-4. Produce one `GenerationCandidate`
-5. `POST /jobs/validate-generation`
-6. If valid:
+1. `python -m app.tools.prepare_story_run`
+2. Read the packet.
+3. Produce one `GenerationCandidate`
+4. `POST /jobs/validate-generation`
+5. If valid:
    - `POST /jobs/apply-generation`
    - inspect newly created canon entities
    - call `POST /assets/generate` for any required missing visuals
-7. Repeat
+6. Report the pre-change URL and stop
 
 ## Expected Output Shape
 Return JSON that fits `GenerationCandidate`.
@@ -124,6 +161,7 @@ Strongly recommended fields:
   - `1` is acceptable for a forced continuation
   - `4+` should be rare and scene-justified
 - `requested_choice_count` from preview is a target, not a strict contract.
+- If you introduce a new unresolved mystery/question in the scene, include it in `new_hooks` unless it is unmistakably just progress on an already existing hook.
 - If preview provides `merge_candidates`, you may use one of those node IDs as a choice `target_node_id` for a careful quick merge.
 - Put exactly one primary location in `entity_references` with role `current_scene` when the backdrop should change.
 - Treat that `current_scene` location as the scene's background-driving place for player playback.

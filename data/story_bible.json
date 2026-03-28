@@ -58,6 +58,16 @@
       "Prefer one meaningful escalation over many shallow reveals."
     ]
   },
+  "hook_policy": {
+    "definition": "A hook is any unresolved mystery, unanswered question, suspicious clue, unknown identity, ominous promise, or unexplained causal thread that should matter later.",
+    "rules": [
+      "If a scene introduces something the player is meant to keep wondering about, it should usually become a hook immediately.",
+      "Placeholder mystery entities such as an unseen voice, unknown figure, or unnamed recurring presence count as hooks if they are meant to matter later.",
+      "When a mystery is anchored to a place, object, or recurring person, link the hook to that entity when possible.",
+      "min_distance_to_payoff and required clue/state tags are real pacing constraints, not flavor text.",
+      "Major hooks should generally only pay off when they are surfaced as eligible by the branch context."
+    ]
+  },
   "branching_policy": {
     "default_choice_range": [2, 3],
     "allow_single_choice_for_forced_beats": true,

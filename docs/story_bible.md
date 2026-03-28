@@ -51,6 +51,21 @@ This file is the human-readable story bible for the current prototype. The machi
 - Use delayed payoff gating with both minimum distance and readiness conditions.
 - Let small/local stories resolve even when the central mystery stays open.
 
+## Hook Rules
+- A hook is any unresolved mystery, unanswered question, suspicious clue, unknown identity, ominous promise, or unexplained causal thread that should matter later.
+- If a scene introduces something the player is meant to keep wondering about, it should usually become a hook immediately.
+- Placeholder mystery entities count too:
+  - an unseen voice
+  - an unknown figure
+  - a caller in the wall
+  - a strange announcement with no owner
+- If a mystery is anchored to a place, object, or recurring person, tie the hook to that entity when possible.
+- `min_distance_to_payoff` is not just flavor text. It is part of the pacing contract.
+- A hook is only really ready to pay off once:
+  - enough branch distance has passed
+  - and the required clue/state tags exist
+- Major hooks should generally only pay off when they are explicitly surfaced as eligible by the branch context.
+
 ## Stakes And Failure
 - Stakes, danger, failure, and even death are allowed in this project.
 - They are never mandatory for a good arc; wonder, embarrassment, loss, escape, delay, or transformation can also carry a scene.

@@ -520,6 +520,31 @@ def test_branch_state_tracks_affordances_and_tags(tmp_path: Path) -> None:
     assert any(tag["tag"] == "open-sky" for tag in branch["tags"])
 
 
+def test_seed_opening_story_creates_long_range_major_hooks(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed_response = client.post("/story/seed-opening-story")
+    assert seed_response.status_code == 200
+
+    hooks_response = client.get("/branches/default/hooks")
+    assert hooks_response.status_code == 200
+    hooks = hooks_response.json()
+    summaries = {hook["summary"]: hook for hook in hooks}
+
+    hat_hook = next(
+        hook for hook in hooks
+        if "bucket hat" in hook["summary"].lower() and hook["importance"] == "major"
+    )
+    body_hook = next(
+        hook for hook in hooks
+        if "five-thumbed left hand" in hook["summary"].lower() and hook["importance"] == "major"
+    )
+
+    assert hat_hook["min_distance_to_payoff"] == 20
+    assert body_hook["min_distance_to_payoff"] == 20
+    assert hat_hook["introduced_at_depth"] == 0
+    assert body_hook["introduced_at_depth"] == 0
+
+
 def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     reset_response = client.post("/story/reset-opening-canon")
@@ -562,6 +587,70 @@ def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) ->
     assert any("min_distance_to_payoff" in issue for issue in result["issues"])
     assert any("required clue tags" in issue.lower() for issue in result["issues"])
     assert any("required state tags" in issue.lower() for issue in result["issues"])
+
+
+def test_generation_validation_requires_hook_for_placeholder_mystery_entity(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A mushroom answers back.",
+            "scene_text": "An unseen station voice speaks from inside the mushroom stalk.",
+            "dialogue_lines": [
+                {"speaker": "Narrator", "text": "The stalk knocks from the inside."},
+                {"speaker": "Unseen Voice", "text": "The striped hat is expected below."},
+            ],
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "choices": [{"choice_text": "Step closer"}],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("unresolved mystery/question" in issue.lower() for issue in result["issues"])
+    assert any("current_scene location" in issue for issue in result["issues"])
+
+
+def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_and_linked(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A mushroom answers back.",
+            "scene_text": "An unseen station voice speaks from inside the mushroom stalk.",
+            "dialogue_lines": [
+                {"speaker": "Narrator", "text": "The stalk knocks from the inside."},
+                {"speaker": "Unseen Voice", "text": "The striped hat is expected below."},
+            ],
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "new_hooks": [
+                {
+                    "hook_type": "minor_mystery",
+                    "importance": "minor",
+                    "summary": "An unseen station voice inside the mushroom stalk recognizes the striped hat.",
+                    "linked_entity_type": "location",
+                    "linked_entity_id": 1,
+                    "min_distance_to_payoff": 1,
+                }
+            ],
+            "choices": [{"choice_text": "Step closer"}],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is True
 
 
 def test_generation_validation_allows_unlocked_affordance_choice(tmp_path: Path) -> None:
@@ -957,6 +1046,67 @@ def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
     assert second_snapshot_path.read_bytes() == db_path.read_bytes()
 
 
+def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--play-base-url",
+        "http://127.0.0.1:8001",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert "Everything is already wired through" in packet["message"]
+    assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
+    assert packet["selected_frontier_item"]["choice_id"] is not None
+    assert packet["preview_payload"]["branch_key"] == "default"
+    assert packet["context_summary"]["branch_key"] == "default"
+    assert "eligible_major_hooks" in packet["context_summary"]
+    assert "blocked_major_hooks" in packet["context_summary"]
+    assert packet["next_action"].startswith("Return one GenerationCandidate JSON only")
+
+
+def test_branch_hooks_endpoint_and_ui_show_readiness(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    hook_response = client.post(
+        "/branches/default/hooks",
+        json={
+            "hook_type": "minor_mystery",
+            "importance": "minor",
+            "summary": "A hidden bell under the mushroom seems to know your hat.",
+            "linked_entity_type": "location",
+            "linked_entity_id": 1,
+            "min_distance_to_payoff": 2,
+            "required_clue_tags": ["bell-heard"],
+        },
+    )
+    assert hook_response.status_code == 200
+
+    hooks_response = client.get("/branches/default/hooks")
+    assert hooks_response.status_code == 200
+    hooks = hooks_response.json()
+    assert len(hooks) >= 1
+    assert "readiness" in hooks[0]
+
+    ui_response = client.get("/ui/hooks")
+    assert ui_response.status_code == 200
+    assert "Branch hook pacing and payoff readiness." in ui_response.text
+    assert "Min payoff distance" in ui_response.text
+
+
 def test_ui_pages_render(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     response = client.get("/")
@@ -971,6 +1121,9 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     assets_page = client.get("/ui/assets")
     assert assets_page.status_code == 200
     assert "/assets/generate" in assets_page.text
+    hooks_page = client.get("/ui/hooks")
+    assert hooks_page.status_code == 200
+    assert "Hooks" in hooks_page.text
     player_page = client.get("/play")
     assert player_page.status_code == 200
     assert "Restart Adventure" in player_page.text

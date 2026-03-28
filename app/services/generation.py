@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,21 @@ from app.services.story_graph import StoryGraphService
 
 class LLMGenerationService:
     """Builds story-generation context, prompt scaffolding, and validation rules."""
+
+    MYSTERY_MARKER_PATTERNS = [
+        re.compile(r"\bunseen voice\b", re.IGNORECASE),
+        re.compile(r"\bunknown voice\b", re.IGNORECASE),
+        re.compile(r"\bmysterious voice\b", re.IGNORECASE),
+        re.compile(r"\bunseen figure\b", re.IGNORECASE),
+        re.compile(r"\bunknown figure\b", re.IGNORECASE),
+        re.compile(r"\bunknown speaker\b", re.IGNORECASE),
+        re.compile(r"\bsomeone\b.*\b(from inside|in the dark|behind|inside the stalk)\b", re.IGNORECASE),
+    ]
+    PLACEHOLDER_SPEAKER_PATTERNS = [
+        re.compile(r"\bunseen\b", re.IGNORECASE),
+        re.compile(r"\bunknown\b", re.IGNORECASE),
+        re.compile(r"\bmysterious\b", re.IGNORECASE),
+    ]
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -86,7 +102,12 @@ class LLMGenerationService:
         return (
             "You are extending a branching whimsical fantasy world while preserving continuity.\n"
             "Follow the story bible, respect hook pacing, and keep the tone sincere rather than jokey.\n"
+            "A hook is any unresolved mystery, unanswered question, ominous promise, unknown identity, suspicious clue, or strange causal thread that should matter later.\n"
+            "If you introduce a new unresolved mystery or question, create a new_hook immediately unless it is clearly just advancing an already existing hook.\n"
+            "If you introduce a placeholder mystery entity such as an unseen voice, unknown figure, or unnamed presence, create a hook for it immediately and link that hook to the current_scene location or another relevant entity whenever possible.\n"
             "Major mysteries must not resolve before their minimum distance and readiness conditions.\n"
+            "Major hook payoffs are only safe when the relevant hook appears in eligible_major_hooks. If it is still blocked, deepen it without resolving it.\n"
+            "For any hook, min_distance_to_payoff and required clue/state tags determine whether payoff is allowed. Validation will reject early resolution.\n"
             "Persistent affordances and inventory items remain available in the branch unless explicitly changed.\n"
             "Treat requested_choice_count as a target, not a rigid quota. Usually return 2 or 3 choices, sometimes 1 for a forced beat, and only occasionally 4 or more when the scene genuinely blooms.\n"
             "Cycles are allowed. Careful merges are allowed when branch-local consequences still make sense; do not collapse branches that now depend on different local state.\n"
@@ -180,9 +201,100 @@ class LLMGenerationService:
             if fact.is_locked and fact.source != "locked_rule":
                 issues.append("LLM-generated fact updates must not introduce new locked facts directly.")
 
+        mystery_markers = self._detect_unresolved_mystery_markers(candidate)
+        if mystery_markers:
+            active_hooks = branch_state_service.list_hooks(
+                candidate.branch_key,
+                statuses=["active", "payoff_ready", "blocked"],
+            )
+            uncovered_markers = [
+                marker
+                for marker in mystery_markers
+                if not self._mystery_marker_is_covered(
+                    marker=marker,
+                    active_hooks=active_hooks,
+                    new_hooks=candidate.new_hooks,
+                )
+            ]
+            if uncovered_markers:
+                marker_text = ", ".join(sorted(uncovered_markers))
+                issues.append(
+                    "Candidate introduces an unresolved mystery/question without creating or extending a hook: "
+                    f"{marker_text}."
+                )
+                current_scene = next(
+                    (reference for reference in candidate.entity_references if reference.role == "current_scene"),
+                    None,
+                )
+                if current_scene is not None:
+                    linked_new_hooks = [
+                        hook for hook in candidate.new_hooks if hook.linked_entity_type and hook.linked_entity_id is not None
+                    ]
+                    if not linked_new_hooks:
+                        issues.append(
+                            "A new scene-anchored mystery should link its hook to the current_scene location or another relevant entity."
+                        )
+
         return {
             "valid": not issues,
             "issues": issues,
             "current_depth": current_depth,
             "act_phase": branch["act_phase"],
         }
+
+    def _detect_unresolved_mystery_markers(self, candidate: GenerationCandidate) -> list[str]:
+        markers: set[str] = set()
+        texts = [
+            candidate.scene_summary,
+            candidate.scene_text,
+            *(line.text for line in candidate.dialogue_lines),
+        ]
+        for text in texts:
+            lower_text = text.lower()
+            for pattern in self.MYSTERY_MARKER_PATTERNS:
+                if pattern.search(lower_text):
+                    markers.add(pattern.pattern.replace("\\b", "").replace("\\", ""))
+
+        for line in candidate.dialogue_lines:
+            speaker = line.speaker.strip().lower()
+            if speaker in {"narrator", "you"}:
+                continue
+            if any(pattern.search(speaker) for pattern in self.PLACEHOLDER_SPEAKER_PATTERNS):
+                markers.add(speaker)
+        return sorted(markers)
+
+    def _mystery_marker_is_covered(
+        self,
+        *,
+        marker: str,
+        active_hooks: list[dict[str, Any]],
+        new_hooks: list[Any],
+    ) -> bool:
+        marker_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", marker.lower())
+            if token not in {"a", "an", "the", "of", "from", "inside"}
+        }
+        for hook in active_hooks:
+            hook_text = " ".join(
+                [
+                    str(hook.get("summary") or ""),
+                    str(hook.get("notes") or ""),
+                    str(hook.get("resolution_text") or ""),
+                ]
+            ).lower()
+            hook_tokens = set(re.findall(r"[a-z0-9]+", hook_text))
+            if marker_tokens and marker_tokens.issubset(hook_tokens):
+                return True
+        for hook in new_hooks:
+            hook_text = " ".join(
+                [
+                    str(hook.summary or ""),
+                    str(hook.notes or ""),
+                    str(hook.hook_type or ""),
+                ]
+            ).lower()
+            hook_tokens = set(re.findall(r"[a-z0-9]+", hook_text))
+            if marker_tokens and marker_tokens.issubset(hook_tokens):
+                return True
+        return False
