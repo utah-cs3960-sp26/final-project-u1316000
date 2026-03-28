@@ -109,6 +109,23 @@ class AssetRequest(BaseModel):
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
+class AssetGenerateRequest(BaseModel):
+    asset_kind: Literal["background", "portrait", "object_render"]
+    entity_type: AssetEntityType
+    entity_id: int
+    prompt: str
+    workflow_name: str = "text-to-image"
+    filename_base: str | None = None
+    negative_prompt: str | None = None
+    width: int = 1024
+    height: int = 1024
+    steps: int = 25
+    guidance_scale: float = 4.0
+    seed: int | None = None
+    remove_background: bool = False
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
 class BackgroundRemovalRequest(BaseModel):
     source_image_path: str
     output_name: str | None = None

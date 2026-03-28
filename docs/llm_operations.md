@@ -15,7 +15,7 @@ This is the first file an LLM should read when working in this repository. It ex
 - FastAPI JSON endpoints are available.
 - A minimal browser UI exists for inspection and manual seeding.
 - LLM generation is stubbed only. There is no autonomous expansion loop yet.
-- Image generation is not implemented yet beyond asset/job placeholders.
+- ComfyUI-backed image generation is available through a workflow template and asset API/tooling.
 - Local background removal is wired through a Hugging Face-compatible tool path.
 
 ## Repo Layout
@@ -26,8 +26,10 @@ This is the first file an LLM should read when working in this repository. It ex
 - `app/services/story_graph.py`: story nodes, choices, node-entity links, and jobs
 - `app/services/generation.py`: LLM generation stub for later structured prompting
 - `app/services/assets.py`: asset job schema, Hugging Face model download helper, and background removal
+- `workflows/comfyui/`: ComfyUI workflow templates; keep editor and API variants here
 - `app/templates/`: browser UI templates
 - `app/static/styles.css`: UI styling
+- `app/tools/generate_asset.py`: command-line helper for ComfyUI-backed image generation
 - `app/tools/remove_background.py`: command-line helper for RMBG background removal
 - `app/tools/download_hf_model.py`: command-line helper for prefetching Hugging Face model repos
 - `tests/test_app.py`: integration tests for bootstrap, canon continuity, and choice graph storage
@@ -96,9 +98,22 @@ This is the first file an LLM should read when working in this repository. It ex
 - `GET /jobs`
 - `POST /jobs/generation-stub`
 - `POST /assets/request`
+- `POST /assets/generate`
 - `POST /assets/remove-background`
 
 ## Asset Workflow
+- Preferred image-generation path:
+  - Use `POST /assets/generate` or `python -m app.tools.generate_asset ...`
+  - The repo submits `workflows/comfyui/<workflow>.api.json` to the local ComfyUI server
+  - Generated image files are stored on disk, then registered in `assets`
+- Prompt policy is enforced in code:
+  - all generated assets get a fixed house style prefix
+  - `portrait` and `object_render` prompts always append a plain white background plus centered full-body subject rules
+  - `portrait` and `object_render` generations automatically run through background removal and create a linked `cutout` asset record
+  - for the user-provided prompt text, focus on content: mood, scale, lighting, texture, physical details, and story hooks
+  - do not spend prompt budget restating art style instructions unless a content detail truly matters
+- Keep workflow templates in `workflows/comfyui/`.
+- Treat `text-to-image.json` as the editor workflow and `text-to-image.api.json` as the machine-submittable version.
 - Use `POST /assets/request` to store a structured asset-generation request even before a full image generator is wired in.
 - Use `POST /assets/remove-background` or `python -m app.tools.remove_background --input path\to\image.png` to create transparent cutouts from source images.
 - Default background-removal model: `briaai/RMBG-2.0`.
@@ -147,3 +162,5 @@ This is the first file an LLM should read when working in this repository. It ex
 - No story should be pre-seeded unless explicitly requested later.
 - Keep SQLite as the source of truth for continuity.
 - Prefer exact entity reuse over fuzzy reinvention.
+- Do not hand-edit workflow node IDs for routine asset generation. Use the Python tool/API and treat the workflow JSON as a template.
+- Do not let the LLM override the house art style or the portrait/object white-background rules through prompt wording. Those are fixed generator policies.

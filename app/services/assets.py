@@ -1,16 +1,68 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
+import random
+import re
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from app.database import fetch_all, fetch_one
+
+GLOBAL_STYLE_PREFIX = (
+    "Style: Cinematic epic fantasy concept art, in the style of Jordan Grimmer and Tobias Roetsch. "
+    "Ethereal, hyper-detailed digital painting, heavy rim-lighting, 'dark but bright' high contrast, "
+    "vibrant magical atmosphere, 8k resolution, volumetric lighting, sense of wonder and adventure."
+)
+
+SUBJECT_ONLY_SUFFIX = (
+    "Plain white background. Styling applies to the subject only. Make sure subject is centered and the "
+    "subject is the only thing visible besides the background. Make sure the full body is in view."
+)
+
+DETAIL_GUIDANCE_SUFFIX = (
+    "Describe the subject or scene richly with mood, lighting, physical details, scale, materials, "
+    "environment storytelling, and any important hooks. Do not specify art style directions beyond the "
+    "content itself."
+)
+
+
+class ComfyUIClient:
+    def __init__(self, base_url: str, timeout_seconds: float = 600.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    def submit_workflow(self, workflow: dict[str, Any]) -> str:
+        response = httpx.post(f"{self.base_url}/prompt", json={"prompt": workflow}, timeout=30.0)
+        response.raise_for_status()
+        data = response.json()
+        prompt_id = data.get("prompt_id")
+        if not prompt_id:
+            raise RuntimeError(f"ComfyUI did not return a prompt_id: {data}")
+        return str(prompt_id)
+
+    def wait_for_history(self, prompt_id: str, *, poll_interval: float = 1.5) -> dict[str, Any]:
+        deadline = time.monotonic() + self.timeout_seconds
+        history_url = f"{self.base_url}/history/{prompt_id}"
+        while time.monotonic() < deadline:
+            response = httpx.get(history_url, timeout=30.0)
+            response.raise_for_status()
+            history = response.json()
+            if history:
+                if prompt_id in history:
+                    return history[prompt_id]
+                return history
+            time.sleep(poll_interval)
+        raise TimeoutError(f"Timed out waiting for ComfyUI prompt {prompt_id}.")
 
 
 class AssetService:
-    """Owns asset metadata, asset-job payloads, and local model helpers."""
+    """Owns asset metadata, asset-job payloads, local model helpers, and ComfyUI generation."""
 
     def __init__(self, connection: sqlite3.Connection, project_root: Path) -> None:
         self.connection = connection
@@ -21,6 +73,7 @@ class AssetService:
             "source": self.project_root / "data" / "assets" / "source",
             "generated": self.project_root / "data" / "assets" / "generated",
             "cutouts": self.project_root / "data" / "assets" / "cutouts",
+            "comfy_output": self.project_root / "data" / "assets" / "comfy_output",
             "hf_cache": self.project_root / "data" / "hf-cache",
         }
         for path in directories.values():
@@ -87,6 +140,225 @@ class AssetService:
         candidate = directories["hf_cache"] / repo_id.replace("/", "--")
         return candidate if candidate.exists() else None
 
+    def generate_with_comfyui(
+        self,
+        *,
+        workflow_path: str | Path,
+        comfyui_base_url: str,
+        comfyui_output_dir: str | Path,
+        entity_type: str,
+        entity_id: int,
+        asset_kind: str,
+        prompt: str,
+        width: int,
+        height: int,
+        steps: int,
+        guidance_scale: float,
+        seed: int | None = None,
+        negative_prompt: str | None = None,
+        filename_base: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        remove_background: bool = False,
+    ) -> dict[str, Any]:
+        directories = self.ensure_asset_directories()
+        workflow = self.load_workflow_template(workflow_path)
+        resolved_seed = int(seed if seed is not None else random.randint(1, 2**53 - 1))
+        should_remove_background = remove_background or asset_kind in {"portrait", "object_render"}
+        final_prompt = self.compose_generation_prompt(asset_kind=asset_kind, user_prompt=prompt)
+        safe_name = self.build_filename_base(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            asset_kind=asset_kind,
+            prompt=prompt,
+            filename_base=filename_base,
+        )
+        filename_prefix = f"{asset_kind}/{safe_name}"
+        prepared_workflow = self.prepare_comfyui_workflow(
+            workflow,
+            prompt=final_prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            guidance_scale=guidance_scale,
+            seed=resolved_seed,
+            filename_prefix=filename_prefix,
+        )
+
+        client = ComfyUIClient(comfyui_base_url)
+        prompt_id = client.submit_workflow(prepared_workflow)
+        history = client.wait_for_history(prompt_id)
+        output_path, image_info = self.resolve_comfyui_output_path(history, Path(comfyui_output_dir))
+        if not output_path.exists():
+            raise FileNotFoundError(f"ComfyUI reported an output file that does not exist: {output_path}")
+
+        final_path = self.import_generated_asset(
+            source_path=output_path,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            asset_kind=asset_kind,
+            filename_base=safe_name,
+            generated_root=directories["generated"],
+        )
+
+        generation_metadata = {
+            "backend": "comfyui",
+            "workflow_path": str(Path(workflow_path).resolve()),
+            "prompt_id": prompt_id,
+            "prompt": prompt,
+            "final_prompt": final_prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "steps": steps,
+            "guidance_scale": guidance_scale,
+            "seed": resolved_seed,
+            "filename_prefix": filename_prefix,
+            "background_removal_applied": should_remove_background,
+            "comfyui_output": image_info,
+            "metadata": metadata or {},
+        }
+
+        generated_asset = self.add_asset(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            asset_kind=asset_kind,
+            file_path=str(final_path),
+            prompt_text=json.dumps(generation_metadata),
+        )
+
+        cutout_asset = None
+        if should_remove_background:
+            cutout_name = f"{safe_name}-cutout.png"
+            cutout_path = self.remove_background(source_image_path=str(final_path), output_name=cutout_name)
+            cutout_asset = self.add_asset(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                asset_kind="cutout",
+                file_path=cutout_path,
+                prompt_text=json.dumps({"source_asset_id": generated_asset["id"], **generation_metadata}),
+            )
+
+        return {
+            "prompt_id": prompt_id,
+            "output_path": str(final_path),
+            "asset": generated_asset,
+            "cutout_asset": cutout_asset,
+        }
+
+    def compose_generation_prompt(self, *, asset_kind: str, user_prompt: str) -> str:
+        sections = [GLOBAL_STYLE_PREFIX, "", user_prompt.strip(), "", DETAIL_GUIDANCE_SUFFIX]
+        if asset_kind in {"portrait", "object_render"}:
+            sections.extend(["", SUBJECT_ONLY_SUFFIX])
+        return "\n".join(part for part in sections if part is not None)
+
+    def load_workflow_template(self, workflow_path: str | Path) -> dict[str, Any]:
+        path = Path(workflow_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Workflow file does not exist: {path}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def prepare_comfyui_workflow(
+        self,
+        workflow: dict[str, Any],
+        *,
+        prompt: str,
+        negative_prompt: str | None,
+        width: int,
+        height: int,
+        steps: int,
+        guidance_scale: float,
+        seed: int,
+        filename_prefix: str,
+    ) -> dict[str, Any]:
+        prepared = copy.deepcopy(workflow)
+        save_node = self.find_node(prepared, class_type="SaveImage")
+        latent_node = self.find_node(prepared, class_type="EmptySD3LatentImage")
+        sampler_node = self.find_node(prepared, class_type="KSampler")
+        positive_node = self.find_node(prepared, class_type="CLIPTextEncode", title_contains="Positive Prompt")
+        negative_node = self.find_node(prepared, class_type="CLIPTextEncode", title_contains="Negative Prompt")
+
+        save_node["inputs"]["filename_prefix"] = filename_prefix
+        latent_node["inputs"]["width"] = width
+        latent_node["inputs"]["height"] = height
+        sampler_node["inputs"]["seed"] = seed
+        sampler_node["inputs"]["steps"] = steps
+        sampler_node["inputs"]["cfg"] = guidance_scale
+        positive_node["inputs"]["text"] = prompt
+        if negative_prompt is not None:
+            negative_node["inputs"]["text"] = negative_prompt
+        return prepared
+
+    def find_node(
+        self,
+        workflow: dict[str, Any],
+        *,
+        class_type: str,
+        title_contains: str | None = None,
+    ) -> dict[str, Any]:
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            if node.get("class_type") != class_type:
+                continue
+            title = str(node.get("_meta", {}).get("title", ""))
+            if title_contains is not None and title_contains not in title:
+                continue
+            return node
+        raise KeyError(f"Could not find node class_type={class_type!r} title_contains={title_contains!r}")
+
+    def resolve_comfyui_output_path(self, history: dict[str, Any], output_root: Path) -> tuple[Path, dict[str, Any]]:
+        outputs = history.get("outputs", history)
+        for node_output in outputs.values():
+            if not isinstance(node_output, dict):
+                continue
+            images = node_output.get("images") or []
+            if images:
+                image_info = images[0]
+                filename = image_info.get("filename")
+                if not filename:
+                    continue
+                subfolder = image_info.get("subfolder") or ""
+                resolved = output_root / subfolder / filename
+                return resolved.resolve(), image_info
+        raise RuntimeError(f"ComfyUI history did not contain any image outputs: {history}")
+
+    def import_generated_asset(
+        self,
+        *,
+        source_path: Path,
+        entity_type: str,
+        entity_id: int,
+        asset_kind: str,
+        filename_base: str,
+        generated_root: Path,
+    ) -> Path:
+        destination_dir = generated_root / asset_kind
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        suffix = source_path.suffix or ".png"
+        destination = destination_dir / f"{entity_type}_{entity_id}_{filename_base}{suffix}"
+        counter = 2
+        while destination.exists():
+            destination = destination_dir / f"{entity_type}_{entity_id}_{filename_base}_v{counter}{suffix}"
+            counter += 1
+        destination.write_bytes(source_path.read_bytes())
+        return destination
+
+    def build_filename_base(
+        self,
+        *,
+        entity_type: str,
+        entity_id: int,
+        asset_kind: str,
+        prompt: str,
+        filename_base: str | None,
+    ) -> str:
+        candidate = filename_base or f"{entity_type}-{entity_id}-{asset_kind}"
+        if filename_base is None:
+            candidate = f"{candidate}-{prompt[:48]}"
+        normalized = re.sub(r"[^a-z0-9]+", "-", candidate.lower()).strip("-")
+        return normalized[:80] or f"{entity_type}-{entity_id}-{asset_kind}"
+
     def remove_background(
         self,
         *,
@@ -112,6 +384,7 @@ class AssetService:
 
         from PIL import Image
         import numpy as np
+
         image = Image.open(input_path).convert("RGB")
         original_size = image.size
 

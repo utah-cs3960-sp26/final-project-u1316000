@@ -13,7 +13,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
 - LLM generation stub for future structured scene expansion.
-- Asset request schema and a local Hugging Face background-removal path.
+- ComfyUI-backed image generation plus a local Hugging Face background-removal path.
 
 ## What Is Not Built Yet
 - No SQLite-backed player progression or scene rendering pipeline yet.
@@ -55,6 +55,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/services/story_graph.py` story nodes, choices, node-entity links, and jobs
 - `app/services/generation.py` future LLM generation interface
 - `app/services/assets.py` asset metadata, job queueing, Hugging Face model download, and background removal
+- `workflows/comfyui/` ComfyUI workflow templates for editor use and API submission
 - `app/templates/` console UI templates
 - `app/static/styles.css` console styling
 - `docs/llm_operations.md` primary onboarding guide for future AIs and humans
@@ -76,12 +77,23 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Keep operator-facing tools separate from any eventual player-facing UI.
 
 ## Asset Pipeline Notes
+- `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.
+- Generation prompts are policy-enforced in code:
+  - all assets get the same fixed cinematic fantasy style prefix
+  - `portrait` and `object_render` assets always add a plain white background plus centered full-body subject rules
+  - `portrait` and `object_render` assets also automatically run through background removal and store a `cutout` asset record
+  - LLMs should describe content, mood, lighting, physical details, and hooks, not art style
 - `POST /assets/request` stores an image-job payload in `generation_jobs`.
 - `POST /assets/remove-background` runs local background removal and can store the resulting cutout in `assets`.
+- Default ComfyUI settings:
+  - base URL: `http://127.0.0.1:8000`
+  - workflow dir: `workflows/comfyui`
+  - output dir: `data/assets/comfy_output`
 - The default background-removal model is `briaai/RMBG-2.0`.
 - Important license note: the Hugging Face RMBG-2.0 weights are source-available for non-commercial use, not general commercial use.
 - Important access note: `briaai/RMBG-2.0` is gated on Hugging Face. You need to accept the model terms and authenticate first.
 - Helpful commands:
+  - `python -m app.tools.generate_asset --asset-kind background --entity-type location --entity-id 1 --prompt "A giant mushroom field at dawn with silver dew, towering pale caps, quiet fog, and the unsettling feeling that someone left in a hurry" --width 1600 --height 896`
   - `python -m app.tools.download_hf_model --repo briaai/RMBG-2.0`
   - `hf auth login`
   - `python -m app.tools.remove_background --input path\to\image.png`

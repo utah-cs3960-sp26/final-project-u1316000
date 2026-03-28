@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,8 +13,15 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import Settings
 from app.database import bootstrap_database, connect
-from app.models import ChoiceCreate, GenerationPayload, StoryNodeCreate, WorldSeed
-from app.models import AssetRequest, BackgroundRemovalRequest
+from app.models import (
+    AssetGenerateRequest,
+    AssetRequest,
+    BackgroundRemovalRequest,
+    ChoiceCreate,
+    GenerationPayload,
+    StoryNodeCreate,
+    WorldSeed,
+)
 from app.services.assets import AssetService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
@@ -332,6 +340,21 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             {
                 "request": request,
                 "assets": assets.list_assets(),
+                "asset_generate_example": {
+                    "asset_kind": "background",
+                    "entity_type": "location",
+                    "entity_id": 1,
+                    "prompt": "A dawn-lit field of enormous mushrooms with silver dew on the grass, mist pooled between the stalks, distant metallic tracks half-hidden in the soil, and a hushed uncanny mood that suggests someone left only moments ago",
+                    "workflow_name": "text-to-image",
+                    "filename_base": "mushroom-field-dawn",
+                    "width": 1600,
+                    "height": 896,
+                    "steps": 25,
+                    "guidance_scale": 4.0,
+                    "seed": 42,
+                    "remove_background": False,
+                    "metadata": {"style": "storybook"},
+                },
                 "asset_request_example": {
                     "job_type": "generate_portrait",
                     "asset_kind": "portrait",
@@ -355,6 +378,9 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "model_repo": "briaai/RMBG-2.0",
                     "device": "auto",
                 },
+                "comfyui_base_url": settings.comfyui_base_url,
+                "comfyui_workflow_dir": str(settings.comfyui_workflow_dir),
+                "comfyui_output_dir": str(settings.comfyui_output_dir),
             },
         )
 
@@ -614,6 +640,45 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             if payload.job_type == "remove_background":
                 normalized_payload["model_repo"] = "briaai/RMBG-2.0"
         return assets.enqueue_asset_job(normalized_payload)
+
+    @app.post("/assets/generate")
+    def generate_asset(payload: AssetGenerateRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        assets = AssetService(db, project_root)
+        assets.ensure_asset_directories()
+        workflow_path = settings.comfyui_workflow_dir / f"{payload.workflow_name}.api.json"
+        try:
+            return assets.generate_with_comfyui(
+                workflow_path=workflow_path,
+                comfyui_base_url=settings.comfyui_base_url,
+                comfyui_output_dir=settings.comfyui_output_dir,
+                entity_type=payload.entity_type,
+                entity_id=payload.entity_id,
+                asset_kind=payload.asset_kind,
+                prompt=payload.prompt,
+                width=payload.width,
+                height=payload.height,
+                steps=payload.steps,
+                guidance_scale=payload.guidance_scale,
+                seed=payload.seed,
+                negative_prompt=payload.negative_prompt,
+                filename_base=payload.filename_base,
+                metadata=payload.metadata,
+                remove_background=payload.remove_background,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"ComfyUI request failed: {exc}. "
+                    f"Confirm ComfyUI is running at {settings.comfyui_base_url} and the workflow is valid."
+                ),
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"ComfyUI generation failed: {exc}") from exc
 
     @app.post("/assets/remove-background")
     def remove_background(payload: BackgroundRemovalRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from app.database import connect
@@ -206,6 +207,162 @@ def test_background_removal_rejects_missing_input(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_comfyui_generation_registers_asset(tmp_path: Path, monkeypatch) -> None:
+    output_dir = tmp_path / "comfy_output" / "background"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = output_dir / "z-image_00001_.png"
+    Image.new("RGB", (64, 64), color=(120, 80, 200)).save(generated_file)
+
+    monkeypatch.setenv("COMFYUI_OUTPUT_DIR", str(tmp_path / "comfy_output"))
+
+    from app.services import assets as assets_module
+
+    captured_workflow: dict[str, object] = {}
+
+    def fake_submit_workflow(self, workflow):
+        captured_workflow.update(workflow)
+        return "prompt-123"
+
+    monkeypatch.setattr(assets_module.ComfyUIClient, "submit_workflow", fake_submit_workflow)
+    monkeypatch.setattr(
+        assets_module.ComfyUIClient,
+        "wait_for_history",
+        lambda self, prompt_id: {
+            "outputs": {
+                "9": {
+                    "images": [
+                        {
+                            "filename": "z-image_00001_.png",
+                            "subfolder": "background",
+                            "type": "output",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    def fake_import_generated_asset(self, *, source_path, entity_type, entity_id, asset_kind, filename_base, generated_root):
+        imported = tmp_path / "imported" / asset_kind / f"{entity_type}_{entity_id}_{filename_base}.png"
+        imported.parent.mkdir(parents=True, exist_ok=True)
+        imported.write_bytes(source_path.read_bytes())
+        return imported
+
+    monkeypatch.setattr(assets_module.AssetService, "import_generated_asset", fake_import_generated_asset)
+
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/assets/generate",
+        json={
+            "asset_kind": "background",
+            "entity_type": "location",
+            "entity_id": 1,
+            "prompt": "A giant mushroom field at dawn.",
+            "workflow_name": "text-to-image",
+            "filename_base": "mushroom-field-dawn",
+            "width": 1600,
+            "height": 896,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["prompt_id"] == "prompt-123"
+    assert data["asset"]["asset_kind"] == "background"
+    assert data["asset"]["entity_type"] == "location"
+    assert data["asset"]["entity_id"] == 1
+    assert Path(data["output_path"]).exists()
+    prompt_text = captured_workflow["76:67"]["inputs"]["text"]  # type: ignore[index]
+    assert "Style: Cinematic epic fantasy concept art" in prompt_text
+    assert "A giant mushroom field at dawn." in prompt_text
+    assert "Do not specify art style directions beyond the content itself." in prompt_text
+
+
+def test_character_generation_prompt_enforces_subject_only_rules(tmp_path: Path) -> None:
+    from app.services.assets import AssetService
+
+    with connect(tmp_path / "prompt_test.db") as connection:
+        service = AssetService(connection, tmp_path)
+        prompt = service.compose_generation_prompt(
+            asset_kind="portrait",
+            user_prompt="A tall gnome with a nervous smile and a velvet tophat, carrying too many keys.",
+        )
+
+    assert "Style: Cinematic epic fantasy concept art" in prompt
+    assert "Plain white background." in prompt
+    assert "subject is centered" in prompt
+    assert "full body is in view" in prompt
+
+
+def test_portrait_generation_automatically_creates_cutout(tmp_path: Path, monkeypatch) -> None:
+    output_dir = tmp_path / "comfy_output" / "portrait"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = output_dir / "portrait_00001_.png"
+    Image.new("RGB", (64, 64), color=(50, 120, 180)).save(generated_file)
+
+    monkeypatch.setenv("COMFYUI_OUTPUT_DIR", str(tmp_path / "comfy_output"))
+
+    from app.services import assets as assets_module
+
+    monkeypatch.setattr(assets_module.ComfyUIClient, "submit_workflow", lambda self, workflow: "prompt-portrait")
+    monkeypatch.setattr(
+        assets_module.ComfyUIClient,
+        "wait_for_history",
+        lambda self, prompt_id: {
+            "outputs": {
+                "9": {
+                    "images": [
+                        {
+                            "filename": "portrait_00001_.png",
+                            "subfolder": "portrait",
+                            "type": "output",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    def fake_import_generated_asset(self, *, source_path, entity_type, entity_id, asset_kind, filename_base, generated_root):
+        imported = tmp_path / "imported" / asset_kind / f"{entity_type}_{entity_id}_{filename_base}.png"
+        imported.parent.mkdir(parents=True, exist_ok=True)
+        imported.write_bytes(source_path.read_bytes())
+        return imported
+
+    monkeypatch.setattr(assets_module.AssetService, "import_generated_asset", fake_import_generated_asset)
+
+    def fake_remove_background(self, *, source_image_path, output_name=None, model_repo="briaai/RMBG-2.0", device="auto"):
+        cutout = tmp_path / "cutouts" / (output_name or "portrait-cutout.png")
+        cutout.parent.mkdir(parents=True, exist_ok=True)
+        cutout.write_bytes(Path(source_image_path).read_bytes())
+        return str(cutout)
+
+    monkeypatch.setattr(assets_module.AssetService, "remove_background", fake_remove_background)
+
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/assets/generate",
+        json={
+            "asset_kind": "portrait",
+            "entity_type": "character",
+            "entity_id": 7,
+            "prompt": "A tall gnome with a worried expression, a velvet tophat, and too many pockets full of keys.",
+            "workflow_name": "text-to-image",
+            "filename_base": "tall-gnome-portrait",
+            "width": 1024,
+            "height": 1536,
+            "remove_background": False,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["asset"]["asset_kind"] == "portrait"
+    assert data["cutout_asset"] is not None
+    assert data["cutout_asset"]["asset_kind"] == "cutout"
+    assert data["cutout_asset"]["entity_type"] == "character"
+
+
 def test_duplicate_location_is_not_recreated(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/seed-world", json={"locations": [{"name": "Cabin"}]})
@@ -227,7 +384,7 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     assert "Objects" in objects_page.text
     assets_page = client.get("/ui/assets")
     assert assets_page.status_code == 200
-    assert "/assets/request" in assets_page.text
+    assert "/assets/generate" in assets_page.text
     player_page = client.get("/play")
     assert player_page.status_code == 200
     assert "Restart Adventure" in player_page.text

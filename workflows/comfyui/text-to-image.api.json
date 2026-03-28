@@ -1,0 +1,141 @@
+{
+  "9": {
+    "inputs": {
+      "filename_prefix": "z-image",
+      "images": [
+        "76:65",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "76:67": {
+    "inputs": {
+      "text": "Style: Cinematic epic fantasy concept art, in the style of Jordan Grimmer and Tobias Roetsch. Ethereal, hyper-detailed digital painting, heavy rim-lighting, 'dark but bright' high contrast, vibrant magical atmosphere, 8k resolution, volumetric lighting, sense of wonder and adventure.\n\nPrompt: A tall soft faced man with a bushy and pointy white beard that covers most of his face and white hair. He wears a plain blue tunic with a black belt and brown pants and boots. He wears a red and white vertical striped bucket hat.\n\nPlain white background. Styling applies to the subject only. Make sure subject is centered and there is nothing other than the subject. ",
+      "clip": [
+        "76:62",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "76:68": {
+    "inputs": {
+      "width": 1600,
+      "height": 896,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "76:63": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "76:62": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "76:65": {
+    "inputs": {
+      "samples": [
+        "76:69",
+        0
+      ],
+      "vae": [
+        "76:63",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "76:70": {
+    "inputs": {
+      "shift": 3.0,
+      "model": [
+        "76:66",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "76:66": {
+    "inputs": {
+      "unet_name": "z_image_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "76:71": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "76:62",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "76:69": {
+    "inputs": {
+      "seed": 863975932404353,
+      "steps": 25,
+      "cfg": 4.0,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": [
+        "76:70",
+        0
+      ],
+      "positive": [
+        "76:67",
+        0
+      ],
+      "negative": [
+        "76:71",
+        0
+      ],
+      "latent_image": [
+        "76:68",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  }
+}

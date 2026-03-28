@@ -3,7 +3,7 @@
 <section class="grid two-up">
     <article class="card">
         <h2>Assets</h2>
-        <p class="lede">Asset requests are queued through JSON, while background removal can run locally with a Hugging Face RMBG model.</p>
+        <p class="lede">Assets can be generated through ComfyUI, queued as placeholder jobs, or post-processed locally with the RMBG background-removal flow. Style enforcement happens in code, so prompt inputs should focus on content and mood rather than art direction. Portraits and object renders automatically get cutouts.</p>
         {% if assets %}
             <table>
                 <thead>
@@ -28,10 +28,16 @@
 
     <article class="card">
         <h2>Request Schema</h2>
+        <p class="meta">ComfyUI server: <code>{{ comfyui_base_url }}</code></p>
+        <p class="meta">Workflow dir: <code>{{ comfyui_workflow_dir }}</code></p>
+        <p class="meta">Output dir: <code>{{ comfyui_output_dir }}</code></p>
+        <p class="meta">POST <code>/assets/generate</code></p>
+        <pre><code>{{ asset_generate_example | tojson(indent=2) }}</code></pre>
         <p class="meta">POST <code>/assets/request</code></p>
         <pre><code>{{ asset_request_example | tojson(indent=2) }}</code></pre>
         <p class="meta">POST <code>/assets/remove-background</code></p>
         <pre><code>{{ background_removal_example | tojson(indent=2) }}</code></pre>
+        <p class="meta">CLI: <code>python -m app.tools.generate_asset --asset-kind background --entity-type location --entity-id 1 --prompt "Mushroom field at dawn"</code></p>
         <p class="meta">CLI: <code>python -m app.tools.remove_background --input path\to\image.png</code></p>
     </article>
 </section>
