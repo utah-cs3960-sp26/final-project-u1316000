@@ -105,35 +105,37 @@ This is the first file an LLM should read when working in this repository. It ex
 1. Read this file first.
 2. Read `docs/story_bible.md`.
 3. For story-expansion loop work, prefer `docs/llm_story_worker.md` as the per-run entrypoint.
-4. Inspect current data:
+4. If a human wants a rollback point before a session, create a manual snapshot first:
+   - `python -m app.tools.snapshot_db --name before-session`
+5. Inspect current data:
    - `python -m pytest`
    - `python -m uvicorn app.main:app --reload --port 8001`
    - open the UI at `http://127.0.0.1:8001`
    - inspect `/ui/seed`, `/ui/story`, `/story-bible`, and `/branches/default/state`
-5. If the opening canon needs to be reset to the current protagonist design:
+6. If the opening canon needs to be reset to the current protagonist design:
    - call `POST /story/reset-opening-canon`
    - call `POST /story/seed-opening-story`
    - optionally call `POST /story/refresh-protagonist-assets`
-6. Before adding new canon:
+7. Before adding new canon:
    - look for an existing location, character, or object by normalized name
    - inspect nearby relations and existing facts
-7. When adding story content later:
+8. When adding story content later:
    - create or reuse canonical entities first
    - update branch state when the player gains a persistent item, relationship change, clue, or affordance
    - create a `story_node`
    - attach canonical entity references in `node_entities`
    - add `choices` as outgoing edges
    - store any new world truths in `facts` and `relations`
-8. Before treating generated content as valid:
+9. Before treating generated content as valid:
    - get a target from `GET /frontier`
    - build context with `POST /jobs/generation-preview`
    - validate the candidate with `POST /jobs/validate-generation`
    - apply it with `POST /jobs/apply-generation`
-9. After applying a scene, generate any required missing visuals:
+10. After applying a scene, generate any required missing visuals:
    - new recurring character -> `portrait`
    - new linked visually distinct location -> `background`
    - new reusable visually important object -> `object_render`
-10. Do not duplicate entities just because a branch rediscovers them.
+11. Do not duplicate entities just because a branch rediscovers them.
 
 ## JSON API Overview
 - `POST /seed-world`

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -904,6 +908,53 @@ def test_play_scene_query_sets_start_scene_permalink(tmp_path: Path) -> None:
     assert match is not None
     story_data = json.loads(match.group(1))
     assert story_data["start_scene"] == target_scene_id
+
+
+def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    assert client.get("/").status_code == 200
+
+    snapshot_dir = tmp_path / "snapshots"
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.snapshot_db",
+        "--name",
+        "session-one",
+        "--output-dir",
+        str(snapshot_dir),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert result.returncode == 0
+    snapshot_path = Path(result.stdout.strip())
+    assert snapshot_path.exists()
+    assert snapshot_path.parent == snapshot_dir
+    assert snapshot_path.name.endswith("session-one.db")
+    assert snapshot_path.read_bytes() == db_path.read_bytes()
+
+    second_result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert second_result.returncode == 0
+    second_snapshot_path = Path(second_result.stdout.strip())
+    assert second_snapshot_path.exists()
+    assert second_snapshot_path != snapshot_path
+    assert second_snapshot_path.name.startswith(f"{db_path.stem}-session-one-")
+    assert second_snapshot_path.read_bytes() == db_path.read_bytes()
 
 
 def test_ui_pages_render(tmp_path: Path) -> None:
