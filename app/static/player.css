@@ -6,7 +6,7 @@
     --mushroom-cap: #f0b0b9;
     --mushroom-cap-shadow: #b86a7b;
     --mushroom-stem: #e8dfc8;
-    --panel: rgba(13, 18, 24, 0.76);
+    --panel: rgba(13, 18, 24, 0.8);
     --panel-strong: rgba(14, 18, 22, 0.92);
     --border: rgba(255, 245, 222, 0.2);
     --text: #f6efe4;
@@ -15,6 +15,7 @@
     --choice: rgba(31, 38, 48, 0.88);
     --choice-hover: rgba(52, 63, 76, 0.95);
     --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    --ui-zone-height: clamp(17rem, 31vh, 23rem);
 }
 
 * {
@@ -53,6 +54,41 @@ button {
         linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
 }
 
+.background-image,
+.fallback-backdrop,
+.stage-vignette {
+    position: absolute;
+    inset: 0;
+}
+
+.background-image {
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    filter: saturate(1.02) contrast(1.02);
+}
+
+.fallback-backdrop {
+    background:
+        radial-gradient(circle at 18% 22%, rgba(255, 236, 192, 0.18), transparent 18%),
+        radial-gradient(circle at 82% 14%, rgba(178, 217, 255, 0.16), transparent 18%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
+}
+
+.stage-vignette {
+    background:
+        linear-gradient(180deg, rgba(8, 11, 15, 0.08) 0%, rgba(8, 11, 15, 0.06) 32%, rgba(8, 11, 15, 0.16) 70%, rgba(8, 11, 15, 0.34) 100%),
+        radial-gradient(circle at 50% 26%, rgba(255, 255, 255, 0.08), transparent 42%);
+    pointer-events: none;
+}
+
+.scene-stage {
+    position: absolute;
+    inset: 0 0 var(--ui-zone-height) 0;
+    z-index: 1;
+    overflow: hidden;
+}
+
 .sky-glow {
     position: absolute;
     inset: 6% auto auto 12%;
@@ -74,17 +110,17 @@ button {
 }
 
 .mist-a {
-    bottom: 18%;
+    bottom: 22%;
 }
 
 .mist-b {
-    bottom: 30%;
+    bottom: 35%;
     background: rgba(255, 255, 255, 0.06);
 }
 
 .mushroom {
     position: absolute;
-    bottom: 20%;
+    bottom: 24%;
 }
 
 .mushroom .cap {
@@ -107,7 +143,7 @@ button {
 }
 
 .mushroom-a {
-    left: 4%;
+    left: 2%;
     width: 18rem;
     height: 30rem;
 }
@@ -125,7 +161,7 @@ button {
 }
 
 .mushroom-b {
-    left: 24%;
+    left: 22%;
     width: 14rem;
     height: 24rem;
 }
@@ -143,7 +179,7 @@ button {
 }
 
 .mushroom-c {
-    right: 12%;
+    right: 13%;
     width: 15rem;
     height: 26rem;
 }
@@ -181,73 +217,18 @@ button {
 .grass-band {
     position: absolute;
     inset: auto 0 0;
-    height: 36%;
+    height: 42%;
     background:
-        linear-gradient(180deg, rgba(120, 154, 88, 0.08) 0%, rgba(31, 46, 28, 0.12) 100%),
+        linear-gradient(180deg, rgba(120, 154, 88, 0.08) 0%, rgba(31, 46, 28, 0.16) 100%),
         radial-gradient(circle at 50% 20%, rgba(233, 255, 197, 0.08), transparent 42%);
 }
 
-.player-silhouette {
-    position: absolute;
-    left: 50%;
-    bottom: 19%;
-    width: 10rem;
-    height: 21rem;
-    transform: translateX(-50%);
-    opacity: 0.78;
-}
-
-.player-cutout {
-    position: absolute;
-    left: 50%;
-    bottom: 16%;
-    z-index: 1;
-    width: min(28vw, 26rem);
-    max-height: 68vh;
-    transform: translateX(-50%);
-    filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.35));
-    pointer-events: none;
-}
-
-.player-silhouette .tophat,
-.player-silhouette .head,
-.player-silhouette .body {
-    position: absolute;
-    display: block;
-    background: rgba(10, 12, 16, 0.82);
-}
-
-.player-silhouette .tophat {
-    top: 0;
-    left: 50%;
-    width: 4.2rem;
-    height: 2.8rem;
-    transform: translateX(-50%);
-    border-radius: 0.25rem 0.25rem 0.5rem 0.5rem;
-    box-shadow: 0 1rem 0 -0.7rem rgba(10, 12, 16, 0.82);
-}
-
-.player-silhouette .head {
-    top: 3rem;
-    left: 50%;
-    width: 3.6rem;
-    height: 3.8rem;
-    transform: translateX(-50%);
-    border-radius: 50%;
-}
-
-.player-silhouette .body {
-    top: 6.3rem;
-    left: 50%;
-    width: 7rem;
-    height: 14rem;
-    transform: translateX(-50%);
-    border-radius: 3rem 3rem 0.8rem 0.8rem;
-}
-
 .hud-top {
-    position: relative;
-    z-index: 2;
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    left: 0;
+    right: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -265,11 +246,124 @@ button {
     font-size: 0.95rem;
 }
 
+.actors-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.scene-actor {
+    position: absolute;
+    z-index: 2;
+    filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.35));
+    transform-origin: center bottom;
+}
+
+.scene-actor.focus {
+    z-index: 3;
+    filter: drop-shadow(0 24px 34px rgba(0, 0, 0, 0.42));
+}
+
+.scene-actor img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center bottom;
+}
+
+.slot-hero-center {
+    left: 50%;
+    bottom: 0;
+    width: min(50vw, 30rem);
+    height: min(82vh, 42rem);
+    transform: translateX(-50%);
+}
+
+.slot-left-support {
+    left: 10%;
+    bottom: 2%;
+    width: min(28vw, 16rem);
+    height: min(60vh, 28rem);
+}
+
+.slot-right-support {
+    right: 10%;
+    bottom: 2%;
+    width: min(28vw, 16rem);
+    height: min(60vh, 28rem);
+}
+
+.slot-left-foreground-object {
+    left: 14%;
+    bottom: 0;
+    width: min(16vw, 10rem);
+    height: min(22vh, 9rem);
+}
+
+.slot-right-foreground-object {
+    right: 14%;
+    bottom: 0;
+    width: min(16vw, 10rem);
+    height: min(22vh, 9rem);
+}
+
+.slot-center-foreground-object {
+    left: 50%;
+    bottom: 0;
+    width: min(18vw, 11rem);
+    height: min(24vh, 10rem);
+    transform: translateX(-50%);
+}
+
+.player-silhouette {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    opacity: 0.88;
+}
+
+.player-silhouette .tophat,
+.player-silhouette .head,
+.player-silhouette .body {
+    position: absolute;
+    display: block;
+    background: rgba(10, 12, 16, 0.84);
+}
+
+.player-silhouette .tophat {
+    top: 6%;
+    left: 50%;
+    width: 22%;
+    height: 12%;
+    transform: translateX(-50%);
+    border-radius: 0.35rem 0.35rem 0.65rem 0.65rem;
+    box-shadow: 0 1rem 0 -0.7rem rgba(10, 12, 16, 0.82);
+}
+
+.player-silhouette .head {
+    top: 18%;
+    left: 50%;
+    width: 18%;
+    height: 14%;
+    transform: translateX(-50%);
+    border-radius: 50%;
+}
+
+.player-silhouette .body {
+    top: 29%;
+    left: 50%;
+    width: 34%;
+    height: 56%;
+    transform: translateX(-50%);
+    border-radius: 3rem 3rem 1rem 1rem;
+}
+
 .settings-button {
     position: fixed;
     top: 1rem;
     right: 1rem;
-    z-index: 5;
+    z-index: 8;
     width: 3.2rem;
     height: 3.2rem;
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -310,7 +404,7 @@ button {
     position: fixed;
     top: 4.8rem;
     right: 1rem;
-    z-index: 5;
+    z-index: 8;
     min-width: 13rem;
     padding: 1rem;
     border: 1px solid var(--border);
@@ -338,18 +432,23 @@ button {
 }
 
 .story-panel {
-    position: relative;
-    z-index: 2;
+    position: absolute;
+    z-index: 5;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    min-height: var(--ui-zone-height);
+    padding: 1rem 6rem 1.8rem;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
-    min-height: 100vh;
-    padding: 0 6rem 2rem;
     gap: 1rem;
+    background: linear-gradient(180deg, rgba(7, 11, 15, 0) 0%, rgba(7, 11, 15, 0.24) 20%, rgba(7, 11, 15, 0.5) 100%);
 }
 
 .dialogue-box {
-    max-width: 60rem;
+    width: min(100%, 74rem);
+    margin: 0 auto;
     padding: 1.2rem 1.35rem 1rem;
     border: 1px solid var(--border);
     border-radius: 1.4rem;
@@ -379,7 +478,7 @@ button {
 }
 
 .dialogue-text {
-    min-height: 7.5rem;
+    min-height: 7rem;
     margin: 1rem 0 1.1rem;
     font-size: 1.22rem;
     line-height: 1.65;
@@ -404,7 +503,8 @@ button {
 }
 
 .choices-panel {
-    max-width: 60rem;
+    width: min(100%, 74rem);
+    margin: 0 auto;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 0.9rem;
@@ -447,23 +547,42 @@ button {
     display: none;
 }
 
+@media (max-width: 1100px) {
+    .hud-top,
+    .story-panel {
+        padding-left: 1.25rem;
+        padding-right: 1.25rem;
+    }
+}
+
 @media (max-width: 900px) {
-    .hud-top {
-        padding: 1rem 1rem 0;
+    :root {
+        --ui-zone-height: clamp(18rem, 38vh, 24rem);
     }
 
-    .story-panel {
-        padding: 0 1rem 1rem;
+    .hud-top {
+        padding-top: 1rem;
+    }
+
+    .hint-pill {
+        display: none;
     }
 
     .dialogue-text {
-        min-height: 9.5rem;
+        min-height: 8.8rem;
         font-size: 1.08rem;
     }
 
-    .player-cutout {
-        width: min(54vw, 18rem);
-        bottom: 22%;
+    .slot-hero-center {
+        width: min(62vw, 22rem);
+        height: min(64vh, 34rem);
+    }
+
+    .slot-left-support,
+    .slot-right-support {
+        width: min(28vw, 12rem);
+        height: min(38vh, 18rem);
+        bottom: 6%;
     }
 
     .dialogue-footer {

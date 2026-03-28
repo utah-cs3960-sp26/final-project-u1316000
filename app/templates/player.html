@@ -23,40 +23,38 @@
 
         <section class="scene-shell" aria-label="Adventure scene">
             <div class="scene-backdrop">
-                <div class="sky-glow"></div>
-                <div class="mist mist-a"></div>
-                <div class="mist mist-b"></div>
-                <div class="mushroom mushroom-a">
-                    <span class="cap"></span>
-                    <span class="stem"></span>
+                <div id="background-image" class="background-image hidden" aria-hidden="true"></div>
+                <div id="fallback-backdrop" class="fallback-backdrop" aria-hidden="true">
+                    <div class="sky-glow"></div>
+                    <div class="mist mist-a"></div>
+                    <div class="mist mist-b"></div>
+                    <div class="mushroom mushroom-a">
+                        <span class="cap"></span>
+                        <span class="stem"></span>
+                    </div>
+                    <div class="mushroom mushroom-b">
+                        <span class="cap"></span>
+                        <span class="stem"></span>
+                    </div>
+                    <div class="mushroom mushroom-c">
+                        <span class="cap"></span>
+                        <span class="stem"></span>
+                    </div>
+                    <div class="mushroom mushroom-d">
+                        <span class="cap"></span>
+                        <span class="stem"></span>
+                    </div>
+                    <div class="grass-band"></div>
                 </div>
-                <div class="mushroom mushroom-b">
-                    <span class="cap"></span>
-                    <span class="stem"></span>
-                </div>
-                <div class="mushroom mushroom-c">
-                    <span class="cap"></span>
-                    <span class="stem"></span>
-                </div>
-                <div class="mushroom mushroom-d">
-                    <span class="cap"></span>
-                    <span class="stem"></span>
-                </div>
-                <div class="grass-band"></div>
-                {% if player_cutout_url %}
-                <img class="player-cutout" src="{{ player_cutout_url }}" alt="The tall gnome player character">
-                {% else %}
-                <div class="player-silhouette">
-                    <span class="tophat"></span>
-                    <span class="head"></span>
-                    <span class="body"></span>
-                </div>
-                {% endif %}
+                <div class="stage-vignette" aria-hidden="true"></div>
             </div>
 
-            <div class="hud-top">
-                <div class="location-pill" id="location-pill">Mushroom Field</div>
-                <div class="hint-pill">Space: reveal / continue</div>
+            <div class="scene-stage" aria-hidden="true">
+                <div class="hud-top">
+                    <div class="location-pill" id="location-pill">Mushroom Field</div>
+                    <div class="hint-pill">Space: reveal / continue</div>
+                </div>
+                <div id="actors-layer" class="actors-layer"></div>
             </div>
 
             <div class="story-panel">

@@ -11,6 +11,9 @@ const locationPill = document.getElementById("location-pill");
 const settingsButton = document.getElementById("settings-button");
 const settingsMenu = document.getElementById("settings-menu");
 const restartButton = document.getElementById("restart-button");
+const backgroundImage = document.getElementById("background-image");
+const fallbackBackdrop = document.getElementById("fallback-backdrop");
+const actorsLayer = document.getElementById("actors-layer");
 
 const typingDelayMs = 24;
 
@@ -49,6 +52,73 @@ function revealEntireLine() {
     setStatus("Press Space or Continue.");
 }
 
+function setBackground(scene) {
+    if (scene.background_url) {
+        backgroundImage.style.backgroundImage = `url("${scene.background_url}")`;
+        backgroundImage.classList.remove("hidden");
+        fallbackBackdrop.classList.add("hidden");
+        return;
+    }
+
+    backgroundImage.style.backgroundImage = "";
+    backgroundImage.classList.add("hidden");
+    fallbackBackdrop.classList.remove("hidden");
+}
+
+function createPlayerFallback() {
+    const silhouette = document.createElement("div");
+    silhouette.className = "player-silhouette";
+    silhouette.innerHTML = `
+        <span class="tophat"></span>
+        <span class="head"></span>
+        <span class="body"></span>
+    `;
+    return silhouette;
+}
+
+function shouldHideActor(actor, lineIndex) {
+    return Array.isArray(actor.hidden_on_lines) && actor.hidden_on_lines.includes(lineIndex);
+}
+
+function renderActors(scene) {
+    actorsLayer.innerHTML = "";
+    const actors = scene.actors || [];
+
+    actors.forEach((actor) => {
+        if (shouldHideActor(actor, currentLineIndex)) {
+            return;
+        }
+
+        const actorElement = document.createElement("div");
+        actorElement.className = `scene-actor slot-${actor.slot}`;
+        if (actor.focus) {
+            actorElement.classList.add("focus");
+        }
+        actorElement.style.transform = actor.scale
+            ? `translateX(${actor.slot === "hero-center" || actor.slot === "center-foreground-object" ? "-50%" : "0"}) scale(${actor.scale})`
+            : "";
+
+        if (actor.asset_url) {
+            const image = document.createElement("img");
+            image.src = actor.asset_url;
+            image.alt = `${actor.entity_type} ${actor.entity_id}`;
+            actorElement.appendChild(image);
+        } else if (actor.use_player_fallback) {
+            actorElement.appendChild(createPlayerFallback());
+        } else {
+            return;
+        }
+
+        actorsLayer.appendChild(actorElement);
+    });
+}
+
+function renderScenePresentation() {
+    const scene = getCurrentScene();
+    setBackground(scene);
+    renderActors(scene);
+}
+
 function typeCurrentLine() {
     stopTyping();
     const scene = getCurrentScene();
@@ -66,6 +136,7 @@ function typeCurrentLine() {
     choicesPanel.classList.add("hidden");
     choicesPanel.innerHTML = "";
     setStatus("Press Space to reveal or continue.");
+    renderScenePresentation();
 
     typingTimer = window.setInterval(() => {
         typedCharacterCount += 1;
@@ -84,7 +155,7 @@ function renderChoices() {
     choicesPanel.classList.remove("hidden");
     continueButton.disabled = true;
     continueButton.textContent = "Choose";
-    setStatus("Choose with click or keys 1-3.");
+    setStatus(`Choose with click or keys 1-${scene.choices.length}.`);
 
     scene.choices.forEach((choice, index) => {
         const button = document.createElement("button");
@@ -167,9 +238,9 @@ document.addEventListener("keydown", (event) => {
     }
 
     if (!choicesPanel.classList.contains("hidden")) {
-        if (event.key >= "1" && event.key <= "3") {
+        const scene = getCurrentScene();
+        if (event.key >= "1" && event.key <= String(Math.min(scene.choices.length, 9))) {
             const index = Number.parseInt(event.key, 10) - 1;
-            const scene = getCurrentScene();
             if (scene.choices[index]) {
                 startScene(scene.choices[index].target);
             }

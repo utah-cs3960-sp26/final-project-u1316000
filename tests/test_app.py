@@ -5,8 +5,9 @@ from pathlib import Path
 from PIL import Image
 from fastapi.testclient import TestClient
 
-from app.database import connect
+from app.database import bootstrap_database, connect
 from app.main import create_app
+from app.services.assets import AssetService
 from app.services.canon import CanonResolver
 
 
@@ -207,6 +208,32 @@ def test_background_removal_rejects_missing_input(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_asset_service_prefers_latest_asset_for_entity_kind(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "assets_test.db"
+    bootstrap_database(db_path)
+    with connect(db_path) as connection:
+        service = AssetService(connection, project_root)
+        first = service.add_asset(
+            entity_type="location",
+            entity_id=1,
+            asset_kind="background",
+            file_path=str(project_root / "data" / "assets" / "generated" / "background" / "one.png"),
+        )
+        latest = service.add_asset(
+            entity_type="location",
+            entity_id=1,
+            asset_kind="background",
+            file_path=str(project_root / "data" / "assets" / "generated" / "background" / "two.png"),
+        )
+
+        selected = service.get_latest_asset(entity_type="location", entity_id=1, asset_kind="background")
+
+    assert first["id"] < latest["id"]
+    assert selected is not None
+    assert selected["id"] == latest["id"]
+
+
 def test_comfyui_generation_registers_asset(tmp_path: Path, monkeypatch) -> None:
     output_dir = tmp_path / "comfy_output" / "background"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -371,6 +398,55 @@ def test_duplicate_location_is_not_recreated(tmp_path: Path) -> None:
     assert len(locations) == 1
 
 
+def test_play_resolves_asset_backed_scene_media(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post(
+        "/seed-world",
+        json={
+            "locations": [{"name": "Mushroom Field"}],
+            "characters": [{"name": "The Tall Gnome"}],
+        },
+    )
+
+    project_root = Path(__file__).resolve().parents[1]
+    fixture_dir = project_root / "data" / "assets" / "test-fixtures"
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    background_path = fixture_dir / f"{tmp_path.name}-bg.png"
+    cutout_path = fixture_dir / f"{tmp_path.name}-cutout.png"
+    try:
+        Image.new("RGB", (32, 32), color=(90, 110, 160)).save(background_path)
+        Image.new("RGBA", (32, 32), color=(200, 160, 90, 255)).save(cutout_path)
+
+        with connect(db_path) as connection:
+            service = AssetService(connection, project_root)
+            service.add_asset(
+                entity_type="location",
+                entity_id=1,
+                asset_kind="background",
+                file_path=str(background_path),
+            )
+            service.add_asset(
+                entity_type="character",
+                entity_id=1,
+                asset_kind="cutout",
+                file_path=str(cutout_path),
+            )
+
+        response = client.get("/play")
+        assert response.status_code == 200
+        assert f"/media/test-fixtures/{background_path.name}" in response.text
+        assert f"/media/test-fixtures/{cutout_path.name}" in response.text
+    finally:
+        if background_path.exists():
+            background_path.unlink()
+        if cutout_path.exists():
+            cutout_path.unlink()
+        try:
+            fixture_dir.rmdir()
+        except OSError:
+            pass
+
+
 def test_ui_pages_render(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     response = client.get("/")
@@ -389,3 +465,4 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     assert player_page.status_code == 200
     assert "Restart Adventure" in player_page.text
     assert "Mushroom Field" in player_page.text
+    assert "actors-layer" in player_page.text

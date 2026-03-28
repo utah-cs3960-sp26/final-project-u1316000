@@ -71,8 +71,8 @@ This is the first file an LLM should read when working in this repository. It ex
 1. Read this file first.
 2. Inspect current data:
    - `python -m pytest`
-   - `python -m uvicorn app.main:app --reload`
-   - open the UI at `http://127.0.0.1:8000`
+   - `python -m uvicorn app.main:app --reload --port 8001`
+   - open the UI at `http://127.0.0.1:8001`
    - inspect `/ui/seed`, `/ui/story`, and the JSON endpoints
 3. Before adding new canon:
    - look for an existing location, character, or object by normalized name
@@ -116,6 +116,7 @@ This is the first file an LLM should read when working in this repository. It ex
 - Treat `text-to-image.json` as the editor workflow and `text-to-image.api.json` as the machine-submittable version.
 - Use `POST /assets/request` to store a structured asset-generation request even before a full image generator is wired in.
 - Use `POST /assets/remove-background` or `python -m app.tools.remove_background --input path\to\image.png` to create transparent cutouts from source images.
+- `/play` currently uses hardcoded opening dialogue, but it resolves location backgrounds and actor cutouts from SQLite assets.
 - Default background-removal model: `briaai/RMBG-2.0`.
 - Licensing warning: the Hugging Face RMBG-2.0 weights are non-commercial under the model card license, so keep that constraint in mind.
 - Access warning: `briaai/RMBG-2.0` is gated on Hugging Face, so accept the model terms and run `hf auth login` before trying to download or infer with it.

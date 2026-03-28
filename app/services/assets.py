@@ -83,6 +83,90 @@ class AssetService:
     def list_assets(self) -> list[dict[str, Any]]:
         return fetch_all(self.connection, "SELECT * FROM assets ORDER BY id DESC")
 
+    def get_latest_asset(
+        self,
+        *,
+        entity_type: str,
+        entity_id: int,
+        asset_kind: str,
+    ) -> dict[str, Any] | None:
+        return fetch_one(
+            self.connection,
+            """
+            SELECT *
+            FROM assets
+            WHERE entity_type = ? AND entity_id = ? AND asset_kind = ? AND status = 'ready'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (entity_type, entity_id, asset_kind),
+        )
+
+    def get_preferred_asset(
+        self,
+        *,
+        entity_type: str,
+        entity_id: int,
+        preferred_kinds: list[str],
+    ) -> dict[str, Any] | None:
+        for asset_kind in preferred_kinds:
+            asset = self.get_latest_asset(entity_type=entity_type, entity_id=entity_id, asset_kind=asset_kind)
+            if asset is not None:
+                return asset
+        return None
+
+    def media_url_for_path(self, file_path: str | Path) -> str | None:
+        resolved_path = Path(file_path).expanduser().resolve()
+        asset_root = (self.project_root / "data" / "assets").resolve()
+        try:
+            relative_path = resolved_path.relative_to(asset_root)
+        except ValueError:
+            return None
+        return f"/media/{relative_path.as_posix()}"
+
+    def resolve_scene_assets(self, scene_definition: dict[str, Any]) -> dict[str, Any]:
+        resolved_scene = copy.deepcopy(scene_definition)
+        location_entity_id = resolved_scene.get("location_entity_id")
+        background_asset = None
+        if location_entity_id is not None:
+            background_asset = self.get_latest_asset(
+                entity_type="location",
+                entity_id=int(location_entity_id),
+                asset_kind="background",
+            )
+        resolved_scene["background_url"] = (
+            self.media_url_for_path(background_asset["file_path"]) if background_asset is not None else None
+        )
+
+        actors: list[dict[str, Any]] = []
+        for entity in resolved_scene.get("present_entities", []):
+            entity_type = entity["entity_type"]
+            entity_id = int(entity["entity_id"])
+            preferred_kinds = ["cutout"]
+            if entity_type == "object":
+                preferred_kinds.append("object_render")
+            elif entity_type == "character":
+                preferred_kinds.append("portrait")
+            asset = self.get_preferred_asset(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                preferred_kinds=preferred_kinds,
+            )
+            actor = {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "slot": entity["slot"],
+                "focus": bool(entity.get("focus", False)),
+                "scale": float(entity.get("scale", 1.0)),
+                "hidden_on_lines": list(entity.get("hidden_on_lines", [])),
+                "use_player_fallback": bool(entity.get("use_player_fallback", False)),
+                "asset_kind": asset["asset_kind"] if asset is not None else None,
+                "asset_url": self.media_url_for_path(asset["file_path"]) if asset is not None else None,
+            }
+            actors.append(actor)
+        resolved_scene["actors"] = actors
+        return resolved_scene
+
     def add_asset(
         self,
         *,

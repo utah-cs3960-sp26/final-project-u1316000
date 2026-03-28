@@ -34,6 +34,17 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
     "scenes": {
         "opening": {
             "location": "Mushroom Field",
+            "location_entity_id": 1,
+            "present_entities": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "slot": "hero-center",
+                    "focus": True,
+                    "scale": 1.16,
+                    "use_player_fallback": True,
+                }
+            ],
             "lines": [
                 {
                     "speaker": "Narrator",
@@ -77,6 +88,17 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
         },
         "tracks": {
             "location": "Mushroom Field",
+            "location_entity_id": 1,
+            "present_entities": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "slot": "hero-center",
+                    "focus": True,
+                    "scale": 1.16,
+                    "use_player_fallback": True,
+                }
+            ],
             "lines": [
                 {
                     "speaker": "Narrator",
@@ -94,6 +116,17 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
         },
         "hat": {
             "location": "Mushroom Field",
+            "location_entity_id": 1,
+            "present_entities": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "slot": "hero-center",
+                    "focus": True,
+                    "scale": 1.16,
+                    "use_player_fallback": True,
+                }
+            ],
             "lines": [
                 {
                     "speaker": "Narrator",
@@ -111,6 +144,17 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
         },
         "hand": {
             "location": "Mushroom Field",
+            "location_entity_id": 1,
+            "present_entities": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "slot": "hero-center",
+                    "focus": True,
+                    "scale": 1.16,
+                    "use_player_fallback": True,
+                }
+            ],
             "lines": [
                 {
                     "speaker": "Narrator",
@@ -174,16 +218,22 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         return templates.TemplateResponse(request, "index.html", context)
 
     @app.get("/play", response_class=HTMLResponse)
-    def player_view(request: Request) -> HTMLResponse:
-        player_cutout = asset_root / "cutouts" / "player-main-cutout.png"
+    def player_view(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+        assets = AssetService(db, project_root)
+        resolved_story = {
+            **PLAYER_DEMO_STORY,
+            "scenes": {
+                scene_key: assets.resolve_scene_assets(scene_definition)
+                for scene_key, scene_definition in PLAYER_DEMO_STORY["scenes"].items()
+            },
+        }
         return templates.TemplateResponse(
             request,
             "player.html",
             {
                 "request": request,
-                "story_data": PLAYER_DEMO_STORY,
+                "story_data": resolved_story,
                 "title": PLAYER_DEMO_STORY["title"],
-                "player_cutout_url": "/media/cutouts/player-main-cutout.png" if player_cutout.exists() else None,
             },
         )
 

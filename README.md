@@ -19,7 +19,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - No SQLite-backed player progression or scene rendering pipeline yet.
 - No autonomous story expansion loop.
 - No dialogue playback UI beyond raw story node text inspection.
-- No image generation or scene compositing workflow yet.
+- No full SQLite-backed story playback loop or authored scene-layout system beyond the opening demo.
 
 ## Quick Start
 1. Create a virtual environment:
@@ -28,9 +28,9 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 2. Install dependencies:
    - `python -m pip install -r requirements.txt`
 3. Preview the console:
-   - `python -m uvicorn app.main:app --reload`
+   - `python -m uvicorn app.main:app --reload --port 8001`
 4. Open:
-   - `http://127.0.0.1:8000`
+   - `http://127.0.0.1:8001`
 
 ## Useful Pages
 - `/` overview dashboard
@@ -44,8 +44,8 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `/ui/jobs` generation job placeholders
 
 ## Current Player Demo
-- `/play` is a hardcoded prototype scene for testing the player-facing layout.
-- It is separate from the SQLite-backed story graph and exists only as a front-end demo for now.
+- `/play` still uses hardcoded opening dialogue/choices, but it now resolves its background and actor art from SQLite-backed assets.
+- It remains separate from the SQLite-backed story graph for playback/navigation purposes.
 
 ## Repo Layout
 - `app/main.py` FastAPI app factory, HTML routes, and JSON API routes
@@ -100,3 +100,6 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 
 ## Docs
 - Primary onboarding guide: [docs/llm_operations.md](docs/llm_operations.md)
+
+## How to preview:
+python -m uvicorn app.main:app --reload --port 8001
