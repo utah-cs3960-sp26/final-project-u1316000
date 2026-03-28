@@ -105,8 +105,14 @@ class LLMGenerationService:
             "A hook is any unresolved mystery, unanswered question, ominous promise, unknown identity, suspicious clue, or strange causal thread that should matter later.\n"
             "If you introduce a new unresolved mystery or question, create a new_hook immediately unless it is clearly just advancing an already existing hook.\n"
             "If you introduce a placeholder mystery entity such as an unseen voice, unknown figure, or unnamed presence, create a hook for it immediately and link that hook to the current_scene location or another relevant entity whenever possible.\n"
+            "For major hooks, include a payoff_concept that voices the intended direction of the eventual answer without fully locking every detail. Minor and local hooks may include payoff_concept too when that helps continuity.\n"
+            "Use must_not_imply on hooks when there are tempting wrong shortcuts future workers should avoid.\n"
+            "A good payoff_concept should describe the general shape of the later answer, not just bind the mystery to whatever system or NPC is immediately available in the current scene.\n"
+            "Broad direction does not mean vague direction: if a hook likely resolves into a known character, place, or system, say that directly instead of writing mushy placeholder notes.\n"
             "Major mysteries must not resolve before their minimum distance and readiness conditions.\n"
             "Major hook payoffs are only safe when the relevant hook appears in eligible_major_hooks. If it is still blocked, deepen it without resolving it.\n"
+            "When a major hook is still blocked, prefer ambiguous clues, provenance fragments, eerie recognition, or partial constraints over explicit procedural instructions, ownership reveals, or local-system explanations unless several prior clues already support that connection.\n"
+            "Do not let the first nearby recurring NPC, transit system, or local mechanic swallow a long-range mystery just because it is available now.\n"
             "For any hook, min_distance_to_payoff and required clue/state tags determine whether payoff is allowed. Validation will reject early resolution.\n"
             "Persistent affordances and inventory items remain available in the branch unless explicitly changed.\n"
             "Treat requested_choice_count as a target, not a rigid quota. Usually return 2 or 3 choices, sometimes 1 for a forced beat, and only occasionally 4 or more when the scene genuinely blooms.\n"
@@ -114,6 +120,9 @@ class LLMGenerationService:
             "If a quick merge is appropriate, a generated choice may include target_node_id pointing at one of the provided merge_candidates.\n"
             "Use scene_present_entities and hidden_on_lines when actors or objects should appear, disappear, or swap focus during the same scene.\n"
             "If a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, make the need for art obvious so the post-apply asset pass can generate it once real IDs exist.\n"
+            "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.\n"
+            "If the player has clearly arrived somewhere new, reusing the old background just to avoid art generation is usually the wrong choice.\n"
+            "If a location does not yet have art, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.\n"
             "Return structured JSON only with these top-level keys:\n"
             "scene_summary, scene_text, dialogue_lines, choices, entity_references, scene_present_entities, fact_updates, relation_updates, "
             "new_hooks, hook_updates, inventory_changes, affordance_changes, relationship_changes, "
@@ -167,6 +176,9 @@ class LLMGenerationService:
         proposed_major_hooks = sum(1 for hook in candidate.new_hooks if hook.importance == "major")
         if proposed_major_hooks > int(beat_budget["max_new_major_hooks_per_scene"]):
             issues.append("Candidate introduces too many major hooks in one scene.")
+        for hook in candidate.new_hooks:
+            if hook.importance == "major" and not (hook.payoff_concept or "").strip():
+                issues.append(f"Major hook '{hook.summary}' must include a payoff_concept.")
 
         proposed_minor_hooks = sum(1 for hook in candidate.new_hooks if hook.importance in {"minor", "local"})
         if proposed_minor_hooks > int(beat_budget["max_minor_hooks_per_scene"]):

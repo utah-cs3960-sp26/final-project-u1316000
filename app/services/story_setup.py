@@ -325,7 +325,10 @@ class StorySetupService:
 
     def _ensure_opening_hooks(self, *, branch_key: str, protagonist_id: int, location_id: int) -> None:
         existing_hooks = self.branch_state.list_hooks(branch_key)
-        existing_summaries = {hook["summary"].strip().lower() for hook in existing_hooks}
+        existing_by_summary = {
+            hook["summary"].strip().lower(): hook
+            for hook in existing_hooks
+        }
         desired_hooks = [
             {
                 "hook_type": "identity_mystery",
@@ -334,6 +337,13 @@ class StorySetupService:
                     "The striped bucket hat, the lost first name, the amnesia, and waking in the Mushroom Field "
                     "all point to the same hidden past event."
                 ),
+                "payoff_concept": (
+                    "The bucket hat came from someone in the protagonist's missing past, and its mirror holds a strange foresight-or-memory function that was meant to guide or protect him for reasons revealed much later."
+                ),
+                "must_not_imply": [
+                    "Do not reduce the bucket hat to ordinary tram uniform gear or platform-issued clothing.",
+                    "Do not fully reveal who gave the hat or why until much later.",
+                ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
@@ -352,6 +362,13 @@ class StorySetupService:
                     "The five-thumbed left hand and the protagonist's altered body suggest deliberate transformation, "
                     "tampering, or design."
                 ),
+                "payoff_concept": (
+                    "The altered hand and stretched body are the result of deliberate intervention tied to the protagonist's missing past, not a random fantasy oddity."
+                ),
+                "must_not_imply": [
+                    "Do not explain the altered body as a simple local platform side effect.",
+                    "Do not treat the five thumbs as a joke mutation with no larger meaning.",
+                ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
@@ -365,6 +382,42 @@ class StorySetupService:
             },
         ]
         for hook in desired_hooks:
-            if hook["summary"].strip().lower() in existing_summaries:
+            existing = existing_by_summary.get(hook["summary"].strip().lower())
+            if existing is None:
+                self.branch_state.create_hook(branch_key=branch_key, **hook)
                 continue
-            self.branch_state.create_hook(branch_key=branch_key, **hook)
+            self.connection.execute(
+                """
+                UPDATE story_hooks
+                SET hook_type = ?,
+                    importance = ?,
+                    payoff_concept = ?,
+                    must_not_imply_json = ?,
+                    linked_entity_type = ?,
+                    linked_entity_id = ?,
+                    introduced_at_depth = ?,
+                    min_distance_to_payoff = ?,
+                    required_clue_tags_json = ?,
+                    required_state_tags_json = ?,
+                    status = ?,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    hook["hook_type"],
+                    hook["importance"],
+                    hook["payoff_concept"],
+                    json.dumps(hook["must_not_imply"]),
+                    hook["linked_entity_type"],
+                    hook["linked_entity_id"],
+                    hook["introduced_at_depth"],
+                    hook["min_distance_to_payoff"],
+                    json.dumps(hook["required_clue_tags"]),
+                    json.dumps(hook["required_state_tags"]),
+                    hook["status"],
+                    hook["notes"],
+                    existing["id"],
+                ),
+            )
+        self.connection.commit()

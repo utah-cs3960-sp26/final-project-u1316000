@@ -323,6 +323,8 @@ class BranchStateService:
         hook_type: str,
         importance: str,
         summary: str,
+        payoff_concept: str | None = None,
+        must_not_imply: list[str] | None = None,
         linked_entity_type: str | None = None,
         linked_entity_id: int | None = None,
         introduced_at_depth: int | None = None,
@@ -336,17 +338,19 @@ class BranchStateService:
         cursor = self.connection.execute(
             """
             INSERT INTO story_hooks (
-                branch_key, hook_type, importance, summary, linked_entity_type, linked_entity_id,
+                branch_key, hook_type, importance, summary, payoff_concept, must_not_imply_json, linked_entity_type, linked_entity_id,
                 introduced_at_depth, min_distance_to_payoff, required_clue_tags_json, required_state_tags_json,
                 status, notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 branch_key,
                 hook_type,
                 importance,
                 summary.strip(),
+                payoff_concept.strip() if payoff_concept else None,
+                json.dumps(must_not_imply or []),
                 linked_entity_type,
                 linked_entity_id,
                 branch["branch_depth"] if introduced_at_depth is None else introduced_at_depth,
@@ -400,6 +404,7 @@ class BranchStateService:
             return None
         hook["required_clue_tags"] = json.loads(hook["required_clue_tags_json"] or "[]")
         hook["required_state_tags"] = json.loads(hook["required_state_tags_json"] or "[]")
+        hook["must_not_imply"] = json.loads(hook["must_not_imply_json"] or "[]")
         return hook
 
     def list_hooks(self, branch_key: str, statuses: list[str] | None = None, importance: str | None = None) -> list[dict[str, Any]]:
@@ -416,6 +421,7 @@ class BranchStateService:
         for row in rows:
             row["required_clue_tags"] = json.loads(row["required_clue_tags_json"] or "[]")
             row["required_state_tags"] = json.loads(row["required_state_tags_json"] or "[]")
+            row["must_not_imply"] = json.loads(row["must_not_imply_json"] or "[]")
         return rows
 
     def list_hooks_with_readiness(

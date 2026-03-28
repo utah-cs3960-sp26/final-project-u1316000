@@ -24,6 +24,22 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Do not spend time rediscovering whether `/frontier`, `/jobs/generation-preview`, `/jobs/validate-generation`, and `/jobs/apply-generation` exist. They do.
 - Your job is to continue the story, not audit the codebase.
 
+## Execution Default
+- If the human points you at this file, that means `run the story worker now` unless they explicitly say they only want discussion.
+- Do not stop after summarizing this file.
+- Do not ask for permission to begin the normal worker loop.
+- Your default behavior is:
+  - prepare the run
+  - write one candidate
+  - validate it
+  - apply it if valid
+  - generate any required art
+  - report the pre-change URL and what changed
+- Only pause instead of acting if:
+  - the loop is broken
+  - required tools/endpoints are actually unavailable
+  - the human explicitly asks for analysis only
+
 ## Goal
 - Expand the story one scene at a time.
 - Preserve continuity.
@@ -34,6 +50,38 @@ This is the single file the story-expansion loop should point the LLM at every r
 
 ## What Counts As A Hook
 - A hook is any unresolved mystery, unanswered question, suspicious clue, ominous promise, unknown identity, unexplained cause, or strange thread that should matter later.
+- Hooks may also carry non-canonical planning metadata about where they are probably heading.
+- The most important directional field is `payoff_concept`: a short statement of the intended shape of the eventual answer.
+- `payoff_concept` is for future workers, not for the player. It should guide continuity without implying that the truth is already known in-world.
+- Use `must_not_imply` to record tempting wrong shortcuts or misleading collapses future workers should avoid.
+- Major hooks should almost always have direction. Minor and local hooks can have direction too whenever that helps continuity.
+- Giving a hook direction means saying, in plain English, what kind of answer this mystery is probably growing toward.
+- A good `payoff_concept` is usually:
+  - broad enough to leave room for discovery
+  - specific enough to keep future workers from drifting
+  - not limited to whatever NPC, machine, or location happens to be in the current scene
+- `broad enough` does not mean `vague`.
+- If you already strongly expect a hook to resolve into a known person, place, system, or relationship, say that directly.
+- Good hook direction should be as specific as the current intended truth honestly allows.
+- Example of helpful specificity:
+  - `The unseen station voice is probably Madam Bei using the station's strange acoustics or relays, not a wholly separate mystery person, though the exact mechanism can stay unsettled for now.`
+- That is better than:
+  - `This should later resolve into a true character.`
+- Why:
+  - the first version gives future workers a real direction
+  - the second version only says `do something later` and leaves too much unnecessary ambiguity
+- Good example:
+  - `The bucket hat was given to him by someone from his missing past, and its inner mirror can briefly show near-future or adjacent-memory glimpses for reasons that will matter much later.`
+- Why that works:
+  - it gives a direction
+  - it does not require the answer to belong to the current tram/platform scene
+  - it leaves room for future scenes to discover who gave it, why, and how the mirror really works
+- Bad example:
+  - `The bucket hat is just tram platform equipment and the stitching is its operating manual.`
+- Why that fails:
+  - it collapses a long-range mystery into the nearest available local system
+  - it gives away too much too soon
+  - it narrows the future story instead of guiding it
 - If the player should later wonder:
   - `Who was that?`
   - `What caused that?`
@@ -83,7 +131,9 @@ This is the single file the story-expansion loop should point the LLM at every r
 1. Read this file.
 2. Prefer the one-command prep path first:
    - `python -m app.tools.prepare_story_run`
+   - use `--full-context` only if the compact packet is genuinely insufficient
 3. Use the returned packet as your source of truth for the current run.
+   - Do not summarize the packet and wait. Continue the loop immediately.
 4. If the prep command is unavailable or the human explicitly wants the manual path, ask the backend which branch end to work on:
    - `GET /frontier`
 5. Pick one frontier item.
@@ -118,10 +168,23 @@ This is the single file the story-expansion loop should point the LLM at every r
 - A good rule of thumb:
   - `eligible_major_hooks` may be advanced carefully
   - `blocked_major_hooks` may be teased, complicated, or enriched, but not paid off
+- For blocked major hooks, prefer:
+  - eerie resonance
+  - provenance fragments
+  - partial constraints
+  - suspicious recognition
+  - clues that widen the mystery or sharpen its shape without over-explaining it
+- Avoid a too-short path like:
+  - `big identity mystery -> nearest current NPC/system explains or operationalizes it immediately`
+- In other words:
+  - do not let the first available local system swallow the whole larger mystery
+  - for example if the hat eventually matters to the tram system, earn that connection over multiple clues instead of turning the hat into a platform rulebook the first time they touch
 
 ## Recommended Loop Contract
 1. `python -m app.tools.prepare_story_run`
 2. Read the packet.
+   - The packet already tells you the validation rules, payload shape, current scene canon slice, and next action.
+   - Do not go read models, tests, or random repo files unless the compact packet is genuinely missing something critical.
 3. Produce one `GenerationCandidate`
 4. `POST /jobs/validate-generation`
 5. If valid:
@@ -199,16 +262,26 @@ Strongly recommended fields:
 
 ## Location Vs Object Vs Variant
 - Create a **new linked location** when the player enters a materially distinct playable place, even if it is physically near or inside a broader place.
+- If a choice clearly means travel, arrival, boarding, departure, changing surroundings, or being sent somewhere else, strongly prefer landing in a new linked location unless it is honestly just another angle of the same place.
+- If the new place has a distinct service, ritual, mood, architecture, function, or framing, that is usually a new location rather than a reason to keep reusing the old background.
 - Create an **object** when the thing is reusable, movable, callable, collectible, inspectable, or likely to recur.
 - Use a **same-location visual variant** sparingly for now.
 - The current renderer prefers the latest asset for an entity, so a second background for the same location will usually replace the first one instead of acting like a branch-specific shot.
 - Until explicit active-asset assignment exists, prefer `new linked location + reusable object` over “second background version of the same place.”
 
+## Characters
+- Characters make a story. That is why so much effort was put in to allow characters to be re-occuring. But also do not shy away from creating new characters. Make a plan and if you think it is a good time to introduce a new character go aheadd. They should fit the fantasy setting and be equally whimsical such as a talking conductor frog (which already exists)
+
 ## Visual Responsibility
 - If the scene changes to a visually distinct place, make sure there is a background plan for that place.
-- If a new recurring character enters the story, make sure there is a portrait plan for that character.
+- If the player has clearly arrived somewhere new, `no new art required` is usually the wrong conclusion.
+- If a new recurring character enters the story, make sure there is a portrait plan for that character. Do not be afraid to create a new character if one is needed for the story, but be sure to create a portrait for them. They should fit the fantasy setting and be equally whimsical such as a talking conductor frog (which already exists)
 - If a new reusable or visually important prop matters to play or continuity, make sure there is an object render plan for it.
 - Do not generate art for every passing noun.
+- If a location has not already been visually defined, give it a distinct identity that fits the whimsical fantasy tone while still being simple enough for AI image generation to render cleanly.
+- Prefer strong, readable compositions over overcomplicated descriptions:
+  - good: `brass claim window in a pale mushroom wall, velvet counter, stamped cards, warm lantern glow`
+  - worse: `a hyper-busy maze of dozens of counters, crowds, tiny props, and impossible machinery all competing at once`
 - For brand-new canon entities:
   - create them through the apply step first
   - then generate assets after apply, once the real entity IDs exist

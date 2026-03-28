@@ -454,17 +454,19 @@ class StoryGraphService:
                 self.connection.execute(
                     """
                     INSERT INTO story_hooks (
-                        branch_key, hook_type, importance, summary, linked_entity_type, linked_entity_id,
+                        branch_key, hook_type, importance, summary, payoff_concept, must_not_imply_json, linked_entity_type, linked_entity_id,
                         introduced_at_depth, min_distance_to_payoff, required_clue_tags_json, required_state_tags_json,
                         status, notes
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
                     """,
                     (
                         request_branch_key,
                         hook.hook_type,
                         hook.importance,
                         hook.summary,
+                        hook.payoff_concept,
+                        json.dumps(hook.must_not_imply),
                         hook.linked_entity_type,
                         hook.linked_entity_id,
                         introduced_at_depth,

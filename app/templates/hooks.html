@@ -28,6 +28,9 @@
                 <h3>#{{ hook.id }} · {{ hook.hook_type }} · {{ hook.importance }}</h3>
                 <p>{{ hook.summary }}</p>
                 <p class="meta">Status: {{ hook.status }}</p>
+                {% if hook.payoff_concept %}
+                    <p class="meta">Payoff concept: {{ hook.payoff_concept }}</p>
+                {% endif %}
                 <p class="meta">Introduced at depth {{ hook.introduced_at_depth }} · Min payoff distance {{ hook.min_distance_to_payoff }}</p>
                 <p class="meta">Payoff required depth: {{ hook.readiness.required_depth }} · Remaining distance: {{ hook.readiness.remaining_distance }}</p>
                 <p class="meta">Distance ready: {{ "yes" if hook.readiness.distance_ready else "no" }} · Conditions ready: {{ "yes" if hook.readiness.conditions_ready else "no" }} · Eligible now: {{ "yes" if hook.readiness.eligible else "no" }}</p>
@@ -48,6 +51,9 @@
                 {% endif %}
                 {% if hook.notes %}
                     <p class="meta">Notes: {{ hook.notes }}</p>
+                {% endif %}
+                {% if hook.must_not_imply %}
+                    <p class="meta">Must not imply: {{ hook.must_not_imply | join("; ") }}</p>
                 {% endif %}
             </article>
         {% endfor %}

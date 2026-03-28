@@ -228,6 +228,8 @@ SCHEMA_STATEMENTS = [
         hook_type TEXT NOT NULL,
         importance TEXT NOT NULL DEFAULT 'minor',
         summary TEXT NOT NULL,
+        payoff_concept TEXT,
+        must_not_imply_json TEXT NOT NULL DEFAULT '[]',
         linked_entity_type TEXT,
         linked_entity_id INTEGER,
         introduced_at_depth INTEGER NOT NULL DEFAULT 0,
@@ -264,6 +266,8 @@ def bootstrap_database(database_path: str | Path) -> None:
         _ensure_column(connection, "story_node_present_entities", "offset_y_percent", "REAL NOT NULL DEFAULT 0")
         _ensure_column(connection, "assets", "display_class", "TEXT")
         _ensure_column(connection, "assets", "normalization_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(connection, "story_hooks", "payoff_concept", "TEXT")
+        _ensure_column(connection, "story_hooks", "must_not_imply_json", "TEXT NOT NULL DEFAULT '[]'")
         connection.commit()
 
 

@@ -543,6 +543,63 @@ def test_seed_opening_story_creates_long_range_major_hooks(tmp_path: Path) -> No
     assert body_hook["min_distance_to_payoff"] == 20
     assert hat_hook["introduced_at_depth"] == 0
     assert body_hook["introduced_at_depth"] == 0
+    assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
+    assert hat_hook["must_not_imply"]
+    assert "deliberate intervention" in (body_hook["payoff_concept"] or "").lower()
+    assert body_hook["must_not_imply"]
+
+
+def test_create_story_hook_route_persists_direction_fields(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/branches/default/hooks",
+        json={
+            "hook_type": "minor_mystery",
+            "importance": "minor",
+            "summary": "A brass slot hums your missing name but refuses to print it.",
+            "payoff_concept": "The slot is connected to the same paperwork logic that keeps misnaming the protagonist.",
+            "must_not_imply": [
+                "Do not treat the slot as a random one-scene gag.",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    hook = response.json()
+    assert "paperwork logic" in hook["payoff_concept"]
+    assert hook["must_not_imply"] == ["Do not treat the slot as a random one-scene gag."]
+
+
+def test_seed_opening_story_backfills_existing_major_hook_direction(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    reset_response = client.post("/story/reset-opening-canon")
+    assert reset_response.status_code == 200
+
+    hook_response = client.post(
+        "/branches/default/hooks",
+        json={
+            "hook_type": "identity_mystery",
+            "importance": "major",
+            "summary": (
+                "The striped bucket hat, the lost first name, the amnesia, and waking in the Mushroom Field "
+                "all point to the same hidden past event."
+            ),
+            "min_distance_to_payoff": 20,
+        },
+    )
+    assert hook_response.status_code == 200
+    assert hook_response.json()["payoff_concept"] is None
+
+    seed_response = client.post("/story/seed-opening-story")
+    assert seed_response.status_code == 200
+
+    hooks = client.get("/branches/default/hooks").json()
+    hat_hook = next(
+        hook for hook in hooks
+        if "bucket hat" in hook["summary"].lower() and hook["importance"] == "major"
+    )
+    assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
+    assert any("tram uniform gear" in guardrail.lower() for guardrail in hat_hook["must_not_imply"])
 
 
 def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) -> None:
@@ -1069,13 +1126,43 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
     assert result.returncode == 0
     packet = json.loads(result.stdout)
     assert "Everything is already wired through" in packet["message"]
+    assert "continue the worker loop immediately" in packet["message"]
     assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
     assert packet["selected_frontier_item"]["choice_id"] is not None
     assert packet["preview_payload"]["branch_key"] == "default"
     assert packet["context_summary"]["branch_key"] == "default"
+    assert "focus_canon_slice" in packet
+    assert "validation_checklist" in packet
+    assert "candidate_template" in packet
+    assert "endpoint_contract" in packet
+    assert "full_context" not in packet
     assert "eligible_major_hooks" in packet["context_summary"]
     assert "blocked_major_hooks" in packet["context_summary"]
-    assert packet["next_action"].startswith("Return one GenerationCandidate JSON only")
+    assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
+
+
+def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--full-context",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert "full_context" in packet
 
 
 def test_branch_hooks_endpoint_and_ui_show_readiness(tmp_path: Path) -> None:

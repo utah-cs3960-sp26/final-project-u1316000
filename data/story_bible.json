@@ -62,10 +62,21 @@
     "definition": "A hook is any unresolved mystery, unanswered question, suspicious clue, unknown identity, ominous promise, or unexplained causal thread that should matter later.",
     "rules": [
       "If a scene introduces something the player is meant to keep wondering about, it should usually become a hook immediately.",
+      "Hooks may carry a non-canonical payoff_concept so future workers know the intended direction of the eventual answer.",
+      "payoff_concept is planning guidance, not player-visible truth.",
+      "Hooks may also carry must_not_imply guardrails to prevent tempting wrong shortcuts.",
+      "Major hooks should almost always have direction. Minor and local hooks can have direction too whenever that improves continuity.",
+      "Giving a hook direction means naming the general shape of the eventual answer without forcing it to belong to the current local scene.",
+      "A strong payoff_concept should guide future workers while still leaving room for discovery.",
+      "Broad direction does not mean vague direction.",
+      "If the intended answer already strongly points at a known character, place, or system, say so directly in the hook guidance.",
+      "Prefer broad directional concepts over over-binding a major mystery to the nearest currently available system.",
       "Placeholder mystery entities such as an unseen voice, unknown figure, or unnamed recurring presence count as hooks if they are meant to matter later.",
       "When a mystery is anchored to a place, object, or recurring person, link the hook to that entity when possible.",
       "min_distance_to_payoff and required clue/state tags are real pacing constraints, not flavor text.",
-      "Major hooks should generally only pay off when they are surfaced as eligible by the branch context."
+      "Major hooks should generally only pay off when they are surfaced as eligible by the branch context.",
+      "Blocked major hooks should usually gain ambiguity, provenance hints, eerie recognition, or partial constraints rather than immediate local-system instructions.",
+      "Do not let the first nearby recurring NPC, transit system, or strange machine absorb a long-range identity mystery just because it is available in the current scene."
     ]
   },
   "branching_policy": {
@@ -100,7 +111,10 @@
       "Line-by-line reveal and hide behavior is valid when it helps staging or readability.",
       "Full-body characters may let part of the lower body disappear behind the lower HUD when the composition benefits.",
       "Avoid placing a large center foreground object directly under a large hero-center character unless the overlap is intentional.",
-      "Character and object cutouts should be normalized into standard transparent frames so scenes usually work without hand-tuned scale values."
+      "Character and object cutouts should be normalized into standard transparent frames so scenes usually work without hand-tuned scale values.",
+      "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.",
+      "If the player has clearly arrived somewhere new, reusing the old background to avoid art generation is usually the wrong move.",
+      "If a location has not yet been visually defined, give it a distinct, readable identity that fits the whimsical fantasy setting without overcomplicating the image prompt."
     ]
   },
   "acts": {

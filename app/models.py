@@ -158,6 +158,8 @@ class StoryHookCreate(BaseModel):
     hook_type: str
     importance: HookImportance = "minor"
     summary: str
+    payoff_concept: str | None = None
+    must_not_imply: list[str] = Field(default_factory=list)
     linked_entity_type: RelationEntityType | None = None
     linked_entity_id: int | None = None
     introduced_at_depth: int | None = None
@@ -188,6 +190,8 @@ class HookProposal(BaseModel):
     hook_type: str
     importance: HookImportance = "minor"
     summary: str
+    payoff_concept: str | None = None
+    must_not_imply: list[str] = Field(default_factory=list)
     linked_entity_type: RelationEntityType | None = None
     linked_entity_id: int | None = None
     min_distance_to_payoff: int = 0
