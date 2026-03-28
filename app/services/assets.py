@@ -152,15 +152,21 @@ class AssetService:
                 entity_id=entity_id,
                 preferred_kinds=preferred_kinds,
             )
+            raw_scale = entity.get("scale")
+            raw_offset_x = entity.get("offset_x_percent")
+            raw_offset_y = entity.get("offset_y_percent")
             actor = {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
                 "slot": entity["slot"],
                 "focus": bool(entity.get("focus", False)),
-                "scale": float(entity.get("scale", 1.0)),
+                "scale": float(raw_scale) if raw_scale is not None else 1.0,
+                "offset_x_percent": float(raw_offset_x) if raw_offset_x is not None else 0.0,
+                "offset_y_percent": float(raw_offset_y) if raw_offset_y is not None else 0.0,
                 "hidden_on_lines": list(entity.get("hidden_on_lines", [])),
                 "use_player_fallback": bool(entity.get("use_player_fallback", False)),
                 "asset_kind": asset["asset_kind"] if asset is not None else None,
+                "display_class": self.get_asset_display_class(asset) if asset is not None else None,
                 "asset_url": self.media_url_for_path(asset["file_path"]) if asset is not None else None,
             }
             actors.append(actor)
@@ -174,15 +180,26 @@ class AssetService:
         entity_id: int,
         asset_kind: str,
         file_path: str,
+        display_class: str | None = None,
+        normalization: dict[str, Any] | None = None,
         prompt_text: str | None = None,
         status: str = "ready",
     ) -> dict[str, Any]:
         cursor = self.connection.execute(
             """
-            INSERT INTO assets (entity_type, entity_id, asset_kind, file_path, prompt_text, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO assets (entity_type, entity_id, asset_kind, file_path, display_class, normalization_json, prompt_text, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (entity_type, entity_id, asset_kind, file_path, prompt_text, status),
+            (
+                entity_type,
+                entity_id,
+                asset_kind,
+                file_path,
+                display_class,
+                json.dumps(normalization or {}),
+                prompt_text,
+                status,
+            ),
         )
         self.connection.commit()
         return fetch_one(self.connection, "SELECT * FROM assets WHERE id = ?", (cursor.lastrowid,)) or {}
@@ -308,18 +325,26 @@ class AssetService:
             entity_id=entity_id,
             asset_kind=asset_kind,
             file_path=str(final_path),
+            display_class=self.infer_display_class(entity_type=entity_type, asset_kind=asset_kind),
             prompt_text=json.dumps(generation_metadata),
         )
 
         cutout_asset = None
         if should_remove_background:
             cutout_name = f"{safe_name}-cutout.png"
-            cutout_path = self.remove_background(source_image_path=str(final_path), output_name=cutout_name)
+            cutout_result = self.remove_background(
+                source_image_path=str(final_path),
+                output_name=cutout_name,
+                entity_type=entity_type,
+                asset_kind=asset_kind,
+            )
             cutout_asset = self.add_asset(
                 entity_type=entity_type,
                 entity_id=entity_id,
                 asset_kind="cutout",
-                file_path=cutout_path,
+                file_path=cutout_result["output_path"],
+                display_class=cutout_result["display_class"],
+                normalization=cutout_result["normalization"],
                 prompt_text=json.dumps({"source_asset_id": generated_asset["id"], **generation_metadata}),
             )
 
@@ -450,7 +475,9 @@ class AssetService:
         output_name: str | None = None,
         model_repo: str = "briaai/RMBG-2.0",
         device: str = "auto",
-    ) -> str:
+        entity_type: str | None = None,
+        asset_kind: str | None = None,
+    ) -> dict[str, Any]:
         directories = self.ensure_asset_directories()
         input_path = Path(source_image_path).expanduser().resolve()
         if not input_path.exists():
@@ -471,6 +498,7 @@ class AssetService:
 
         image = Image.open(input_path).convert("RGB")
         original_size = image.size
+        display_class = self.infer_display_class(entity_type=entity_type, asset_kind=asset_kind or "cutout")
 
         model_source = self.resolve_local_model_path(model_repo)
         if model_source is not None:
@@ -482,6 +510,7 @@ class AssetService:
                     onnx_model_path=onnx_model_path,
                     image=image,
                     original_size=original_size,
+                    display_class=display_class,
                 )
 
         import torch
@@ -517,9 +546,14 @@ class AssetService:
         alpha_mask = Image.fromarray(mask_array, mode="L").resize(original_size)
         cutout = image.copy()
         cutout.putalpha(alpha_mask)
+        cutout, normalization = self.normalize_cutout_frame(cutout, display_class=display_class)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cutout.save(output_path)
-        return str(output_path)
+        return {
+            "output_path": str(output_path),
+            "display_class": display_class,
+            "normalization": normalization,
+        }
 
     def _remove_background_with_onnx(
         self,
@@ -529,7 +563,8 @@ class AssetService:
         onnx_model_path: Path,
         image,
         original_size: tuple[int, int],
-    ) -> str:
+        display_class: str,
+    ) -> dict[str, Any]:
         import numpy as np
         import onnxruntime as ort
         from PIL import Image
@@ -550,6 +585,95 @@ class AssetService:
         alpha_mask = Image.fromarray(mask_array, mode="L").resize(original_size)
         cutout = Image.open(input_path).convert("RGB")
         cutout.putalpha(alpha_mask)
+        cutout, normalization = self.normalize_cutout_frame(cutout, display_class=display_class)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cutout.save(output_path)
-        return str(output_path)
+        return {
+            "output_path": str(output_path),
+            "display_class": display_class,
+            "normalization": normalization,
+        }
+
+    def trim_transparent_canvas(self, image):
+        alpha_channel = image.getchannel("A")
+        bounding_box = alpha_channel.getbbox()
+        if bounding_box is None:
+            return image
+        return image.crop(bounding_box)
+
+    def infer_display_class(self, *, entity_type: str | None, asset_kind: str | None) -> str | None:
+        if asset_kind == "background" or entity_type == "location":
+            return "background-scene"
+        if entity_type == "character" or asset_kind == "portrait":
+            return "character-fullbody"
+        if entity_type == "object" or asset_kind == "object_render":
+            return "object-featured"
+        return None
+
+    def get_asset_display_class(self, asset: dict[str, Any]) -> str | None:
+        return asset.get("display_class") or self.infer_display_class(
+            entity_type=asset.get("entity_type"),
+            asset_kind=asset.get("asset_kind"),
+        )
+
+    def normalize_cutout_frame(self, image, *, display_class: str | None):
+        from PIL import Image
+
+        trimmed = self.trim_transparent_canvas(image)
+        alpha_channel = trimmed.getchannel("A")
+        bounding_box = alpha_channel.getbbox()
+        if bounding_box is None:
+            normalization = {
+                "method": "none",
+                "display_class": display_class,
+                "canvas_size": list(trimmed.size),
+                "content_size": [0, 0],
+            }
+            return trimmed, normalization
+
+        content_width, content_height = trimmed.size
+
+        if display_class == "character-fullbody":
+            canvas_size = (1024, 1536)
+            target_height = int(canvas_size[1] * 0.9)
+            scale = target_height / max(content_height, 1)
+            scaled_width = max(1, int(round(content_width * scale)))
+            scaled_height = max(1, int(round(content_height * scale)))
+            resized = trimmed.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+            x = max(0, (canvas_size[0] - scaled_width) // 2)
+            baseline = int(canvas_size[1] * 0.96)
+            y = max(0, baseline - scaled_height)
+        elif display_class == "object-featured":
+            canvas_size = (1024, 1024)
+            target_width = int(canvas_size[0] * 0.82)
+            target_height = int(canvas_size[1] * 0.62)
+            scale = min(target_width / max(content_width, 1), target_height / max(content_height, 1))
+            scaled_width = max(1, int(round(content_width * scale)))
+            scaled_height = max(1, int(round(content_height * scale)))
+            resized = trimmed.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+            x = max(0, (canvas_size[0] - scaled_width) // 2)
+            y = max(0, (canvas_size[1] - scaled_height) // 2)
+        else:
+            canvas_size = trimmed.size
+            scaled_width = content_width
+            scaled_height = content_height
+            resized = trimmed
+            canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+            x = 0
+            y = 0
+
+        canvas.alpha_composite(resized, (x, y))
+        normalization = {
+            "method": "standard_frame",
+            "display_class": display_class,
+            "canvas_size": [canvas_size[0], canvas_size[1]],
+            "content_size": [scaled_width, scaled_height],
+            "content_offset": [x, y],
+            "content_ratio": {
+                "width": round(scaled_width / max(canvas_size[0], 1), 4),
+                "height": round(scaled_height / max(canvas_size[1], 1), 4),
+            },
+        }
+        return canvas, normalization

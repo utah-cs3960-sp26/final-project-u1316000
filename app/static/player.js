@@ -23,6 +23,32 @@ let typedCharacterCount = 0;
 let typingTimer = null;
 let isTyping = false;
 let hasReachedChoices = false;
+let isHudHidden = false;
+
+function getSceneKeyFromUrl() {
+    const url = new URL(window.location.href);
+    const requestedScene = url.searchParams.get("scene");
+    if (requestedScene && storyData.scenes[requestedScene]) {
+        return requestedScene;
+    }
+    return storyData.start_scene;
+}
+
+function writeSceneKeyToUrl(sceneKey, replaceHistory = false) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("scene", sceneKey);
+    if (!url.searchParams.get("branch_key")) {
+        url.searchParams.set("branch_key", "default");
+    }
+
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    const state = { scene: sceneKey };
+    if (replaceHistory) {
+        window.history.replaceState(state, "", nextUrl);
+        return;
+    }
+    window.history.pushState(state, "", nextUrl);
+}
 
 function getCurrentScene() {
     return storyData.scenes[currentSceneKey];
@@ -91,12 +117,18 @@ function renderActors(scene) {
 
         const actorElement = document.createElement("div");
         actorElement.className = `scene-actor slot-${actor.slot}`;
+        actorElement.classList.add(`entity-${actor.entity_type}`);
+        if (actor.asset_kind) {
+            actorElement.classList.add(`asset-${actor.asset_kind}`);
+        }
         if (actor.focus) {
             actorElement.classList.add("focus");
         }
-        actorElement.style.transform = actor.scale
-            ? `translateX(${actor.slot === "hero-center" || actor.slot === "center-foreground-object" ? "-50%" : "0"}) scale(${actor.scale})`
-            : "";
+        const baseTranslateX = actor.slot === "hero-center" || actor.slot === "center-foreground-object" ? "-50%" : "0";
+        const offsetX = Number(actor.offset_x_percent || 0);
+        const offsetY = Number(actor.offset_y_percent || 0);
+        const scale = Number(actor.scale || 1);
+        actorElement.style.transform = `translate(${baseTranslateX}, 0) translate(${offsetX}%, ${offsetY}%) scale(${scale})`;
 
         if (actor.asset_url) {
             const image = document.createElement("img");
@@ -161,11 +193,23 @@ function renderChoices() {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "choice-button";
+        const isResolved = Boolean(choice.resolved && choice.target);
+        if (!isResolved) {
+            button.classList.add("choice-pending");
+            button.disabled = true;
+        }
         button.innerHTML = `
             <span class="choice-number">${index + 1}</span>
             <span class="choice-label">${choice.label}</span>
+            ${!isResolved ? '<span class="choice-status">Still being woven</span>' : ""}
         `;
-        button.addEventListener("click", () => startScene(choice.target));
+        button.addEventListener("click", () => {
+            if (!isResolved) {
+                setStatus("That path is still being woven.");
+                return;
+            }
+            startScene(choice.target);
+        });
         choicesPanel.appendChild(button);
     });
 }
@@ -202,16 +246,23 @@ function advanceDialogue() {
     finishScene();
 }
 
-function startScene(sceneKey) {
+function startScene(sceneKey, options = {}) {
     stopTyping();
     currentSceneKey = sceneKey;
     currentLineIndex = 0;
+    writeSceneKeyToUrl(sceneKey, Boolean(options.replaceHistory));
     typeCurrentLine();
 }
 
 function restartAdventure() {
     settingsMenu.classList.add("hidden");
-    startScene(storyData.start_scene);
+    startScene(storyData.start_scene, { replaceHistory: true });
+}
+
+function toggleHud() {
+    isHudHidden = !isHudHidden;
+    document.body.classList.toggle("hud-hidden", isHudHidden);
+    settingsMenu.classList.add("hidden");
 }
 
 continueButton.addEventListener("click", advanceDialogue);
@@ -231,6 +282,12 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+    if (event.key === "h" || event.key === "H") {
+        event.preventDefault();
+        toggleHud();
+        return;
+    }
+
     if (event.code === "Space") {
         event.preventDefault();
         advanceDialogue();
@@ -242,10 +299,22 @@ document.addEventListener("keydown", (event) => {
         if (event.key >= "1" && event.key <= String(Math.min(scene.choices.length, 9))) {
             const index = Number.parseInt(event.key, 10) - 1;
             if (scene.choices[index]) {
-                startScene(scene.choices[index].target);
+                const choice = scene.choices[index];
+                if (choice.resolved && choice.target) {
+                    startScene(choice.target);
+                } else {
+                    setStatus("That path is still being woven.");
+                }
             }
         }
     }
 });
 
-startScene(storyData.start_scene);
+window.addEventListener("popstate", () => {
+    const sceneKey = getSceneKeyFromUrl();
+    if (sceneKey !== currentSceneKey) {
+        startScene(sceneKey, { replaceHistory: true });
+    }
+});
+
+startScene(getSceneKeyFromUrl(), { replaceHistory: true });

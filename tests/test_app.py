@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -37,6 +39,7 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "relations",
         "facts",
         "story_nodes",
+        "story_node_present_entities",
         "choices",
         "node_entities",
         "assets",
@@ -327,6 +330,38 @@ def test_character_generation_prompt_enforces_subject_only_rules(tmp_path: Path)
     assert "full body is in view" in prompt
 
 
+def test_trim_transparent_canvas_removes_empty_padding(tmp_path: Path) -> None:
+    from app.services.assets import AssetService
+
+    with connect(tmp_path / "trim_test.db") as connection:
+        service = AssetService(connection, tmp_path)
+        image = Image.new("RGBA", (100, 100), color=(0, 0, 0, 0))
+        for x in range(30, 70):
+            for y in range(20, 80):
+                image.putpixel((x, y), (200, 120, 90, 255))
+
+        trimmed = service.trim_transparent_canvas(image)
+
+    assert trimmed.size == (40, 60)
+
+
+def test_normalize_cutout_frame_uses_standard_character_canvas(tmp_path: Path) -> None:
+    from app.services.assets import AssetService
+
+    with connect(tmp_path / "normalize_test.db") as connection:
+        service = AssetService(connection, tmp_path)
+        image = Image.new("RGBA", (120, 160), color=(0, 0, 0, 0))
+        for x in range(20, 100):
+            for y in range(20, 150):
+                image.putpixel((x, y), (210, 150, 90, 255))
+
+        normalized, metadata = service.normalize_cutout_frame(image, display_class="character-fullbody")
+
+    assert normalized.size == (1024, 1536)
+    assert metadata["display_class"] == "character-fullbody"
+    assert metadata["content_ratio"]["height"] >= 0.89
+
+
 def test_portrait_generation_automatically_creates_cutout(tmp_path: Path, monkeypatch) -> None:
     output_dir = tmp_path / "comfy_output" / "portrait"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -364,11 +399,24 @@ def test_portrait_generation_automatically_creates_cutout(tmp_path: Path, monkey
 
     monkeypatch.setattr(assets_module.AssetService, "import_generated_asset", fake_import_generated_asset)
 
-    def fake_remove_background(self, *, source_image_path, output_name=None, model_repo="briaai/RMBG-2.0", device="auto"):
+    def fake_remove_background(
+        self,
+        *,
+        source_image_path,
+        output_name=None,
+        model_repo="briaai/RMBG-2.0",
+        device="auto",
+        entity_type=None,
+        asset_kind=None,
+    ):
         cutout = tmp_path / "cutouts" / (output_name or "portrait-cutout.png")
         cutout.parent.mkdir(parents=True, exist_ok=True)
         cutout.write_bytes(Path(source_image_path).read_bytes())
-        return str(cutout)
+        return {
+            "output_path": str(cutout),
+            "display_class": "character-fullbody",
+            "normalization": {"method": "test"},
+        }
 
     monkeypatch.setattr(assets_module.AssetService, "remove_background", fake_remove_background)
 
@@ -592,6 +640,122 @@ def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path
     assert "Major mysteries must not resolve" in data["prompt"]
 
 
+def test_frontier_returns_open_branch_ends(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    response = client.get("/frontier")
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) >= 3
+    assert all(item["choice_id"] is not None for item in items)
+    assert all("selection_score" in item for item in items)
+    assert all("selection_reason" in item for item in items)
+
+
+def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "The Velvet Mushroom",
+                "scene_summary": "The marked mushroom answers with a weird little secret.",
+                "scene_text": "You follow the groove to a mushroom that seems to be waiting for you.",
+                "dialogue_lines": [
+                    {"speaker": "Narrator", "text": "The velvet-marked mushroom leans closer, although mushrooms should not lean."},
+                    {"speaker": "You", "text": "That feels rude, somehow."},
+                ],
+                "scene_present_entities": [
+                    {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True, "scale": 1.16}
+                ],
+                "choices": [
+                    {"choice_text": "Knock on the mushroom stem"},
+                    {"choice_text": "Circle around the velvet knot"},
+                ],
+                "discovered_clue_tags": ["velvet-mushroom-found"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["node"]["title"] == "The Velvet Mushroom"
+    assert len(data["created_choices"]) == 2
+
+    nodes = client.get("/story-nodes").json()
+    created_node = next(node for node in nodes if node["title"] == "The Velvet Mushroom")
+    assert len(created_node["present_entities"]) == 1
+    assert created_node["choices"][0]["to_node_id"] is None
+
+    refreshed_frontier = client.get("/frontier").json()
+    assert all(item["choice_id"] != frontier_item["choice_id"] for item in refreshed_frontier)
+
+    branch_state = client.get("/branches/default/state").json()
+    assert any(tag["tag"] == "velvet-mushroom-found" for tag in branch_state["tags"])
+
+
+def test_apply_generation_rejects_invalid_candidate_without_partial_write(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+    before_nodes = client.get("/story-nodes").json()
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_summary": "An invalid candidate.",
+                "scene_text": "This tries to apply without choices.",
+                "choices": [],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    after_nodes = client.get("/story-nodes").json()
+    assert len(after_nodes) == len(before_nodes)
+
+
+def test_apply_generation_rejects_missing_affordance_choice_write(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_summary": "A goose appears from nowhere.",
+                "scene_text": "An impossible shortcut is offered.",
+                "choices": [
+                    {
+                        "choice_text": "Blow the goose whistle",
+                        "required_affordances": ["Call the Goose"],
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+
+
 def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkeypatch) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/reset-opening-canon")
@@ -601,10 +765,23 @@ def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkey
 
     from app.services import assets as assets_module
 
-    def fake_remove_background(self, *, source_image_path, output_name=None, model_repo="briaai/RMBG-2.0", device="auto"):
+    def fake_remove_background(
+        self,
+        *,
+        source_image_path,
+        output_name=None,
+        model_repo="briaai/RMBG-2.0",
+        device="auto",
+        entity_type=None,
+        asset_kind=None,
+    ):
         cutout = tmp_path / (output_name or "cutout.png")
         Image.open(source_image_path).convert("RGBA").save(cutout)
-        return str(cutout)
+        return {
+            "output_path": str(cutout),
+            "display_class": "character-fullbody",
+            "normalization": {"method": "test"},
+        }
 
     monkeypatch.setattr(assets_module.AssetService, "remove_background", fake_remove_background)
 
@@ -627,13 +804,7 @@ def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkey
 
 def test_play_resolves_asset_backed_scene_media(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
-    client.post(
-        "/seed-world",
-        json={
-            "locations": [{"name": "Mushroom Field"}],
-            "characters": [{"name": "The Tall Gnome"}],
-        },
-    )
+    client.post("/story/seed-opening-story")
 
     project_root = Path(__file__).resolve().parents[1]
     fixture_dir = project_root / "data" / "assets" / "test-fixtures"
@@ -663,6 +834,7 @@ def test_play_resolves_asset_backed_scene_media(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert f"/media/test-fixtures/{background_path.name}" in response.text
         assert f"/media/test-fixtures/{cutout_path.name}" in response.text
+        assert "Follow the grooves beneath the velvet-marked mushroom" in response.text
     finally:
         if background_path.exists():
             background_path.unlink()
@@ -672,6 +844,25 @@ def test_play_resolves_asset_backed_scene_media(tmp_path: Path) -> None:
             fixture_dir.rmdir()
         except OSError:
             pass
+
+
+def test_play_scene_query_sets_start_scene_permalink(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    nodes = client.get("/story-nodes").json()
+    target_scene_id = str(nodes[1]["id"])
+
+    response = client.get(f"/play?branch_key=default&scene={target_scene_id}")
+    assert response.status_code == 200
+
+    match = re.search(
+        r'<script id="player-story-data" type="application/json">(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    assert match is not None
+    story_data = json.loads(match.group(1))
+    assert story_data["start_scene"] == target_scene_id
 
 
 def test_ui_pages_render(tmp_path: Path) -> None:
@@ -693,3 +884,7 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     assert "Restart Adventure" in player_page.text
     assert "Mushroom Field" in player_page.text
     assert "actors-layer" in player_page.text
+    death_page = client.get("/play/death")
+    assert death_page.status_code == 200
+    assert "You Died" in death_page.text
+    assert "Restart Adventure" in death_page.text

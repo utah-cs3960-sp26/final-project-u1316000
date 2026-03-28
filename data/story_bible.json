@@ -37,6 +37,16 @@
     "Strange creatures, objects, and customs may exist, but once introduced they must stay consistent.",
     "Whimsical quests and side journeys are welcome as long as they feel consequential and memorable."
   ],
+  "stakes_policy": {
+    "danger_and_death_allowed": true,
+    "danger_and_death_required": false,
+    "principles": [
+      "Danger, failure, and even death are valid story outcomes, but they are not mandatory for a satisfying arc.",
+      "Use stakes that fit the tone of the scene: wonder, embarrassment, loss, delay, transformation, danger, or death can all matter.",
+      "Fatal outcomes should feel earned or resonant rather than edgy for its own sake.",
+      "The player may restart from saved scene entry points, but death should still carry tonal weight when it happens."
+    ]
+  },
   "beat_budget": {
     "max_major_hook_advances_per_scene": 1,
     "max_new_major_hooks_per_scene": 1,
@@ -46,6 +56,40 @@
       "Do not resolve a major mystery immediately after introducing it.",
       "Let side quests, social beats, and local absurdities breathe without always advancing the main plot.",
       "Prefer one meaningful escalation over many shallow reveals."
+    ]
+  },
+  "branching_policy": {
+    "default_choice_range": [2, 3],
+    "allow_single_choice_for_forced_beats": true,
+    "allow_more_than_three_choices_rarely": true,
+    "cycles_are_good": true,
+    "merges_require_branch_state_compatibility": true,
+    "quick_merges_are_good": true,
+    "quick_merge_definition": "A quick merge is when a brief informational or tonal detour leads back into the same larger event because the branch difference is small enough that the next scene still logically converges.",
+    "quick_merge_examples": [
+      "A -> examine the five thumbs -> C",
+      "A -> follow the silver tracks -> C"
+    ],
+    "notes": [
+      "Do not force three new branches every scene.",
+      "Let some scenes narrow, some widen, and some loop back into existing problems or places.",
+      "Use quick merges for minor inspection choices, small lore reveals, or brief character beats before a larger event that would happen either way.",
+      "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge."
+    ]
+  },
+  "visual_policy": {
+    "new_recurring_character_requires_art": true,
+    "new_visually_distinct_linked_location_requires_art": true,
+    "new_reusable_visually_important_object_requires_art": true,
+    "prefer_new_linked_location_over_same_location_variant": true,
+    "prefer_reusable_object_for_notable_vehicles_or_props": true,
+    "same_location_variants_are_temporary_and_should_be_used_sparingly": true,
+    "presentation_notes": [
+      "A single scene may show multiple actors or objects at once.",
+      "Line-by-line reveal and hide behavior is valid when it helps staging or readability.",
+      "Full-body characters may let part of the lower body disappear behind the lower HUD when the composition benefits.",
+      "Avoid placing a large center foreground object directly under a large hero-center character unless the overlap is intentional.",
+      "Character and object cutouts should be normalized into standard transparent frames so scenes usually work without hand-tuned scale values."
     ]
   },
   "acts": {

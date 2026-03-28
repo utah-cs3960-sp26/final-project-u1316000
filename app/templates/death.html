@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/player.css') }}">
+</head>
+<body class="player-body death-body">
+    <main class="death-root">
+        <div class="death-backdrop" aria-hidden="true">
+            <div class="death-glow"></div>
+            <div class="death-vignette"></div>
+        </div>
+
+        <section class="death-panel" aria-label="Death screen">
+            <p class="death-kicker">The Adventure Pauses Here</p>
+            <h1 class="death-title">You Died</h1>
+            <p class="death-copy">
+                The world keeps going, but this path has closed. You can return to the beginning and try another route.
+            </p>
+            <a class="death-restart-button" href="{{ restart_url }}">Restart Adventure</a>
+        </section>
+    </main>
+</body>
+</html>

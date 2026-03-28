@@ -73,13 +73,39 @@ class EntityReference(BaseModel):
     role: str = "mentioned"
 
 
+class DialogueLine(BaseModel):
+    speaker: str = "Narrator"
+    text: str
+
+
+class ScenePresentEntity(BaseModel):
+    entity_type: RelationEntityType
+    entity_id: int
+    slot: Literal[
+        "hero-center",
+        "left-support",
+        "right-support",
+        "left-foreground-object",
+        "right-foreground-object",
+        "center-foreground-object",
+    ]
+    scale: float | None = None
+    offset_x_percent: float = 0.0
+    offset_y_percent: float = 0.0
+    focus: bool = False
+    hidden_on_lines: list[int] = Field(default_factory=list)
+    use_player_fallback: bool = False
+
+
 class StoryNodeCreate(BaseModel):
     branch_key: str = "default"
     title: str | None = None
     scene_text: str
     summary: str | None = None
     parent_node_id: int | None = None
+    dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     referenced_entities: list[EntityReference] = Field(default_factory=list)
+    present_entities: list[ScenePresentEntity] = Field(default_factory=list)
 
 
 class ChoiceCreate(BaseModel):
@@ -145,8 +171,9 @@ class StoryHookCreate(BaseModel):
 class GenerationPayload(BaseModel):
     branch_key: str = "default"
     current_node_id: int | None = None
+    choice_id: int | None = None
     focus_entity_ids: list[int] = Field(default_factory=list)
-    requested_choice_count: int = 3
+    requested_choice_count: int = 2
     branch_summary: str | None = None
 
 
@@ -208,8 +235,10 @@ class GenerationCandidate(BaseModel):
     scene_title: str | None = None
     scene_summary: str
     scene_text: str
+    dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     choices: list[GeneratedChoice]
     entity_references: list[EntityReference] = Field(default_factory=list)
+    scene_present_entities: list[ScenePresentEntity] = Field(default_factory=list)
     fact_updates: list[FactSeed] = Field(default_factory=list)
     relation_updates: list[RelationSeed] = Field(default_factory=list)
     new_hooks: list[HookProposal] = Field(default_factory=list)
@@ -264,6 +293,13 @@ class BackgroundRemovalRequest(BaseModel):
     entity_id: int | None = None
     model_repo: str = "briaai/RMBG-2.0"
     device: Literal["auto", "cpu", "cuda"] = "auto"
+
+
+class ApplyGenerationRequest(BaseModel):
+    branch_key: str = "default"
+    parent_node_id: int
+    choice_id: int | None = None
+    candidate: GenerationCandidate
 
 
 GenerationCandidate.model_rebuild()

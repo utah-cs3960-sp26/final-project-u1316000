@@ -14,6 +14,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
 - Structured LLM generation preview and validation workflow with hook pacing guardrails.
+- One-scene story expansion loop support with a frontier endpoint and apply-generation writeback.
 - ComfyUI-backed image generation plus a local Hugging Face background-removal path.
 
 ## What Is Not Built Yet
@@ -36,6 +37,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 ## Useful Pages
 - `/` overview dashboard
 - `/play` player-view prototype
+- `/play/death` death-screen prototype
 - `/ui/seed` manual world seeding
 - `/ui/locations` canonical locations
 - `/ui/characters` canonical characters
@@ -45,6 +47,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `/ui/jobs` generation job placeholders
 - `/story-bible` story bible JSON
 - `/branches/default/state` aggregated branch state snapshot
+- `/frontier` scored open branch ends for the next LLM run
 
 ## Current Player Demo
 - `/play` still uses hardcoded opening dialogue/choices, but it now resolves its background and actor art from SQLite-backed assets.
@@ -58,6 +61,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/services/story_graph.py` story nodes, choices, node-entity links, and jobs
 - `app/services/branch_state.py` per-branch inventory, affordances, tags, relationships, and hooks
 - `app/services/generation.py` story bible loading, context building, and generation validation
+- `app/services/story_graph.py` now also handles frontier listing, scene presentation metadata, and apply-generation writeback
 - `app/services/assets.py` asset metadata, job queueing, Hugging Face model download, and background removal
 - `app/services/story_setup.py` soft-reset opening canon and protagonist asset refresh helpers
 - `workflows/comfyui/` ComfyUI workflow templates for editor use and API submission
@@ -95,8 +99,14 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - `story_hooks`
 - Use `POST /jobs/generation-preview` to build a structured LLM prompt context from the story bible, canon, and branch state.
 - Use `POST /jobs/validate-generation` to check a candidate scene against hook pacing and affordance continuity rules before writing it into the graph.
+- Use `GET /frontier` to pick the next unresolved branch end.
+- Use `POST /jobs/apply-generation` to atomically write a validated scene into the story graph.
+- Default worker behavior should be `2` or `3` choices per scene, not a rigid `3` forever.
+- Cycles are fine. Merges should be used carefully when branch-local state still lines up.
 - Use `POST /story/reset-opening-canon` to seed the updated bucket-hat protagonist and opening canon.
+- Use `POST /story/seed-opening-story` to seed the SQLite-backed opening branch.
 - Use `POST /story/refresh-protagonist-assets` to register a fresh protagonist portrait and cutout after a design update.
+- Stakes, danger, failure, and death are allowed in story generation, but they should be used deliberately rather than as a default.
 
 ## Asset Pipeline Notes
 - `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.
@@ -107,6 +117,12 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - LLMs should describe content, mood, lighting, physical details, and hooks, not art style
 - `POST /assets/request` stores an image-job payload in `generation_jobs`.
 - `POST /assets/remove-background` runs local background removal and can store the resulting cutout in `assets`.
+- When a story worker introduces:
+  - a new recurring character, generate a `portrait`
+  - a new visually distinct linked location, generate a `background`
+  - a new reusable visually important object, generate an `object_render`
+- For brand-new canon entities, apply the scene first so IDs exist, then generate the assets.
+- Prefer `new linked location + reusable object` over a same-location visual variant for materially distinct sub-scenes until explicit active-asset assignment exists.
 - Default ComfyUI settings:
   - base URL: `http://127.0.0.1:8000`
   - workflow dir: `workflows/comfyui`
@@ -123,6 +139,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 ## Docs
 - Primary onboarding guide: [docs/llm_operations.md](docs/llm_operations.md)
 - Tone and pacing guide: [docs/story_bible.md](docs/story_bible.md)
+- Loop worker guide: [docs/llm_story_worker.md](docs/llm_story_worker.md)
 
 ## How to preview:
 python -m uvicorn app.main:app --reload --port 8001

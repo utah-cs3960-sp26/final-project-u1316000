@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,6 +15,7 @@ from app.config import Settings
 from app.database import bootstrap_database, connect
 from app.models import (
     AffordanceCreate,
+    ApplyGenerationRequest,
     AssetGenerateRequest,
     AssetRequest,
     BackgroundRemovalRequest,
@@ -49,7 +50,6 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                     "entity_id": 1,
                     "slot": "hero-center",
                     "focus": True,
-                    "scale": 1.16,
                     "use_player_fallback": True,
                 }
             ],
@@ -103,7 +103,6 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                     "entity_id": 1,
                     "slot": "hero-center",
                     "focus": True,
-                    "scale": 1.16,
                     "use_player_fallback": True,
                 }
             ],
@@ -131,7 +130,6 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                     "entity_id": 1,
                     "slot": "hero-center",
                     "focus": True,
-                    "scale": 1.16,
                     "use_player_fallback": True,
                 }
             ],
@@ -159,7 +157,6 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                     "entity_id": 1,
                     "slot": "hero-center",
                     "focus": True,
-                    "scale": 1.16,
                     "use_player_fallback": True,
                 }
             ],
@@ -226,22 +223,47 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         return templates.TemplateResponse(request, "index.html", context)
 
     @app.get("/play", response_class=HTMLResponse)
-    def player_view(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+    def player_view(
+        request: Request,
+        branch_key: str = Query("default"),
+        scene: str | None = Query(None),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> HTMLResponse:
         assets = AssetService(db, project_root)
+        story = StoryGraphService(db)
+        branch_story = story.get_branch_player_story(branch_key)
+        raw_story = branch_story if branch_story["start_scene"] is not None else PLAYER_DEMO_STORY
         resolved_story = {
-            **PLAYER_DEMO_STORY,
+            **raw_story,
             "scenes": {
                 scene_key: assets.resolve_scene_assets(scene_definition)
-                for scene_key, scene_definition in PLAYER_DEMO_STORY["scenes"].items()
+                for scene_key, scene_definition in raw_story["scenes"].items()
             },
         }
+        if scene and scene in resolved_story["scenes"]:
+            resolved_story["start_scene"] = scene
         return templates.TemplateResponse(
             request,
             "player.html",
             {
                 "request": request,
                 "story_data": resolved_story,
-                "title": PLAYER_DEMO_STORY["title"],
+                "title": resolved_story["title"],
+            },
+        )
+
+    @app.get("/play/death", response_class=HTMLResponse)
+    def death_view(
+        request: Request,
+        branch_key: str = Query("default"),
+    ) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "death.html",
+            {
+                "request": request,
+                "title": "You Died",
+                "restart_url": f"/play?branch_key={branch_key}",
             },
         )
 
@@ -676,10 +698,38 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/story/seed-opening-story")
+    def seed_opening_story(
+        branch_key: str = Query("default"),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        setup = StorySetupService(
+            db,
+            project_root=project_root,
+            story_bible=app.state.llm_generation.story_bible,
+        )
+        return setup.seed_opening_story(branch_key)
+
     @app.get("/branches/{branch_key}/state")
     def get_branch_state(branch_key: str, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
         return branch_state.get_branch_state(branch_key)
+
+    @app.get("/frontier")
+    def get_frontier(
+        branch_key: str | None = Query(None),
+        limit: int = Query(20, ge=1, le=100),
+        mode: str = Query("auto"),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> list[dict[str, Any]]:
+        story = StoryGraphService(db)
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return story.list_frontier(
+            branch_state_service=branch_state,
+            branch_key=branch_key,
+            limit=limit,
+            mode=mode,
+        )
 
     @app.post("/branches/{branch_key}/tags")
     def create_branch_tag(
@@ -777,7 +827,9 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             scene_text=payload.scene_text,
             summary=payload.summary,
             parent_node_id=payload.parent_node_id,
+            dialogue_lines=[line.model_dump() for line in payload.dialogue_lines],
             referenced_entities=[reference.model_dump() for reference in payload.referenced_entities],
+            present_entities=[entity.model_dump() for entity in payload.present_entities],
         )
         BranchStateService(db, app.state.llm_generation.story_bible["acts"]).sync_branch_progress(
             payload.branch_key,
@@ -802,18 +854,26 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         canon = CanonResolver(db)
         story = StoryGraphService(db)
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        current_node_id = payload.current_node_id
+        if current_node_id is None and payload.choice_id is not None:
+            choice = next((choice for choice in story.list_choices() if int(choice["id"]) == payload.choice_id), None)
+            if choice is not None:
+                current_node_id = int(choice["from_node_id"])
         context = app.state.llm_generation.build_context(
             branch_key=payload.branch_key,
             canon=canon,
             branch_state=branch_state,
             story_graph=story,
             focus_entity_ids=payload.focus_entity_ids,
-            current_node_id=payload.current_node_id,
+            current_node_id=current_node_id,
             branch_summary=payload.branch_summary,
             requested_choice_count=payload.requested_choice_count,
         )
         prompt = app.state.llm_generation.build_prompt(context)
-        job = story.create_job(job_type="llm_generation_preview", payload_json=json.dumps({"context": context, "prompt": prompt}))
+        job = story.create_job(
+            job_type="llm_generation_preview",
+            payload_json=json.dumps({"context": context, "prompt": prompt, "choice_id": payload.choice_id}),
+        )
         return {"job": job, "context": context, "prompt": prompt}
 
     @app.post("/jobs/validate-generation")
@@ -826,6 +886,47 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             canon=canon,
         )
         return result
+
+    @app.post("/jobs/apply-generation")
+    def apply_generation_candidate(payload: ApplyGenerationRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        if payload.candidate.branch_key != payload.branch_key:
+            raise HTTPException(status_code=400, detail="candidate.branch_key must match branch_key.")
+
+        canon = CanonResolver(db)
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        validation = app.state.llm_generation.validate_candidate(
+            candidate=payload.candidate,
+            branch_state_service=branch_state,
+            canon=canon,
+        )
+        if not validation["valid"]:
+            raise HTTPException(status_code=400, detail={"validation": validation})
+
+        story = StoryGraphService(db)
+        try:
+            result = story.apply_generation_candidate(
+                request_branch_key=payload.branch_key,
+                parent_node_id=payload.parent_node_id,
+                choice_id=payload.choice_id,
+                candidate=payload.candidate,
+                branch_state_service=branch_state,
+                canon=canon,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        job = story.create_job(
+            job_type="llm_generation_apply",
+            status="completed",
+            payload_json=json.dumps(
+                {
+                    "request": payload.model_dump(),
+                    "validation": validation,
+                    "result": result,
+                }
+            ),
+        )
+        return {"job": job, "validation": validation, **result}
 
     @app.post("/assets/request")
     def create_asset_request(payload: AssetRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
@@ -880,11 +981,12 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def remove_background(payload: BackgroundRemovalRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         assets = AssetService(db, project_root)
         try:
-            output_path = assets.remove_background(
+            result = assets.remove_background(
                 source_image_path=payload.source_image_path,
                 output_name=payload.output_name,
                 model_repo=payload.model_repo,
                 device=payload.device,
+                entity_type=payload.entity_type,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -902,7 +1004,9 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 entity_type=payload.entity_type,
                 entity_id=payload.entity_id,
                 asset_kind="cutout",
-                file_path=output_path,
+                file_path=result["output_path"],
+                display_class=result["display_class"],
+                normalization=result["normalization"],
                 prompt_text=json.dumps(payload.model_dump()),
             )
         else:
@@ -910,9 +1014,11 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "entity_type": payload.entity_type,
                 "entity_id": payload.entity_id,
                 "asset_kind": "cutout",
-                "file_path": output_path,
+                "file_path": result["output_path"],
+                "display_class": result["display_class"],
+                "normalization_json": json.dumps(result["normalization"]),
             }
-        return {"output_path": output_path, "asset": asset_record}
+        return {"output_path": result["output_path"], "asset": asset_record}
 
     return app
 

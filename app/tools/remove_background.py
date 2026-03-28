@@ -25,7 +25,7 @@ def main() -> None:
     connection = sqlite3.connect(":memory:")
     try:
         service = AssetService(connection, project_root)
-        output_path = service.remove_background(
+        result = service.remove_background(
             source_image_path=args.input,
             output_name=args.output_name,
             model_repo=args.model_repo,
@@ -41,7 +41,7 @@ def main() -> None:
     finally:
         connection.close()
 
-    print(output_path)
+    print(result["output_path"])
 
 
 if __name__ == "__main__":

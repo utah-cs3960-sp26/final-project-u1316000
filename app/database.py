@@ -72,6 +72,7 @@ SCHEMA_STATEMENTS = [
         title TEXT,
         scene_text TEXT NOT NULL,
         summary TEXT,
+        dialogue_lines_json TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (parent_node_id) REFERENCES story_nodes(id)
     )
@@ -102,12 +103,31 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS story_node_present_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        story_node_id INTEGER NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        slot TEXT NOT NULL,
+        scale REAL,
+        offset_x_percent REAL NOT NULL DEFAULT 0,
+        offset_y_percent REAL NOT NULL DEFAULT 0,
+        focus INTEGER NOT NULL DEFAULT 0,
+        hidden_on_lines_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (story_node_id) REFERENCES story_nodes(id),
+        UNIQUE(story_node_id, entity_type, entity_id, slot)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS assets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entity_type TEXT NOT NULL,
         entity_id INTEGER NOT NULL,
         asset_kind TEXT NOT NULL,
         file_path TEXT NOT NULL,
+        display_class TEXT,
+        normalization_json TEXT NOT NULL DEFAULT '{}',
         prompt_text TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -239,7 +259,21 @@ def bootstrap_database(database_path: str | Path) -> None:
     with connect(path) as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        _ensure_column(connection, "story_nodes", "dialogue_lines_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "story_node_present_entities", "offset_x_percent", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "story_node_present_entities", "offset_y_percent", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "assets", "display_class", "TEXT")
+        _ensure_column(connection, "assets", "normalization_json", "TEXT NOT NULL DEFAULT '{}'")
         connection.commit()
+
+
+def _ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def fetch_all(connection: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
