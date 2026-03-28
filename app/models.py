@@ -7,6 +7,16 @@ from pydantic import BaseModel, Field
 
 EntityType = Literal["world", "location", "character", "object"]
 RelationEntityType = Literal["location", "character", "object"]
+AssetEntityType = Literal["location", "character", "object"]
+AssetJobType = Literal["generate_background", "generate_portrait", "generate_object", "remove_background"]
+AssetKind = Literal["background", "portrait", "object_render", "cutout"]
+BranchTagType = Literal["clue", "state", "quest", "relationship", "travel", "mystery"]
+HookImportance = Literal["major", "minor", "local"]
+HookStatus = Literal["active", "payoff_ready", "resolved", "blocked"]
+RelationshipStance = Literal["ally", "friendly", "neutral", "wary", "hostile", "unknown"]
+AffordanceStatus = Literal["unlocked", "suspended", "retired"]
+InventoryStatus = Literal["owned", "stored", "spent", "lost"]
+ActPhase = Literal["early", "middle", "late"]
 
 
 class LocationSeed(BaseModel):
@@ -80,15 +90,136 @@ class ChoiceCreate(BaseModel):
     notes: str | None = None
 
 
+class BranchTagCreate(BaseModel):
+    branch_key: str = "default"
+    tag: str
+    tag_type: BranchTagType = "state"
+    source: str = "manual"
+    notes: str | None = None
+
+
+class InventoryEntryCreate(BaseModel):
+    branch_key: str = "default"
+    object_id: int
+    quantity: int = 1
+    status: InventoryStatus = "owned"
+    source_node_id: int | None = None
+    notes: str | None = None
+
+
+class AffordanceCreate(BaseModel):
+    branch_key: str = "default"
+    name: str
+    description: str
+    source_object_id: int | None = None
+    source_character_id: int | None = None
+    availability_note: str | None = None
+    required_state_tags: list[str] = Field(default_factory=list)
+    status: AffordanceStatus = "unlocked"
+    notes: str | None = None
+
+
+class RelationshipStateCreate(BaseModel):
+    branch_key: str = "default"
+    character_id: int
+    stance: RelationshipStance = "neutral"
+    notes: str | None = None
+    state_tags: list[str] = Field(default_factory=list)
+
+
+class StoryHookCreate(BaseModel):
+    branch_key: str = "default"
+    hook_type: str
+    importance: HookImportance = "minor"
+    summary: str
+    linked_entity_type: RelationEntityType | None = None
+    linked_entity_id: int | None = None
+    introduced_at_depth: int | None = None
+    min_distance_to_payoff: int = 0
+    required_clue_tags: list[str] = Field(default_factory=list)
+    required_state_tags: list[str] = Field(default_factory=list)
+    status: HookStatus = "active"
+    notes: str | None = None
+
+
 class GenerationPayload(BaseModel):
     branch_key: str = "default"
-    open_hooks: list[str] = Field(default_factory=list)
+    current_node_id: int | None = None
     focus_entity_ids: list[int] = Field(default_factory=list)
+    requested_choice_count: int = 3
+    branch_summary: str | None = None
 
 
-AssetJobType = Literal["generate_background", "generate_portrait", "generate_object", "remove_background"]
-AssetKind = Literal["background", "portrait", "object_render", "cutout"]
-AssetEntityType = Literal["location", "character", "object"]
+class GeneratedChoice(BaseModel):
+    choice_text: str
+    notes: str | None = None
+    required_affordances: list[str] = Field(default_factory=list)
+
+
+class HookProposal(BaseModel):
+    hook_type: str
+    importance: HookImportance = "minor"
+    summary: str
+    linked_entity_type: RelationEntityType | None = None
+    linked_entity_id: int | None = None
+    min_distance_to_payoff: int = 0
+    required_clue_tags: list[str] = Field(default_factory=list)
+    required_state_tags: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class HookUpdate(BaseModel):
+    hook_id: int
+    status: HookStatus
+    progress_note: str | None = None
+    resolution_text: str | None = None
+    add_required_clue_tags: list[str] = Field(default_factory=list)
+    add_required_state_tags: list[str] = Field(default_factory=list)
+
+
+class InventoryChange(BaseModel):
+    action: Literal["add", "remove"]
+    object_id: int | None = None
+    object_name: str | None = None
+    quantity: int = 1
+    notes: str | None = None
+
+
+class AffordanceChange(BaseModel):
+    action: Literal["unlock", "suspend", "restore", "retire"]
+    name: str
+    description: str | None = None
+    source_object_id: int | None = None
+    source_character_id: int | None = None
+    availability_note: str | None = None
+    required_state_tags: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class RelationshipUpdate(BaseModel):
+    character_id: int
+    stance: RelationshipStance = "neutral"
+    notes: str | None = None
+    state_tags: list[str] = Field(default_factory=list)
+
+
+class GenerationCandidate(BaseModel):
+    branch_key: str = "default"
+    scene_title: str | None = None
+    scene_summary: str
+    scene_text: str
+    choices: list[GeneratedChoice]
+    entity_references: list[EntityReference] = Field(default_factory=list)
+    fact_updates: list[FactSeed] = Field(default_factory=list)
+    relation_updates: list[RelationSeed] = Field(default_factory=list)
+    new_hooks: list[HookProposal] = Field(default_factory=list)
+    hook_updates: list[HookUpdate] = Field(default_factory=list)
+    inventory_changes: list[InventoryChange] = Field(default_factory=list)
+    affordance_changes: list[AffordanceChange] = Field(default_factory=list)
+    relationship_changes: list[RelationshipUpdate] = Field(default_factory=list)
+    asset_requests: list["AssetRequest"] = Field(default_factory=list)
+    discovered_clue_tags: list[str] = Field(default_factory=list)
+    discovered_state_tags: list[str] = Field(default_factory=list)
 
 
 class AssetRequest(BaseModel):
@@ -133,3 +264,6 @@ class BackgroundRemovalRequest(BaseModel):
     entity_id: int | None = None
     model_repo: str = "briaai/RMBG-2.0"
     device: Literal["auto", "cpu", "cuda"] = "auto"
+
+
+GenerationCandidate.model_rebuild()

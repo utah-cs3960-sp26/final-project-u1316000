@@ -124,6 +124,105 @@ SCHEMA_STATEMENTS = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS branch_state (
+        branch_key TEXT PRIMARY KEY,
+        act_phase TEXT NOT NULL DEFAULT 'early',
+        branch_depth INTEGER NOT NULL DEFAULT 0,
+        latest_story_node_id INTEGER,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (latest_story_node_id) REFERENCES story_nodes(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_key TEXT NOT NULL,
+        object_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'owned',
+        source_node_id INTEGER,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key),
+        FOREIGN KEY (object_id) REFERENCES objects(id),
+        FOREIGN KEY (source_node_id) REFERENCES story_nodes(id),
+        UNIQUE(branch_key, object_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS unlocked_affordances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        source_object_id INTEGER,
+        source_character_id INTEGER,
+        availability_note TEXT,
+        required_state_tags_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'unlocked',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key),
+        FOREIGN KEY (source_object_id) REFERENCES objects(id),
+        FOREIGN KEY (source_character_id) REFERENCES characters(id),
+        UNIQUE(branch_key, name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS relationship_states (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_key TEXT NOT NULL,
+        character_id INTEGER NOT NULL,
+        stance TEXT NOT NULL DEFAULT 'neutral',
+        notes TEXT,
+        state_tags_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key),
+        FOREIGN KEY (character_id) REFERENCES characters(id),
+        UNIQUE(branch_key, character_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS branch_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_key TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        tag_type TEXT NOT NULL DEFAULT 'state',
+        source TEXT NOT NULL DEFAULT 'manual',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key),
+        UNIQUE(branch_key, tag, tag_type)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS story_hooks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_key TEXT NOT NULL,
+        hook_type TEXT NOT NULL,
+        importance TEXT NOT NULL DEFAULT 'minor',
+        summary TEXT NOT NULL,
+        linked_entity_type TEXT,
+        linked_entity_id INTEGER,
+        introduced_at_depth INTEGER NOT NULL DEFAULT 0,
+        min_distance_to_payoff INTEGER NOT NULL DEFAULT 0,
+        required_clue_tags_json TEXT NOT NULL DEFAULT '[]',
+        required_state_tags_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'active',
+        notes TEXT,
+        resolution_text TEXT,
+        blocked_reason TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key)
+    )
+    """,
 ]
 
 

@@ -14,7 +14,8 @@ This is the first file an LLM should read when working in this repository. It ex
 - SQLite persistence is set up.
 - FastAPI JSON endpoints are available.
 - A minimal browser UI exists for inspection and manual seeding.
-- LLM generation is stubbed only. There is no autonomous expansion loop yet.
+- Story generation now has a structured preview/validation workflow driven by the story bible and branch state.
+- There is still no autonomous expansion loop yet.
 - ComfyUI-backed image generation is available through a workflow template and asset API/tooling.
 - Local background removal is wired through a Hugging Face-compatible tool path.
 
@@ -24,8 +25,10 @@ This is the first file an LLM should read when working in this repository. It ex
 - `app/models.py`: Pydantic request models
 - `app/services/canon.py`: canonical entity lookup, dedupe, facts, and relations
 - `app/services/story_graph.py`: story nodes, choices, node-entity links, and jobs
-- `app/services/generation.py`: LLM generation stub for later structured prompting
+- `app/services/branch_state.py`: per-branch inventory, affordances, tags, relationships, and hooks
+- `app/services/generation.py`: story bible loading, LLM context building, and validation
 - `app/services/assets.py`: asset job schema, Hugging Face model download helper, and background removal
+- `app/services/story_setup.py`: bucket-hat opening reset helpers
 - `workflows/comfyui/`: ComfyUI workflow templates; keep editor and API variants here
 - `app/templates/`: browser UI templates
 - `app/static/styles.css`: UI styling
@@ -49,6 +52,14 @@ This is the first file an LLM should read when working in this repository. It ex
 - `node_entities`: links between a scene and canonical entities it references
 - `generation_jobs`: placeholder records for later LLM expansion jobs
 
+### Branch state tables
+- `branch_state`: current act phase, branch depth, and latest node
+- `inventory_entries`: branch-specific persistent items
+- `unlocked_affordances`: reusable capabilities such as summoning a goose ride
+- `relationship_states`: branch-specific character stance and relationship tags
+- `branch_tags`: clue/state/travel/quest tags used for pacing and gating
+- `story_hooks`: delayed-payoff setups with importance, minimum distance, and readiness tags
+
 ## Hard Canon vs Soft Canon
 - **Hard canon** means facts that must not be contradicted automatically.
 - In this prototype, hard canon is represented by `facts.is_locked = 1`.
@@ -66,24 +77,50 @@ This is the first file an LLM should read when working in this repository. It ex
     - relation_type = `north_of`
     - object = barn
 - A later branch going north from the barn should resolve the same cabin row instead of creating another one.
+- Persistent branch consequences should not be buried only in prose:
+  - put reusable items in `inventory_entries`
+  - put reusable powers/travel options/social permissions in `unlocked_affordances`
+  - put mystery pacing in `story_hooks`
+
+## Story Bible Rules
+- Read [docs/story_bible.md](docs/story_bible.md) before generating story content.
+- The current protagonist reset is authoritative:
+  - abnormally tall gnome
+  - five thumbs on the left hand
+  - red-and-white striped bucket hat of unknown origin
+  - amnesia remains a major mystery
+- The world is whimsical and surreal, but it should not feel like parody.
+- Strange things should matter. Avoid randomness that exists only to be quirky.
+- Major hooks require both:
+  - minimum narrative distance before payoff
+  - readiness via clue/state tags
+- Side quests are welcome. Immediate collapse of every mystery is not.
 
 ## Safe Workflow For An LLM
 1. Read this file first.
+2. Read `docs/story_bible.md`.
 2. Inspect current data:
    - `python -m pytest`
    - `python -m uvicorn app.main:app --reload --port 8001`
    - open the UI at `http://127.0.0.1:8001`
-   - inspect `/ui/seed`, `/ui/story`, and the JSON endpoints
-3. Before adding new canon:
+   - inspect `/ui/seed`, `/ui/story`, `/story-bible`, and `/branches/default/state`
+3. If the opening canon needs to be reset to the current protagonist design:
+   - call `POST /story/reset-opening-canon`
+   - optionally call `POST /story/refresh-protagonist-assets`
+4. Before adding new canon:
    - look for an existing location, character, or object by normalized name
    - inspect nearby relations and existing facts
-4. When adding story content later:
+5. When adding story content later:
    - create or reuse canonical entities first
+   - update branch state when the player gains a persistent item, relationship change, clue, or affordance
    - create a `story_node`
    - attach canonical entity references in `node_entities`
    - add `choices` as outgoing edges
    - store any new world truths in `facts` and `relations`
-5. Do not duplicate entities just because a branch rediscovers them.
+6. Before treating generated content as valid:
+   - build context with `POST /jobs/generation-preview`
+   - validate the candidate with `POST /jobs/validate-generation`
+7. Do not duplicate entities just because a branch rediscovers them.
 
 ## JSON API Overview
 - `POST /seed-world`
@@ -93,10 +130,20 @@ This is the first file an LLM should read when working in this repository. It ex
 - `GET /story-nodes`
 - `GET /choices`
 - `GET /assets`
+- `GET /story-bible`
+- `GET /branches/{branch_key}/state`
+- `POST /branches/{branch_key}/tags`
+- `POST /branches/{branch_key}/inventory`
+- `POST /branches/{branch_key}/affordances`
+- `POST /branches/{branch_key}/relationships`
+- `POST /branches/{branch_key}/hooks`
 - `POST /story-nodes`
 - `POST /choices`
 - `GET /jobs`
-- `POST /jobs/generation-stub`
+- `POST /jobs/generation-preview`
+- `POST /jobs/validate-generation`
+- `POST /story/reset-opening-canon`
+- `POST /story/refresh-protagonist-assets`
 - `POST /assets/request`
 - `POST /assets/generate`
 - `POST /assets/remove-background`
@@ -160,8 +207,9 @@ This is the first file an LLM should read when working in this repository. It ex
 
 ## Guardrails
 - No autonomous story generation should be activated in this milestone.
-- No story should be pre-seeded unless explicitly requested later.
 - Keep SQLite as the source of truth for continuity.
 - Prefer exact entity reuse over fuzzy reinvention.
+- Preserve branch continuity for unlocked affordances and major hooks; do not “forget” a goose whistle once a branch has earned it.
+- Do not resolve a major mystery simply because it was introduced recently or because a detail looks tempting.
 - Do not hand-edit workflow node IDs for routine asset generation. Use the Python tool/API and treat the workflow JSON as a template.
 - Do not let the LLM override the house art style or the portrait/object white-background rules through prompt wording. Those are fixed generator policies.

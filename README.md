@@ -10,9 +10,10 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 
 ## Current Capabilities
 - SQLite schema for locations, characters, objects, relations, facts, story nodes, choices, assets, and generation jobs.
+- Story bible plus per-branch state for inventory, affordances, relationship shifts, branch tags, and delayed-payoff hooks.
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
-- LLM generation stub for future structured scene expansion.
+- Structured LLM generation preview and validation workflow with hook pacing guardrails.
 - ComfyUI-backed image generation plus a local Hugging Face background-removal path.
 
 ## What Is Not Built Yet
@@ -42,6 +43,8 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `/ui/story` story nodes and choices
 - `/ui/assets` assets and image-job schema examples
 - `/ui/jobs` generation job placeholders
+- `/story-bible` story bible JSON
+- `/branches/default/state` aggregated branch state snapshot
 
 ## Current Player Demo
 - `/play` still uses hardcoded opening dialogue/choices, but it now resolves its background and actor art from SQLite-backed assets.
@@ -53,12 +56,15 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/models.py` request payload models
 - `app/services/canon.py` canonical entity lookup, dedupe, facts, and relations
 - `app/services/story_graph.py` story nodes, choices, node-entity links, and jobs
-- `app/services/generation.py` future LLM generation interface
+- `app/services/branch_state.py` per-branch inventory, affordances, tags, relationships, and hooks
+- `app/services/generation.py` story bible loading, context building, and generation validation
 - `app/services/assets.py` asset metadata, job queueing, Hugging Face model download, and background removal
+- `app/services/story_setup.py` soft-reset opening canon and protagonist asset refresh helpers
 - `workflows/comfyui/` ComfyUI workflow templates for editor use and API submission
 - `app/templates/` console UI templates
 - `app/static/styles.css` console styling
 - `docs/llm_operations.md` primary onboarding guide for future AIs and humans
+- `docs/story_bible.md` human-readable tone and pacing guide
 - `app/tools/remove_background.py` CLI tool for local background removal
 - `app/tools/download_hf_model.py` CLI tool for downloading model repos into the local cache
 - `tests/test_app.py` integration tests
@@ -74,7 +80,23 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Use SQLite as the source of truth.
 - Treat locked facts as hard canon and avoid contradicting them automatically.
 - Reuse existing locations, characters, and objects whenever possible.
+- Track player consequences per branch, not in global canon prose.
+- Treat major mysteries as delayed-payoff hooks with both minimum distance and readiness conditions.
 - Keep operator-facing tools separate from any eventual player-facing UI.
+
+## Story Workflow Notes
+- Global canon stays in `locations`, `characters`, `objects`, `relations`, `facts`, and reusable `assets`.
+- Branch-specific consequences live in:
+  - `branch_state`
+  - `inventory_entries`
+  - `unlocked_affordances`
+  - `relationship_states`
+  - `branch_tags`
+  - `story_hooks`
+- Use `POST /jobs/generation-preview` to build a structured LLM prompt context from the story bible, canon, and branch state.
+- Use `POST /jobs/validate-generation` to check a candidate scene against hook pacing and affordance continuity rules before writing it into the graph.
+- Use `POST /story/reset-opening-canon` to seed the updated bucket-hat protagonist and opening canon.
+- Use `POST /story/refresh-protagonist-assets` to register a fresh protagonist portrait and cutout after a design update.
 
 ## Asset Pipeline Notes
 - `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.
@@ -100,6 +122,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 
 ## Docs
 - Primary onboarding guide: [docs/llm_operations.md](docs/llm_operations.md)
+- Tone and pacing guide: [docs/story_bible.md](docs/story_bible.md)
 
 ## How to preview:
 python -m uvicorn app.main:app --reload --port 8001

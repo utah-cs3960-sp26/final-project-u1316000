@@ -141,6 +141,12 @@ class StoryGraphService:
             "choices",
             "assets",
             "generation_jobs",
+            "branch_state",
+            "inventory_entries",
+            "unlocked_affordances",
+            "relationship_states",
+            "branch_tags",
+            "story_hooks",
         ]
         counts: dict[str, int] = {}
         for table_name in table_names:

@@ -41,6 +41,12 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "node_entities",
         "assets",
         "generation_jobs",
+        "branch_state",
+        "inventory_entries",
+        "unlocked_affordances",
+        "relationship_states",
+        "branch_tags",
+        "story_hooks",
     }.issubset(tables)
 
 
@@ -396,6 +402,227 @@ def test_duplicate_location_is_not_recreated(tmp_path: Path) -> None:
     client.post("/seed-world", json={"locations": [{"name": "Cabin"}]})
     locations = client.get("/locations").json()
     assert len(locations) == 1
+
+
+def test_story_reset_seeds_bucket_hat_protagonist(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    response = client.post("/story/reset-opening-canon")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["protagonist"]["name"] == "The Tall Gnome"
+    assert data["opening_location"]["name"] == "Mushroom Field"
+    assert data["default_branch"]["branch_key"] == "default"
+
+    with connect(db_path) as connection:
+        canon = CanonResolver(connection)
+        facts = canon.list_facts()
+        locked_facts = {fact["fact_text"] for fact in facts if fact["is_locked"]}
+
+    assert "The protagonist's left hand has five thumbs." in locked_facts
+    assert "The protagonist wears a red-and-white striped bucket hat and does not know how they got it." in locked_facts
+
+
+def test_branch_state_tracks_affordances_and_tags(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed_response = client.post(
+        "/seed-world",
+        json={
+            "objects": [{"name": "Goose Whistle"}],
+            "characters": [{"name": "Post Goose"}],
+        },
+    )
+    assert seed_response.status_code == 200
+
+    objects = client.get("/objects").json()
+    goose_whistle = next(item for item in objects if item["name"] == "Goose Whistle")
+
+    tag_response = client.post(
+        "/branches/default/tags",
+        json={"tag": "open-sky", "tag_type": "state", "source": "test"},
+    )
+    assert tag_response.status_code == 200
+
+    inventory_response = client.post(
+        "/branches/default/inventory",
+        json={"object_id": goose_whistle["id"], "notes": "Won from a very serious goose."},
+    )
+    assert inventory_response.status_code == 200
+
+    affordance_response = client.post(
+        "/branches/default/affordances",
+        json={
+            "name": "Call the Goose",
+            "description": "Summon the post goose for a short ride or message delivery.",
+            "source_object_id": goose_whistle["id"],
+            "required_state_tags": ["open-sky"],
+        },
+    )
+    assert affordance_response.status_code == 200
+
+    branch_response = client.get("/branches/default/state")
+    assert branch_response.status_code == 200
+    branch = branch_response.json()
+    assert any(item["object_name"] == "Goose Whistle" for item in branch["inventory"])
+    assert any(affordance["name"] == "Call the Goose" for affordance in branch["affordances"])
+    assert any(tag["tag"] == "open-sky" for tag in branch["tags"])
+
+
+def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    reset_response = client.post("/story/reset-opening-canon")
+    assert reset_response.status_code == 200
+
+    hook_response = client.post(
+        "/branches/default/hooks",
+        json={
+            "hook_type": "identity_mystery",
+            "importance": "major",
+            "summary": "Where did the bucket hat come from?",
+            "min_distance_to_payoff": 3,
+            "required_clue_tags": ["hat-origin-clue"],
+            "required_state_tags": ["saw-mirror-stitching"],
+        },
+    )
+    assert hook_response.status_code == 200
+    hook_id = hook_response.json()["id"]
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "The hat reveals everything immediately.",
+            "scene_text": "The hat tells you the entire truth far too early.",
+            "choices": [{"choice_text": "Keep going"}],
+            "hook_updates": [
+                {
+                    "hook_id": hook_id,
+                    "status": "resolved",
+                    "resolution_text": "The truth is revealed right away.",
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("min_distance_to_payoff" in issue for issue in result["issues"])
+    assert any("required clue tags" in issue.lower() for issue in result["issues"])
+    assert any("required state tags" in issue.lower() for issue in result["issues"])
+
+
+def test_generation_validation_allows_unlocked_affordance_choice(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed_response = client.post("/seed-world", json={"objects": [{"name": "Goose Whistle"}]})
+    assert seed_response.status_code == 200
+    goose_whistle = client.get("/objects").json()[0]
+
+    client.post("/branches/default/tags", json={"tag": "open-sky", "tag_type": "state"})
+    client.post(
+        "/branches/default/affordances",
+        json={
+            "name": "Call the Goose",
+            "description": "Summon the goose for travel.",
+            "source_object_id": goose_whistle["id"],
+            "required_state_tags": ["open-sky"],
+        },
+    )
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "The whistle becomes useful.",
+            "scene_text": "Wind combs the mushrooms and the whistle feels warm in your pocket.",
+            "choices": [
+                {
+                    "choice_text": "Blow the goose whistle",
+                    "required_affordances": ["Call the Goose"],
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is True
+
+
+def test_generation_validation_rejects_missing_affordance_choice(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A goose option appears from nowhere.",
+            "scene_text": "A choice references a goose that has never been earned.",
+            "choices": [
+                {
+                    "choice_text": "Blow the goose whistle",
+                    "required_affordances": ["Call the Goose"],
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("unavailable affordances" in issue for issue in result["issues"])
+
+
+def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    preview_response = client.post(
+        "/jobs/generation-preview",
+        json={
+            "branch_key": "default",
+            "focus_entity_ids": [1],
+            "branch_summary": "The tall gnome has just awakened in the mushroom field.",
+        },
+    )
+
+    assert preview_response.status_code == 200
+    data = preview_response.json()
+    assert data["job"]["job_type"] == "llm_generation_preview"
+    assert data["context"]["story_bible"]["title"] == "The Tall Gnome's Impossible Hat"
+    assert data["context"]["branch_state"]["branch_key"] == "default"
+    assert "Major mysteries must not resolve" in data["prompt"]
+
+
+def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkeypatch) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    portrait_source = tmp_path / "main-character-no-cutout.png"
+    Image.new("RGB", (64, 96), color=(180, 80, 70)).save(portrait_source)
+
+    from app.services import assets as assets_module
+
+    def fake_remove_background(self, *, source_image_path, output_name=None, model_repo="briaai/RMBG-2.0", device="auto"):
+        cutout = tmp_path / (output_name or "cutout.png")
+        Image.open(source_image_path).convert("RGBA").save(cutout)
+        return str(cutout)
+
+    monkeypatch.setattr(assets_module.AssetService, "remove_background", fake_remove_background)
+
+    refresh_response = client.post(
+        "/story/refresh-protagonist-assets",
+        params={"source_image_path": str(portrait_source)},
+    )
+    assert refresh_response.status_code == 200
+    data = refresh_response.json()
+    assert data["portrait_asset"]["asset_kind"] == "portrait"
+    assert data["cutout_asset"]["asset_kind"] == "cutout"
+
+    with connect(db_path) as connection:
+        service = AssetService(connection, Path(__file__).resolve().parents[1])
+        latest_cutout = service.get_latest_asset(entity_type="character", entity_id=1, asset_kind="cutout")
+
+    assert latest_cutout is not None
+    assert latest_cutout["id"] == data["cutout_asset"]["id"]
 
 
 def test_play_resolves_asset_backed_scene_media(tmp_path: Path) -> None:

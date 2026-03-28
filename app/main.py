@@ -14,18 +14,26 @@ from fastapi.templating import Jinja2Templates
 from app.config import Settings
 from app.database import bootstrap_database, connect
 from app.models import (
+    AffordanceCreate,
     AssetGenerateRequest,
     AssetRequest,
     BackgroundRemovalRequest,
+    BranchTagCreate,
     ChoiceCreate,
     GenerationPayload,
+    GenerationCandidate,
+    InventoryEntryCreate,
+    RelationshipStateCreate,
+    StoryHookCreate,
     StoryNodeCreate,
     WorldSeed,
 )
 from app.services.assets import AssetService
+from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
+from app.services.story_setup import StorySetupService
 
 
 PLAYER_DEMO_STORY: dict[str, Any] = {
@@ -60,7 +68,7 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                 },
                 {
                     "speaker": "Narrator",
-                    "text": "Your normal hat is gone. In its place sits a black tophat beaded with mist, wrapped in a silver ribbon stitched with symbols that feel insultingly familiar.",
+                    "text": "Your normal hat is gone. In its place sits a red-and-white striped bucket hat, absurdly jaunty and deeply wrong, as if someone dressed you for a joke you cannot remember.",
                 },
                 {
                     "speaker": "Narrator",
@@ -77,7 +85,7 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
                     "target": "tracks",
                 },
                 {
-                    "label": "Inspect the tophat and its silver ribbon",
+                    "label": "Inspect the bucket hat and its stitched warning",
                     "target": "hat",
                 },
                 {
@@ -130,7 +138,7 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
             "lines": [
                 {
                     "speaker": "Narrator",
-                    "text": "The tophat fits too well. Inside the brim, the silver ribbon has been stitched through with tiny letters: NOT YOUR FIRST NAME.",
+                    "text": "The bucket hat fits too well. Inside the brim, tiny letters have been stitched through the inner seam: NOT YOUR FIRST NAME.",
                 },
                 {
                     "speaker": "Narrator",
@@ -192,7 +200,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     app = FastAPI(title="CYOA Prototype")
     app.state.settings = settings
     app.state.project_root = project_root
-    app.state.llm_generation = LLMGenerationService()
+    app.state.llm_generation = LLMGenerationService(project_root)
 
     templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
     app.state.templates = templates
@@ -411,10 +419,10 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "entity_type": "character",
                     "entity_id": 1,
                     "model_repo": "stabilityai/stable-diffusion-xl-base-1.0",
-                    "prompt": "A mysterious gnome in a black tophat, storybook portrait, transparent background",
+                    "prompt": "An unusually tall gnome in a red-and-white striped bucket hat, full body, standing against a white backdrop with an uneasy but determined expression",
                     "negative_prompt": "blurry, extra fingers, watermark",
                     "width": 1024,
-                    "height": 1024,
+                    "height": 1536,
                     "steps": 28,
                     "guidance_scale": 6.5,
                     "seed": 7,
@@ -474,6 +482,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             summary=summary or None,
             referenced_entities=references,
         )
+        BranchStateService(db, app.state.llm_generation.story_bible["acts"]).sync_branch_progress(branch_key)
         return RedirectResponse("/ui/story", status_code=303)
 
     @app.post("/ui/story/choice")
@@ -639,10 +648,130 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def get_assets(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
         return AssetService(db, project_root).list_assets()
 
+    @app.get("/story-bible")
+    def get_story_bible() -> dict[str, Any]:
+        return app.state.llm_generation.story_bible
+
+    @app.post("/story/reset-opening-canon")
+    def reset_opening_canon(db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        setup = StorySetupService(
+            db,
+            project_root=project_root,
+            story_bible=app.state.llm_generation.story_bible,
+        )
+        return setup.soft_reset_opening_canon()
+
+    @app.post("/story/refresh-protagonist-assets")
+    def refresh_protagonist_assets(
+        source_image_path: str | None = None,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        setup = StorySetupService(
+            db,
+            project_root=project_root,
+            story_bible=app.state.llm_generation.story_bible,
+        )
+        try:
+            return setup.refresh_protagonist_assets(source_image_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/branches/{branch_key}/state")
+    def get_branch_state(branch_key: str, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.get_branch_state(branch_key)
+
+    @app.post("/branches/{branch_key}/tags")
+    def create_branch_tag(
+        branch_key: str,
+        payload: BranchTagCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.add_branch_tag(
+            branch_key=branch_key,
+            tag=payload.tag,
+            tag_type=payload.tag_type,
+            source=payload.source,
+            notes=payload.notes,
+        )
+
+    @app.post("/branches/{branch_key}/inventory")
+    def create_inventory_entry(
+        branch_key: str,
+        payload: InventoryEntryCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.add_inventory_entry(
+            branch_key=branch_key,
+            object_id=payload.object_id,
+            quantity=payload.quantity,
+            status=payload.status,
+            source_node_id=payload.source_node_id,
+            notes=payload.notes,
+        )
+
+    @app.post("/branches/{branch_key}/affordances")
+    def create_affordance(
+        branch_key: str,
+        payload: AffordanceCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.set_affordance(
+            branch_key=branch_key,
+            name=payload.name,
+            description=payload.description,
+            source_object_id=payload.source_object_id,
+            source_character_id=payload.source_character_id,
+            availability_note=payload.availability_note,
+            required_state_tags=payload.required_state_tags,
+            status=payload.status,
+            notes=payload.notes,
+        )
+
+    @app.post("/branches/{branch_key}/relationships")
+    def create_relationship_state(
+        branch_key: str,
+        payload: RelationshipStateCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.set_relationship_state(
+            branch_key=branch_key,
+            character_id=payload.character_id,
+            stance=payload.stance,
+            notes=payload.notes,
+            state_tags=payload.state_tags,
+        )
+
+    @app.post("/branches/{branch_key}/hooks")
+    def create_story_hook(
+        branch_key: str,
+        payload: StoryHookCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        return branch_state.create_hook(
+            branch_key=branch_key,
+            hook_type=payload.hook_type,
+            importance=payload.importance,
+            summary=payload.summary,
+            linked_entity_type=payload.linked_entity_type,
+            linked_entity_id=payload.linked_entity_id,
+            introduced_at_depth=payload.introduced_at_depth,
+            min_distance_to_payoff=payload.min_distance_to_payoff,
+            required_clue_tags=payload.required_clue_tags,
+            required_state_tags=payload.required_state_tags,
+            status=payload.status,
+            notes=payload.notes,
+        )
+
     @app.post("/story-nodes")
     def create_story_node(payload: StoryNodeCreate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         story = StoryGraphService(db)
-        return story.create_story_node(
+        node = story.create_story_node(
             branch_key=payload.branch_key,
             title=payload.title,
             scene_text=payload.scene_text,
@@ -650,6 +779,11 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             parent_node_id=payload.parent_node_id,
             referenced_entities=[reference.model_dump() for reference in payload.referenced_entities],
         )
+        BranchStateService(db, app.state.llm_generation.story_bible["acts"]).sync_branch_progress(
+            payload.branch_key,
+            latest_story_node_id=int(node["id"]),
+        )
+        return node
 
     @app.post("/choices")
     def create_choice(payload: ChoiceCreate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
@@ -663,23 +797,35 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         )
 
     @app.post("/jobs/generation-stub")
-    def create_generation_stub(payload: GenerationPayload, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+    @app.post("/jobs/generation-preview")
+    def create_generation_preview(payload: GenerationPayload, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         canon = CanonResolver(db)
         story = StoryGraphService(db)
-        premise_facts = [fact for fact in canon.list_facts() if fact["entity_type"] == "world"]
-        relevant_entities = [
-            location
-            for location in canon.list_locations()
-            if location["id"] in payload.focus_entity_ids
-        ]
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
         context = app.state.llm_generation.build_context(
             branch_key=payload.branch_key,
-            premise_facts=premise_facts,
-            relevant_entities=relevant_entities,
-            open_hooks=payload.open_hooks,
+            canon=canon,
+            branch_state=branch_state,
+            story_graph=story,
+            focus_entity_ids=payload.focus_entity_ids,
+            current_node_id=payload.current_node_id,
+            branch_summary=payload.branch_summary,
+            requested_choice_count=payload.requested_choice_count,
         )
         prompt = app.state.llm_generation.build_prompt(context)
-        return story.create_job(job_type="llm_stub", payload_json=json.dumps({"context": context, "prompt": prompt}))
+        job = story.create_job(job_type="llm_generation_preview", payload_json=json.dumps({"context": context, "prompt": prompt}))
+        return {"job": job, "context": context, "prompt": prompt}
+
+    @app.post("/jobs/validate-generation")
+    def validate_generation_candidate(payload: GenerationCandidate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        canon = CanonResolver(db)
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        result = app.state.llm_generation.validate_candidate(
+            candidate=payload,
+            branch_state_service=branch_state,
+            canon=canon,
+        )
+        return result
 
     @app.post("/assets/request")
     def create_asset_request(payload: AssetRequest, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:

@@ -1,0 +1,90 @@
+{
+  "title": "The Tall Gnome's Impossible Hat",
+  "tone": {
+    "pillars": [
+      "whimsical",
+      "surreal",
+      "wacky",
+      "slightly unhinged",
+      "immersive fantasy"
+    ],
+    "principles": [
+      "Sincerity over parody.",
+      "No cringe in pursuit of funny.",
+      "Weirdness should create curiosity, consequences, or emotional texture instead of random noise.",
+      "Fantasy assumptions are unsafe; the world may surprise the player without breaking continuity.",
+      "Absurd elements should be treated as real parts of the world, not winked at constantly."
+    ],
+    "avoid": [
+      "meta joke spam",
+      "forced quirkiness with no story function",
+      "immediate explanation of every mystery",
+      "default generic fantasy assumptions"
+    ]
+  },
+  "protagonist": {
+    "name": "The Tall Gnome",
+    "summary": "An abnormally tall gnome with amnesia, five thumbs on the left hand, and a red-and-white striped bucket hat of unknown origin.",
+    "locked_facts": [
+      "The protagonist is unmistakably a gnome, but stretched to roughly human size.",
+      "The protagonist's left hand has five thumbs.",
+      "The protagonist wears a red-and-white striped bucket hat and does not know how they got it.",
+      "The protagonist begins with significant memory loss."
+    ]
+  },
+  "world_rules": [
+    "The setting is fantasy, but familiar genre logic should never be assumed to be normal or complete.",
+    "Strange creatures, objects, and customs may exist, but once introduced they must stay consistent.",
+    "Whimsical quests and side journeys are welcome as long as they feel consequential and memorable."
+  ],
+  "beat_budget": {
+    "max_major_hook_advances_per_scene": 1,
+    "max_new_major_hooks_per_scene": 1,
+    "max_minor_hooks_per_scene": 2,
+    "require_non_main_plot_texture": true,
+    "rules": [
+      "Do not resolve a major mystery immediately after introducing it.",
+      "Let side quests, social beats, and local absurdities breathe without always advancing the main plot.",
+      "Prefer one meaningful escalation over many shallow reveals."
+    ]
+  },
+  "acts": {
+    "early": {
+      "min_depth": 0,
+      "max_depth": 4,
+      "goal": "Disorientation, local weirdness, first recurring clues, and strange invitations into the world.",
+      "guidance": [
+        "Scatter clues instead of solving them.",
+        "Introduce recurring entities, odd transportation, and bizarre local problems.",
+        "Keep the hat, the hand, and the memory loss mysterious."
+      ]
+    },
+    "middle": {
+      "min_depth": 5,
+      "max_depth": 10,
+      "goal": "Patterns emerge, recurring forces connect, and surreal systems become legible.",
+      "guidance": [
+        "Let old clues echo through new quests.",
+        "Unlock reusable affordances and relationships.",
+        "Advance major hooks only when distance and conditions justify it."
+      ]
+    },
+    "late": {
+      "min_depth": 11,
+      "max_depth": 999,
+      "goal": "Identity, cause, and consequence begin converging without losing the world's surreal energy.",
+      "guidance": [
+        "Major mysteries can begin paying off if properly prepared.",
+        "Recurring allies, rivals, and places should matter.",
+        "Final answers should still feel a little uncanny, not merely tidy."
+      ]
+    }
+  },
+  "example_affordance_patterns": [
+    {
+      "name": "Goose Whistle",
+      "description": "A traversal summon that can call a known goose ally under the right conditions.",
+      "notes": "Should unlock future travel or emergency choices when it makes sense, not appear everywhere all the time."
+    }
+  ]
+}
