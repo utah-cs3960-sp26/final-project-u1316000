@@ -17,6 +17,7 @@ RelationshipStance = Literal["ally", "friendly", "neutral", "wary", "hostile", "
 AffordanceStatus = Literal["unlocked", "suspended", "retired"]
 InventoryStatus = Literal["owned", "stored", "spent", "lost"]
 ActPhase = Literal["early", "middle", "late"]
+DirectionNoteStatus = Literal["active", "parked", "resolved"]
 
 
 class LocationSeed(BaseModel):
@@ -170,6 +171,33 @@ class StoryHookCreate(BaseModel):
     notes: str | None = None
 
 
+class StoryDirectionNoteCreate(BaseModel):
+    note_type: str = "plotline"
+    title: str
+    note_text: str
+    status: DirectionNoteStatus = "active"
+    priority: int = 2
+    related_entity_type: RelationEntityType | None = None
+    related_entity_id: int | None = None
+    related_hook_id: int | None = None
+    source_branch_key: str | None = None
+    notes: str | None = None
+    created_by: str = "manual"
+
+
+class StoryDirectionNoteUpdate(BaseModel):
+    note_type: str | None = None
+    title: str | None = None
+    note_text: str | None = None
+    status: DirectionNoteStatus | None = None
+    priority: int | None = None
+    related_entity_type: RelationEntityType | None = None
+    related_entity_id: int | None = None
+    related_hook_id: int | None = None
+    source_branch_key: str | None = None
+    notes: str | None = None
+
+
 class GenerationPayload(BaseModel):
     branch_key: str = "default"
     current_node_id: int | None = None
@@ -209,6 +237,19 @@ class HookUpdate(BaseModel):
     add_required_state_tags: list[str] = Field(default_factory=list)
 
 
+class DirectionNoteProposal(BaseModel):
+    note_type: str = "plotline"
+    title: str
+    note_text: str
+    status: DirectionNoteStatus = "active"
+    priority: int = 2
+    related_entity_type: RelationEntityType | None = None
+    related_entity_id: int | None = None
+    related_hook_id: int | None = None
+    source_branch_key: str | None = None
+    notes: str | None = None
+
+
 class InventoryChange(BaseModel):
     action: Literal["add", "remove"]
     object_id: int | None = None
@@ -242,12 +283,16 @@ class GenerationCandidate(BaseModel):
     scene_text: str
     dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     choices: list[GeneratedChoice]
+    new_locations: list[LocationSeed] = Field(default_factory=list)
+    new_characters: list[CharacterSeed] = Field(default_factory=list)
+    new_objects: list[ObjectSeed] = Field(default_factory=list)
     entity_references: list[EntityReference] = Field(default_factory=list)
     scene_present_entities: list[ScenePresentEntity] = Field(default_factory=list)
     fact_updates: list[FactSeed] = Field(default_factory=list)
     relation_updates: list[RelationSeed] = Field(default_factory=list)
     new_hooks: list[HookProposal] = Field(default_factory=list)
     hook_updates: list[HookUpdate] = Field(default_factory=list)
+    global_direction_notes: list[DirectionNoteProposal] = Field(default_factory=list)
     inventory_changes: list[InventoryChange] = Field(default_factory=list)
     affordance_changes: list[AffordanceChange] = Field(default_factory=list)
     relationship_changes: list[RelationshipUpdate] = Field(default_factory=list)

@@ -9,6 +9,23 @@ This file is the human-readable story bible for the current prototype. The machi
 - Weirdness must feel consequential, curious, or emotionally textured.
 - The world can surprise the player, but continuity must hold once something exists.
 
+## Voice And Readability
+- A mix of lyrical and plain language is good.
+- Narration may be more poetic, strange, or image-rich than spoken dialogue.
+- Character dialogue should usually be more grounded and immediately understandable.
+- Player dialogue should usually be the clearest voice in the scene, even when reacting to bizarre things.
+- Surreal wording is welcome, but each line should still cash out into a clear thought on first read.
+- If a line sounds evocative but cannot be paraphrased plainly, it is probably too muddy.
+- Prefer `clear weird` over `murky weird`.
+- Good:
+  - `Why does this fit my hand at all?`
+  - `Hats should not do that.`
+  - `The brim twitches like a clerk straightening its papers.`
+- Worse:
+  - `Who taught the ground my hand badly?`
+  - `That is too much behavior for a brim.`
+- A line that introduces a rule, clue, or system behavior should be especially clear.
+
 ## Protagonist Reset
 - The protagonist is an abnormally tall gnome.
 - The protagonist's left hand has five thumbs.
@@ -23,6 +40,7 @@ This file is the human-readable story bible for the current prototype. The machi
 
 ## Branching Shape
 - Default to `2` or `3` meaningful choices, not a rigid `3` every scene.
+- Every generated choice should carry internal planning notes in the form `Goal: ... Intent: ...` so future workers can see why the option exists and what broader direction it is meant to support.
 - A single forced continuation is acceptable when a scene is tight and transition-driven.
 - More than `3` choices should be rare and should happen only when the scene truly opens outward.
 - Cycles and revisits are desirable when they reinforce continuity.
@@ -37,6 +55,8 @@ This file is the human-readable story bible for the current prototype. The machi
   - brief tone or character beats
   - optional extra information before a larger event that would happen either way
 - Use quick merges to prevent meaningless branch explosion when the real dramatic structure is still converging.
+- Quick merges are a pressure-release valve, not the default branch shape.
+- If a branch has reconverged repeatedly in its recent scenes, the next expansion should usually open at least one fresh path instead of merging again.
 - Do not use a quick merge when the detour should create lasting branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge that must change the next scene.
 - When testing or reviewing a worker run, the useful "before" URL is the scene URL for the parent choice state:
   - `/play?branch_key=<branch_key>&scene=<from_node_id>`
@@ -50,6 +70,20 @@ This file is the human-readable story bible for the current prototype. The machi
 - Major mysteries should not pay off immediately after introduction.
 - Use delayed payoff gating with both minimum distance and readiness conditions.
 - Let small/local stories resolve even when the central mystery stays open.
+
+## Global Planning Notes
+- Global story direction notes are allowed and encouraged.
+- They are not player-facing canon.
+- Their job is to preserve medium- and long-range direction across many one-scene worker runs.
+- [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the informal human-editable scratchpad for fun possibilities, half-formed ideas, and future scene/location/character concepts.
+- Use them for:
+  - plotline ideas
+  - future character introductions
+  - escalation plans
+  - reminders about where a currently small system might lead later
+- Example:
+  - `A later tram ride could become a train robbery or transit crisis that introduces new characters and turns the network into a more active plotline.`
+- This helps prevent the story from feeling overly incremental just because each worker only writes one scene at a time.
 
 ## Hook Rules
 - A hook is any unresolved mystery, unanswered question, suspicious clue, unknown identity, ominous promise, or unexplained causal thread that should matter later.
@@ -114,4 +148,6 @@ This file is the human-readable story bible for the current prototype. The machi
 - Use same-location image variants sparingly until the renderer supports explicit active-asset assignment.
 - New recurring characters, new visually distinct linked locations, and reusable visually important objects should get image generation as part of the scene-authoring workflow.
 - If a player has clearly arrived at a new place, reusing the old background to avoid art generation is usually the wrong move.
+- Generate art on demand, not speculatively.
+- If a place, character, or object is only being seeded for later and is not yet on-screen or immediately reachable in play, defer art until it is about to matter in a real scene.
 - If a location has not yet been visually defined, give it a distinct, readable identity that fits the whimsical fantasy setting without overcomplicating the prompt beyond what an AI image generator can reliably stage.

@@ -37,7 +37,12 @@
         {% if locations %}
             <ul>
             {% for location in locations %}
-                <li><strong>{{ location.name }}</strong>{% if location.canonical_summary %} - {{ location.canonical_summary }}{% endif %}</li>
+                <li>
+                    <strong>{{ location.name }}</strong>
+                    {% if location.description or location.canonical_summary %}
+                        - {{ location.description or location.canonical_summary }}
+                    {% endif %}
+                </li>
             {% endfor %}
             </ul>
         {% else %}
@@ -49,7 +54,15 @@
         {% if characters %}
             <ul>
             {% for character in characters %}
-                <li><strong>{{ character.name }}</strong>{% if character.home_location_name %} - lives at {{ character.home_location_name }}{% endif %}</li>
+                <li>
+                    <strong>{{ character.name }}</strong>
+                    {% if character.description or character.canonical_summary %}
+                        - {{ character.description or character.canonical_summary }}
+                    {% endif %}
+                    {% if character.home_location_name %}
+                        <span class="meta">(lives at {{ character.home_location_name }})</span>
+                    {% endif %}
+                </li>
             {% endfor %}
             </ul>
         {% else %}
@@ -61,7 +74,15 @@
         {% if objects %}
             <ul>
             {% for object in objects %}
-                <li><strong>{{ object.name }}</strong>{% if object.default_location_name %} - usually found at {{ object.default_location_name }}{% endif %}</li>
+                <li>
+                    <strong>{{ object.name }}</strong>
+                    {% if object.description or object.canonical_summary %}
+                        - {{ object.description or object.canonical_summary }}
+                    {% endif %}
+                    {% if object.default_location_name %}
+                        <span class="meta">(usually found at {{ object.default_location_name }})</span>
+                    {% endif %}
+                </li>
             {% endfor %}
             </ul>
         {% else %}
@@ -84,6 +105,10 @@
         <h3>Hook Inspector</h3>
         <p class="meta">Inspect active, blocked, and payoff-ready hooks at <a href="/ui/hooks">/ui/hooks</a>.</p>
         <p class="meta">This is the fastest way to see min payoff distance, linked entities, and missing readiness tags.</p>
+    </article>
+    <article class="card">
+        <h3>Story Notes</h3>
+        <p class="meta">Use <a href="/ui/story-notes">/ui/story-notes</a> for global planning memory: future plotlines, offscreen payoffs, character ideas, and longer-range story direction that should survive across worker runs.</p>
     </article>
     <article class="card">
         <h3>Recent Assets</h3>

@@ -12,6 +12,7 @@ from app.database import connect
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
+from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 
 
@@ -70,6 +71,17 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
             }
             for hook in context.get("blocked_major_hooks", [])
         ],
+        "global_direction_notes": [
+            {
+                "id": note["id"],
+                "note_type": note["note_type"],
+                "title": note["title"],
+                "note_text": note["note_text"],
+                "status": note["status"],
+                "priority": note["priority"],
+            }
+            for note in context.get("global_direction_notes", [])
+        ],
         "available_affordances": [
             {
                 "name": affordance["name"],
@@ -78,6 +90,14 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
             for affordance in context.get("available_affordances", [])
         ],
         "branch_tags": [tag["tag"] for tag in context.get("branch_tags", [])],
+        "branch_shape": {
+            "merge_pressure_level": (context.get("branch_shape") or {}).get("merge_pressure_level"),
+            "should_prefer_divergence": (context.get("branch_shape") or {}).get("should_prefer_divergence"),
+            "merge_only_streak": (context.get("branch_shape") or {}).get("merge_only_streak"),
+            "merge_only_count": (context.get("branch_shape") or {}).get("merge_only_count"),
+            "reason": (context.get("branch_shape") or {}).get("reason"),
+            "recent_nodes": (context.get("branch_shape") or {}).get("recent_nodes", [])[:4],
+        },
         "merge_candidates": [
             {
                 "node_id": candidate["node_id"],
@@ -146,12 +166,18 @@ def build_focus_canon_slice(context: dict[str, Any], canon: CanonResolver) -> di
     }
 
 
-def build_validation_checklist() -> list[str]:
-    return [
+def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) -> list[str]:
+    checklist = [
         "Return valid GenerationCandidate JSON only; do not wrap it in prose.",
         "Include at least one choice.",
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
+        "Every choice must include notes in this exact pattern: `Goal: ... Intent: ...`.",
+        "In choice notes, Goal means the immediate purpose of taking the option. Intent means the broader direction, future possibility, branch shape, or likely payoff lane the option is meant to open or reinforce.",
+        "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
         "If you introduce a new unresolved mystery or unanswered question, create or extend a hook.",
+        "Use a mix of lyrical narration and clearer spoken dialogue; the player voice should usually be one of the clearest in the scene.",
+        "Prefer clear weird over murky weird. If a line sounds evocative but cannot be paraphrased plainly, rewrite it.",
+        "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.",
         "For major hooks, include a payoff_concept describing the intended direction of the later payoff.",
         "A good payoff_concept should describe the general shape of the later answer, not just tie the mystery to the nearest currently available local system.",
         "Broad direction does not mean vague direction: if the likely later answer already points at a known character, place, or system, say that directly.",
@@ -164,10 +190,17 @@ def build_validation_checklist() -> list[str]:
         "Use target_node_id only for valid same-branch merge candidates.",
         "Do not invent new locked facts.",
         "If the scene introduces a new recurring character, new linked location, or reusable visually important object, plan the post-apply asset generation.",
+        "Generate art on demand. If a place, character, or object is only future-facing and not yet on-screen or immediately reachable, defer its art until a later scene truly needs it.",
+        "If the scene sparks a medium- or long-range idea you want future workers to remember, add a global_direction_note instead of assuming the idea will survive implicitly.",
         "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.",
         "If the player has clearly arrived somewhere new, `no new art required` is usually the wrong conclusion.",
         "If a location has not already been visually defined, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.",
     ]
+    if branch_shape and branch_shape.get("should_prefer_divergence"):
+        checklist.append(
+            "This branch is currently over-merged. Open at least one fresh path this run instead of only reconverging into existing scenes."
+        )
+    return checklist
 
 
 def build_candidate_template(branch_key: str) -> dict[str, Any]:
@@ -180,15 +213,19 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
             {"speaker": "Narrator", "text": ""},
         ],
         "choices": [
-            {"choice_text": ""},
-            {"choice_text": ""},
+            {"choice_text": "", "notes": "Goal:  Intent: "},
+            {"choice_text": "", "notes": "Goal:  Intent: "},
         ],
+        "new_locations": [],
+        "new_characters": [],
+        "new_objects": [],
         "entity_references": [],
         "scene_present_entities": [],
         "fact_updates": [],
         "relation_updates": [],
         "new_hooks": [],
         "hook_updates": [],
+        "global_direction_notes": [],
         "inventory_changes": [],
         "affordance_changes": [],
         "relationship_changes": [],
@@ -205,12 +242,14 @@ def select_frontier_item(
     branch_key: str | None,
     choice_id: int | None,
     mode: str,
+    branching_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     frontier = story.list_frontier(
         branch_state_service=branch_state,
         branch_key=branch_key,
         limit=100,
         mode=mode,
+        branching_policy=branching_policy,
     )
     if choice_id is not None:
         for item in frontier:
@@ -235,12 +274,14 @@ def main() -> None:
         canon = CanonResolver(connection)
         story = StoryGraphService(connection)
         branch_state = BranchStateService(connection, llm_generation.story_bible["acts"])
+        story_notes = StoryDirectionService(connection)
         selected = select_frontier_item(
             story,
             branch_state,
             branch_key=args.branch_key,
             choice_id=args.choice_id,
             mode=args.mode,
+            branching_policy=llm_generation.story_bible.get("branching_policy"),
         )
         preview_payload = {
             "branch_key": selected["branch_key"],
@@ -253,6 +294,7 @@ def main() -> None:
             branch_key=selected["branch_key"],
             canon=canon,
             branch_state=branch_state,
+            story_notes=story_notes,
             story_graph=story,
             focus_entity_ids=[],
             current_node_id=int(selected["from_node_id"]),
@@ -274,12 +316,15 @@ def main() -> None:
             "preview_payload": preview_payload,
             "context_summary": summarize_context(context),
             "focus_canon_slice": build_focus_canon_slice(context, canon),
-            "validation_checklist": build_validation_checklist(),
+            "validation_checklist": build_validation_checklist(branch_shape=context.get("branch_shape")),
             "candidate_template": build_candidate_template(selected["branch_key"]),
             "endpoint_contract": {
                 "validate_generation": "POST /jobs/validate-generation with the GenerationCandidate JSON as the request body.",
                 "apply_generation": (
                     "POST /jobs/apply-generation with branch_key, parent_node_id, choice_id, and candidate."
+                ),
+                "story_notes": (
+                    "Use global_direction_notes inside the GenerationCandidate for new planning memory, or POST /story-notes directly to add/update out-of-world direction notes."
                 ),
                 "generate_assets_after_apply": (
                     "POST /assets/generate after apply when new recurring characters, linked locations, or reusable important objects need art."
@@ -292,7 +337,10 @@ def main() -> None:
             },
             "next_action": (
                 "Run now. Do not ask the human for permission. Return one GenerationCandidate JSON only, "
-                "validate it, apply it if valid, generate any required art, report the pre-change URL, and stop. "
+                "validate it, apply it if valid, generate any required art, report the pre-change URL, "
+                "report the concrete choice id(s) a human should click from that state to reach the new content, "
+                "and explicitly say whether you added any hooks, global direction notes, or IDEAS.md entries. "
+                "Then stop. "
                 "Do not browse the repo unless the loop is blocked."
             ),
         }

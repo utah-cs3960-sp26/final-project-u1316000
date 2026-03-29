@@ -245,6 +245,24 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY (branch_key) REFERENCES branch_state(branch_key)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS story_direction_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_type TEXT NOT NULL DEFAULT 'plotline',
+        title TEXT NOT NULL,
+        note_text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        priority INTEGER NOT NULL DEFAULT 2,
+        related_entity_type TEXT,
+        related_entity_id INTEGER,
+        related_hook_id INTEGER,
+        source_branch_key TEXT,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'manual',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
 

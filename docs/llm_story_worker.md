@@ -48,6 +48,20 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Carry the visual side forward too when the scene genuinely needs new art.
 - Stakes, danger, and even death are allowed, but they are not required for a good scene or arc.
 
+## Voice
+- Use a mix of lyrical narration and clearer spoken dialogue.
+- Narration may be more poetic, image-rich, or uncanny.
+- Spoken dialogue should usually be more grounded and immediately understandable.
+- The player character should usually be one of the clearest voices in the scene.
+- Surreal lines are welcome, but they should still communicate a clear thought on first read.
+- If a line sounds clever or eerie but you cannot paraphrase it plainly, rewrite it.
+- Prefer `clear weird` over `murky weird`.
+- Be especially clear when a line introduces:
+  - a clue
+  - a rule
+  - a system behavior
+  - a consequence
+
 ## What Counts As A Hook
 - A hook is any unresolved mystery, unanswered question, suspicious clue, ominous promise, unknown identity, unexplained cause, or strange thread that should matter later.
 - Hooks may also carry non-canonical planning metadata about where they are probably heading.
@@ -102,6 +116,8 @@ This is the single file the story-expansion loop should point the LLM at every r
   - `relations`
   - locked `facts`
   - reusable `assets`
+- Global planning memory:
+  - `story_direction_notes`
 - Branch-local state:
   - `branch_state`
   - `inventory_entries`
@@ -115,6 +131,35 @@ This is the single file the story-expansion loop should point the LLM at every r
   - `node_entities`
   - `story_node_present_entities`
 
+## Hooks Vs Story Notes
+- Hooks are mostly in-world unresolved threads that affect what the player is wondering about in a specific branch.
+- Story direction notes are out-of-world planning memory for future workers.
+- `IDEAS.md` is the loose human-editable scratchpad for fun future ideas, scene concepts, character seeds, location seeds, and plot possibilities.
+- Use hooks for:
+  - mysteries
+  - suspicious clues
+  - unresolved identities
+  - delayed payoffs the player is already brushing against
+- Use story direction notes for:
+  - where a plotline could lead later
+  - future characters you want to introduce
+  - medium-range escalation ideas
+  - reminders that a local system could blossom into a bigger arc
+  - plot turns that are not yet canon in the current scene
+- Example hook:
+  - `Madam Bei recognizes the striped hat and implies it has caused trouble before.`
+- Example story direction note:
+  - `A later tram ride could turn into a train robbery or transit crisis, introducing new characters and shifting the tram network from eerie logistics into a more active action plotline.`
+- A hook says `this unresolved thing exists in the story`.
+- A story direction note says `here is a promising direction future workers may want to steer toward`.
+- Not every scene needs a story direction note.
+- Add one when you feel a medium- or long-range idea forming and you do not want the next worker to lose it.
+- You can leave these notes either:
+  - inside `global_direction_notes` on the normal `GenerationCandidate`
+  - or through the `/story-notes` endpoints when you need to manage them directly
+- If you have fun ideas for future scenes, locations, characters, or plotlines, feel free to also append them to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md).
+- `IDEAS.md` is the easiest place for both humans and workers to leave informal future possibilities without turning them into canon.
+
 ## Hard Rules
 - Do not resolve major hooks early.
 - Do not forget branch-local affordances, inventory, or relationship changes.
@@ -124,8 +169,24 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Strange things should matter. Do not add randomness with no continuity or consequence.
 - Death is available as a consequence, but do not treat lethality as the default way to make scenes meaningful.
 - Usually return `2` or `3` player choices. `1` is acceptable for a forced transition or tightly framed beat. More than `3` should be uncommon and justified.
+- Every generated choice must include internal planning notes in the form `Goal: ... Intent: ...`.
+- In choice notes:
+  - `Goal` = the immediate purpose of taking this option
+  - `Intent` = the broader direction, future possibility, branch shape, or likely payoff lane this option is meant to open or reinforce
+- If you introduce a brand-new canonical location, character, or object, declare it explicitly in:
+  - `new_locations`
+  - `new_characters`
+  - `new_objects`
+- Every new canonical entity should include a short readable description, not just a name.
 - Cycles are allowed. Merges are allowed only when the resulting scene still fits the relevant branch-local consequences.
+- Quick merges are a relief valve, not the default branch shape.
+- If the prep packet says the branch should prefer divergence, open at least one fresh path this run instead of only reconverging into existing scenes.
 - If you introduce a new recurring character, a new visually distinct linked location, or a reusable visually important object, make sure the visual follow-through happens after apply.
+- Generate art on demand, not speculatively.
+- Default rule:
+  - if the player is seeing it now, arriving there now, or the next playable scene immediately depends on it, generate the art now
+  - if it is only a future-facing setup, canon seed, or offscreen possibility, defer art until it is about to matter on-screen
+- If a scene gives you a meaningful future idea that should shape later runs, add a `global_direction_note` instead of hoping the next worker rediscovers it.
 
 ## Per-Run Workflow
 1. Read this file.
@@ -148,13 +209,18 @@ This is the single file the story-expansion loop should point the LLM at every r
 10. Only if valid, apply it:
    - `POST /jobs/apply-generation`
 11. After apply, generate required missing visuals:
-   - new recurring character -> `portrait`
-   - new visually distinct linked location -> `background`
-   - new reusable visually important object -> `object_render`
+   - current playable arrival into a new visually distinct linked location -> `background`
+   - new recurring character who is actually appearing in the scene now -> `portrait`
+   - reusable visually important object that is actually on-screen or immediately playable now -> `object_render`
+   - if the new canon entity is only future-facing, defer art until it is about to matter on-screen
 12. Stop after reporting:
    - the pre-change URL
    - what node/choice you expanded
+   - the concrete choice id(s) a human should click to reach the new content from the reported state
    - whether any new art was required
+   - whether you added any new hooks
+   - whether you added any global story direction notes
+   - whether you appended anything to `IDEAS.md`
 
 ## Hook Payoff Gating
 - `min_distance_to_payoff` is real and enforced.
@@ -192,6 +258,7 @@ This is the single file the story-expansion loop should point the LLM at every r
    - inspect newly created canon entities
    - call `POST /assets/generate` for any required missing visuals
 6. Report the pre-change URL and stop
+   - include the choice id(s) to click from that state, not just prose like `pick option 1`
 
 ## Expected Output Shape
 Return JSON that fits `GenerationCandidate`.
@@ -204,10 +271,14 @@ Required fields:
 
 Strongly recommended fields:
 - `dialogue_lines`
+- `new_locations`
+- `new_characters`
+- `new_objects`
 - `entity_references`
 - `scene_present_entities`
 - `new_hooks`
 - `hook_updates`
+- `global_direction_notes`
 - `inventory_changes`
 - `affordance_changes`
 - `relationship_changes`
@@ -217,7 +288,13 @@ Strongly recommended fields:
 ## Output Guidance
 - `scene_text` can be a compact prose summary of the scene.
 - `dialogue_lines` should be used when the scene is meant to play with multi-line RPG dialogue.
+- If you introduce a brand-new canonical location, character, or object, include it in `new_locations`, `new_characters`, or `new_objects`.
+- Every new canonical entity should have a short readable `description`, not just a name.
 - `choices` should be the player-facing options from the newly created scene.
+- Every choice must include `notes` using this pattern:
+  - `Goal: ... Intent: ...`
+- Example:
+  - `Goal: test whether the plate recognizes the altered hand. Intent: open a recurring mushroom-field mystery voice and, if it stays small, allow a careful quick merge back into the station sequence.`
 - A choice may optionally include `target_node_id` when you want a quick merge into an already existing scene in the same branch.
 - Choice count guidance:
   - default to `2` or `3`
@@ -226,6 +303,11 @@ Strongly recommended fields:
 - `requested_choice_count` from preview is a target, not a strict contract.
 - If you introduce a new unresolved mystery/question in the scene, include it in `new_hooks` unless it is unmistakably just progress on an already existing hook.
 - If preview provides `merge_candidates`, you may use one of those node IDs as a choice `target_node_id` for a careful quick merge.
+- Use `global_direction_notes` when you want to leave behind:
+  - a future plotline direction
+  - a potential new character or faction
+  - a planned escalation
+  - a reminder that a currently small system should later open outward
 - Put exactly one primary location in `entity_references` with role `current_scene` when the backdrop should change.
 - Treat that `current_scene` location as the scene's background-driving place for player playback.
 - Use `scene_present_entities` for everyone or everything the player should actually see in the current scene.
@@ -259,6 +341,7 @@ Strongly recommended fields:
   - risky merge example: two branches with different inventory, allies, or affordances collapsing into the same consequence-heavy scene
 - Do not force a detour into a separate long branch just because the player examined something.
 - Do not quick-merge when the detour created meaningful branch-local consequences that should change the next scene.
+- Do not let quick merges become the whole branch shape. If recent scenes have already been merge-heavy, the next one should usually widen the branch again.
 
 ## Location Vs Object Vs Variant
 - Create a **new linked location** when the player enters a materially distinct playable place, even if it is physically near or inside a broader place.
@@ -278,6 +361,8 @@ Strongly recommended fields:
 - If a new recurring character enters the story, make sure there is a portrait plan for that character. Do not be afraid to create a new character if one is needed for the story, but be sure to create a portrait for them. They should fit the fantasy setting and be equally whimsical such as a talking conductor frog (which already exists)
 - If a new reusable or visually important prop matters to play or continuity, make sure there is an object render plan for it.
 - Do not generate art for every passing noun.
+- Do not generate art just because a new canon entity exists on paper.
+- If a place, character, or object is only being set up for later and is not yet being shown or immediately reached in play, defer its art until a later scene actually needs it.
 - If a location has not already been visually defined, give it a distinct identity that fits the whimsical fantasy tone while still being simple enough for AI image generation to render cleanly.
 - Prefer strong, readable compositions over overcomplicated descriptions:
   - good: `brass claim window in a pale mushroom wall, velvet counter, stamped cards, warm lantern glow`
@@ -319,8 +404,14 @@ Strongly recommended fields:
       {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": true}
     ],
     "choices": [
-      {"choice_text": "Knock on the mushroom stem"},
-      {"choice_text": "Step around the velvet knot"}
+      {
+        "choice_text": "Knock on the mushroom stem",
+        "notes": "Goal: test whether the marked mushroom responds. Intent: open a fresh mystery path around the marker."
+      },
+      {
+        "choice_text": "Step around the velvet knot",
+        "notes": "Goal: inspect the departure marker from another angle. Intent: widen the branch with a clue-first alternative."
+      }
     ],
     "discovered_clue_tags": ["velvet-mushroom-found"]
   }

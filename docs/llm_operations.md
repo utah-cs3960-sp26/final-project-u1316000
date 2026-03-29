@@ -136,10 +136,15 @@ This is the first file an LLM should read when working in this repository. It ex
    - validate the candidate with `POST /jobs/validate-generation`
    - apply it with `POST /jobs/apply-generation`
 11. After applying a scene, generate any required missing visuals:
-   - new recurring character -> `portrait`
-   - new linked visually distinct location -> `background`
-   - new reusable visually important object -> `object_render`
+   - new recurring character who is actually appearing now -> `portrait`
+   - new linked visually distinct location the player has actually arrived at now -> `background`
+   - new reusable visually important object that is actually on-screen or immediately playable now -> `object_render`
+   - if the entity is only future-facing, defer art until it is about to matter in play
 12. Do not duplicate entities just because a branch rediscovers them.
+13. When reporting a completed worker run, include:
+   - the pre-change URL
+   - the specific choice id(s) to click from that state
+   - not just prose like `pick option 1`
 
 ## JSON API Overview
 - `POST /seed-world`
@@ -157,6 +162,9 @@ This is the first file an LLM should read when working in this repository. It ex
 - `POST /branches/{branch_key}/affordances`
 - `POST /branches/{branch_key}/relationships`
 - `POST /branches/{branch_key}/hooks`
+- `GET /story-notes`
+- `POST /story-notes`
+- `POST /story-notes/{note_id}`
 - `POST /story-nodes`
 - `POST /choices`
 - `GET /jobs`
@@ -182,9 +190,24 @@ This is the first file an LLM should read when working in this repository. It ex
   - for the user-provided prompt text, focus on content: mood, scale, lighting, texture, physical details, and story hooks
   - do not spend prompt budget restating art style instructions unless a content detail truly matters
 - Scene-authoring policy:
-  - if a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, treat image generation as part of finishing that scene
+  - if a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object that the player is actually seeing or reaching now, treat image generation as part of finishing that scene
+  - if the new canon entity is only being set up for later, do not generate speculative art yet
   - for brand-new canon entities, apply the scene first so SQLite assigns real IDs, then call `/assets/generate`
   - use same-location variants sparingly for now because the renderer currently prefers the latest asset per entity and does not yet support explicit active-asset assignment
+## Story Direction Notes
+- `story_direction_notes` are global planning memory, not player-facing canon.
+- Use them to preserve:
+  - future plotline ideas
+  - offscreen escalation plans
+  - future character introductions
+  - reminders about where a currently small system could lead later
+- [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the loose scratchpad for fun future possibilities that should stay easy for humans to type into and easy for workers to append to.
+- Hooks and direction notes are different:
+  - hooks are in-world unresolved threads in a branch
+  - direction notes are out-of-world planning guidance across runs
+- Workers can add new ones:
+  - directly via `POST /story-notes`
+  - or during normal scene apply via `global_direction_notes` in `GenerationCandidate`
 - Keep workflow templates in `workflows/comfyui/`.
 - Treat `text-to-image.json` as the editor workflow and `text-to-image.api.json` as the machine-submittable version.
 - Use `POST /assets/request` to store a structured asset-generation request even before a full image generator is wired in.

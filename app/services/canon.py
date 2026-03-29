@@ -81,7 +81,15 @@ class CanonResolver:
     ) -> dict[str, Any]:
         existing = self.find_location_by_name(name)
         if existing is not None:
-            return existing
+            if description or canonical_summary:
+                self._update_entity_metadata_if_missing(
+                    table_name="locations",
+                    entity_id=int(existing["id"]),
+                    description=description,
+                    canonical_summary=canonical_summary,
+                )
+                existing = self.get_location(int(existing["id"]))
+            return existing or {}
 
         slug = self.slugify(name)
         cursor = self.connection.execute(
@@ -111,6 +119,14 @@ class CanonResolver:
                 )
                 self.connection.commit()
                 existing = self.get_character(existing["id"])
+            if description or canonical_summary:
+                self._update_entity_metadata_if_missing(
+                    table_name="characters",
+                    entity_id=int(existing["id"]),
+                    description=description,
+                    canonical_summary=canonical_summary,
+                )
+                existing = self.get_character(int(existing["id"]))
             return existing or {}
 
         slug = self.slugify(name)
@@ -141,6 +157,14 @@ class CanonResolver:
                 )
                 self.connection.commit()
                 existing = self.get_object(existing["id"])
+            if description or canonical_summary:
+                self._update_entity_metadata_if_missing(
+                    table_name="objects",
+                    entity_id=int(existing["id"]),
+                    description=description,
+                    canonical_summary=canonical_summary,
+                )
+                existing = self.get_object(int(existing["id"]))
             return existing or {}
 
         slug = self.slugify(name)
@@ -234,3 +258,22 @@ class CanonResolver:
             """,
             (relation_type, anchor_location_id),
         )
+
+    def _update_entity_metadata_if_missing(
+        self,
+        *,
+        table_name: str,
+        entity_id: int,
+        description: str | None,
+        canonical_summary: str | None,
+    ) -> None:
+        self.connection.execute(
+            f"""
+            UPDATE {table_name}
+            SET description = COALESCE(description, ?),
+                canonical_summary = COALESCE(canonical_summary, ?)
+            WHERE id = ?
+            """,
+            (description, canonical_summary, entity_id),
+        )
+        self.connection.commit()

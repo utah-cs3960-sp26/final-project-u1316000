@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/player.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/player.css') }}?v={{ asset_version }}">
 </head>
 <body class="player-body death-body">
     <main class="death-root">

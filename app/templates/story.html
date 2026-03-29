@@ -49,7 +49,14 @@
                 {% if node.choices %}
                     <ul>
                     {% for choice in node.choices %}
-                        <li>{{ choice.choice_text }} -> {% if choice.to_node_id %}#{{ choice.to_node_id }}{% else %}(open){% endif %}</li>
+                        <li>
+                            {{ choice.choice_text }} -> {% if choice.to_node_id %}#{{ choice.to_node_id }}{% else %}(open){% endif %}
+                            {% if choice.notes_data and choice.notes_data.notes %}
+                                <div class="meta">Choice notes: {{ choice.notes_data.notes }}</div>
+                            {% elif choice.notes %}
+                                <div class="meta">Choice notes: {{ choice.notes }}</div>
+                            {% endif %}
+                        </li>
                     {% endfor %}
                     </ul>
                 {% else %}
@@ -70,4 +77,3 @@
     <p class="meta">Objects: {% for object in objects %}object:{{ object.id }} ({{ object.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
 </section>
 {% endblock %}
-

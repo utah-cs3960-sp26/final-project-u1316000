@@ -22,6 +22,26 @@
       "default generic fantasy assumptions"
     ]
   },
+  "voice_policy": {
+    "principles": [
+      "A mix of lyrical narration and clearer spoken dialogue is good.",
+      "Narration may be more poetic, image-rich, or uncanny than dialogue.",
+      "Character dialogue should usually be more grounded and immediately understandable.",
+      "The player character should usually be one of the clearest voices in the scene.",
+      "Surreal lines are welcome, but they should still communicate a clear thought on first read.",
+      "Prefer clear weird over murky weird.",
+      "If a line introduces a clue, rule, system behavior, or consequence, it should be especially clear."
+    ],
+    "good_examples": [
+      "Why does this fit my hand at all?",
+      "Hats should not do that.",
+      "The brim twitches like a clerk straightening its papers."
+    ],
+    "avoid_examples": [
+      "Who taught the ground my hand badly?",
+      "That is too much behavior for a brim."
+    ]
+  },
   "protagonist": {
     "name": "The Tall Gnome",
     "summary": "An abnormally tall gnome with amnesia, five thumbs on the left hand, and a red-and-white striped bucket hat of unknown origin.",
@@ -58,6 +78,18 @@
       "Prefer one meaningful escalation over many shallow reveals."
     ]
   },
+  "global_direction_notes_policy": {
+    "allowed": true,
+    "player_facing": false,
+    "purpose": "Preserve medium- and long-range story direction across many one-scene worker runs.",
+    "good_uses": [
+      "plotline ideas",
+      "future character introductions",
+      "escalation plans",
+      "reminders about where a currently small system may lead later"
+    ],
+    "example": "A later tram ride could become a train robbery or transit crisis that introduces new characters and turns the network into a more active plotline."
+  },
   "hook_policy": {
     "definition": "A hook is any unresolved mystery, unanswered question, suspicious clue, unknown identity, ominous promise, or unexplained causal thread that should matter later.",
     "rules": [
@@ -86,6 +118,11 @@
     "cycles_are_good": true,
     "merges_require_branch_state_compatibility": true,
     "quick_merges_are_good": true,
+    "anti_overmerge": {
+      "recent_window": 6,
+      "merge_only_streak_limit": 2,
+      "merge_only_count_limit": 3
+    },
     "quick_merge_definition": "A quick merge is when a brief informational or tonal detour leads back into the same larger event because the branch difference is small enough that the next scene still logically converges.",
     "quick_merge_examples": [
       "A -> examine the five thumbs -> C",
@@ -93,8 +130,11 @@
     ],
     "notes": [
       "Do not force three new branches every scene.",
+      "Every generated choice should carry internal planning notes in the form 'Goal: ... Intent: ...' so future workers can understand why the option exists and what larger direction it is meant to support.",
       "Let some scenes narrow, some widen, and some loop back into existing problems or places.",
       "Use quick merges for minor inspection choices, small lore reveals, or brief character beats before a larger event that would happen either way.",
+      "Quick merges are a relief valve, not the default branch shape.",
+      "If a branch has quick-merged repeatedly in recent scenes, the next expansion should usually open at least one fresh path instead of reconverging again.",
       "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge.",
       "For manual testing and review, the useful pre-change URL is /play?branch_key=<branch_key>&scene=<from_node_id>."
     ]
@@ -114,6 +154,8 @@
       "Character and object cutouts should be normalized into standard transparent frames so scenes usually work without hand-tuned scale values.",
       "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.",
       "If the player has clearly arrived somewhere new, reusing the old background to avoid art generation is usually the wrong move.",
+      "Generate art on demand, not speculatively.",
+      "If a place, character, or object is only being seeded for later and is not yet on-screen or immediately reachable in play, defer art until it is about to matter in a real scene.",
       "If a location has not yet been visually defined, give it a distinct, readable identity that fits the whimsical fantasy setting without overcomplicating the image prompt."
     ]
   },

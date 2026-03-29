@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+    <div>
+        <p class="eyebrow">Story Notes</p>
+        <h2>Global planning memory for future workers.</h2>
+        <p class="lede">These notes are not player-facing canon. They are a place to store plotline direction, future character ideas, offscreen consequences, and medium-range plans so each worker run does not have to rediscover the story's momentum from scratch.</p>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Add Note</h2>
+    <form method="post" action="/ui/story-notes/create" class="stack">
+        <label>Title <input type="text" name="title" required></label>
+        <label>Note Type <input type="text" name="note_type" value="plotline"></label>
+        <label>Direction / Idea <textarea name="note_text" rows="4" required></textarea></label>
+        <label>Status
+            <select name="status">
+                <option value="active">active</option>
+                <option value="parked">parked</option>
+                <option value="resolved">resolved</option>
+            </select>
+        </label>
+        <label>Priority <input type="number" name="priority" value="2" min="0" max="5"></label>
+        <label>Source Branch Key <input type="text" name="source_branch_key" value="default"></label>
+        <label>Related Entity Type <input type="text" name="related_entity_type" placeholder="location, character, object"></label>
+        <label>Related Entity ID <input type="text" name="related_entity_id"></label>
+        <label>Related Hook ID <input type="text" name="related_hook_id"></label>
+        <label>Extra Notes <textarea name="notes" rows="2"></textarea></label>
+        <button type="submit">Create Story Note</button>
+    </form>
+</section>
+
+<section class="card">
+    <h2>Current Notes</h2>
+    {% if notes %}
+        <div class="stack">
+        {% for note in notes %}
+            <article class="subcard">
+                <h3>#{{ note.id }} · {{ note.title }}</h3>
+                <p class="meta">Type: {{ note.note_type }} · Status: {{ note.status }} · Priority: {{ note.priority }}</p>
+                <p>{{ note.note_text }}</p>
+                {% if note.source_branch_key %}
+                    <p class="meta">Source branch: {{ note.source_branch_key }}</p>
+                {% endif %}
+                {% if note.related_entity_type and note.related_entity_id %}
+                    <p class="meta">Related entity: {{ note.related_entity_type }}:{{ note.related_entity_id }}</p>
+                {% endif %}
+                {% if note.related_hook_id %}
+                    <p class="meta">Related hook: #{{ note.related_hook_id }}</p>
+                {% endif %}
+                {% if note.notes %}
+                    <p class="meta">Notes: {{ note.notes }}</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+        </div>
+    {% else %}
+        <p class="empty">No global story notes yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -607,6 +607,7 @@ button {
 }
 
 .choice-button {
+    position: relative;
     min-height: 5.5rem;
     padding: 1rem 1.1rem;
     border-radius: 1rem;
@@ -633,10 +634,46 @@ button {
     text-transform: uppercase;
 }
 
+.choice-id {
+    position: absolute;
+    top: 0.62rem;
+    right: 0.78rem;
+    z-index: 1;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(246, 239, 228, 0.42);
+    font-size: 0.56rem;
+    font-family: "Courier New", Courier, monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    pointer-events: none;
+}
+
 .choice-label {
     display: block;
     font-size: 1rem;
     line-height: 1.45;
+}
+
+.choice-intent-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 1rem 1.1rem;
+    border-radius: 1rem;
+    background: rgba(93, 101, 115, 0.44);
+    color: rgba(246, 239, 228, 0.88);
+    font-size: 0.84rem;
+    line-height: 1.45;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+body.choice-intent-debug-visible .choice-intent-overlay {
+    opacity: 1;
 }
 
 .choice-status {

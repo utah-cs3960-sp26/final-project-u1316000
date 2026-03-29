@@ -24,6 +24,16 @@ let typingTimer = null;
 let isTyping = false;
 let hasReachedChoices = false;
 let isHudHidden = false;
+let isChoiceIntentOverlayVisible = false;
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
 
 function getSceneKeyFromUrl() {
     const url = new URL(window.location.href);
@@ -198,10 +208,13 @@ function renderChoices() {
             button.classList.add("choice-pending");
             button.disabled = true;
         }
+        const intentText = choice.intent || "No intent note recorded.";
         button.innerHTML = `
             <span class="choice-number">${index + 1}</span>
-            <span class="choice-label">${choice.label}</span>
+            <span class="choice-id">id ${choice.id}</span>
+            <span class="choice-label">${escapeHtml(choice.label)}</span>
             ${!isResolved ? '<span class="choice-status">Still being woven</span>' : ""}
+            <span class="choice-intent-overlay">${escapeHtml(intentText)}</span>
         `;
         button.addEventListener("click", () => {
             if (!isResolved) {
@@ -265,6 +278,11 @@ function toggleHud() {
     settingsMenu.classList.add("hidden");
 }
 
+function toggleChoiceIntentOverlay() {
+    isChoiceIntentOverlayVisible = !isChoiceIntentOverlayVisible;
+    document.body.classList.toggle("choice-intent-debug-visible", isChoiceIntentOverlayVisible);
+}
+
 continueButton.addEventListener("click", advanceDialogue);
 settingsButton.addEventListener("click", () => {
     settingsMenu.classList.toggle("hidden");
@@ -282,6 +300,12 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+    if (event.key === "c" || event.key === "C") {
+        event.preventDefault();
+        toggleChoiceIntentOverlay();
+        return;
+    }
+
     if (event.key === "h" || event.key === "H") {
         event.preventDefault();
         toggleHud();

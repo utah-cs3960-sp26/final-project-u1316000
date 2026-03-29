@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any
 
@@ -12,6 +13,11 @@ from app.services.canon import CanonResolver
 
 class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
+
+    CHOICE_NOTES_PATTERN = re.compile(
+        r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
+        re.IGNORECASE | re.DOTALL,
+    )
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -29,6 +35,7 @@ class StoryGraphService:
                 """,
                 (node["id"],),
             )
+            self._decode_choice_rows(node["choices"])
             node["present_entities"] = self._list_present_entities(node["id"])
             node["entities"] = fetch_all(
                 self.connection,
@@ -86,6 +93,7 @@ class StoryGraphService:
                 "SELECT * FROM choices WHERE from_node_id = ? ORDER BY id",
                 (node_id,),
             ):
+                self._decode_choice(choice)
                 scene_choices.append(
                     {
                         "id": int(choice["id"]),
@@ -93,6 +101,8 @@ class StoryGraphService:
                         "target": str(choice["to_node_id"]) if choice["to_node_id"] is not None else None,
                         "resolved": choice["to_node_id"] is not None,
                         "status": choice["status"],
+                        "notes": choice.get("notes_data", {}).get("notes") if isinstance(choice.get("notes_data"), dict) else choice.get("notes"),
+                        "intent": (choice.get("planning") or {}).get("intent"),
                     }
                 )
 
@@ -214,6 +224,7 @@ class StoryGraphService:
             "SELECT * FROM choices WHERE from_node_id = ? ORDER BY id",
             (node_id,),
         )
+        self._decode_choice_rows(node["choices"])
         node["present_entities"] = self._list_present_entities(node_id)
         node["entities"] = fetch_all(
             self.connection,
@@ -290,6 +301,101 @@ class StoryGraphService:
             ),
         )
 
+    def describe_branch_shape(
+        self,
+        branch_key: str,
+        *,
+        branching_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        policy = branching_policy or {}
+        anti_overmerge = policy.get("anti_overmerge", policy)
+        recent_window = int(anti_overmerge.get("recent_window", 6))
+        merge_only_streak_limit = int(anti_overmerge.get("merge_only_streak_limit", 2))
+        merge_only_count_limit = int(anti_overmerge.get("merge_only_count_limit", 3))
+
+        rows = fetch_all(
+            self.connection,
+            """
+            SELECT id, title, summary
+            FROM story_nodes
+            WHERE branch_key = ? AND parent_node_id IS NOT NULL
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (branch_key, recent_window),
+        )
+
+        recent_nodes: list[dict[str, Any]] = []
+        merge_only_count = 0
+        mixed_merge_count = 0
+        nodes_opening_fresh_paths = 0
+        merge_only_streak = 0
+
+        for index, row in enumerate(rows):
+            choices = fetch_all(
+                self.connection,
+                "SELECT id, to_node_id FROM choices WHERE from_node_id = ? ORDER BY id",
+                (row["id"],),
+            )
+            total_choices = len(choices)
+            merge_choices = sum(1 for choice in choices if choice["to_node_id"] is not None)
+            fresh_choices = sum(1 for choice in choices if choice["to_node_id"] is None)
+            is_merge_only = total_choices > 0 and merge_choices > 0 and fresh_choices == 0
+            opens_fresh_path = fresh_choices > 0
+            is_mixed = merge_choices > 0 and fresh_choices > 0
+
+            if is_merge_only:
+                merge_only_count += 1
+            if is_mixed:
+                mixed_merge_count += 1
+            if opens_fresh_path:
+                nodes_opening_fresh_paths += 1
+            if index == merge_only_streak and is_merge_only:
+                merge_only_streak += 1
+
+            recent_nodes.append(
+                {
+                    "node_id": int(row["id"]),
+                    "title": row["title"],
+                    "summary": row["summary"],
+                    "total_choices": total_choices,
+                    "merge_choices": merge_choices,
+                    "fresh_choices": fresh_choices,
+                    "is_merge_only": is_merge_only,
+                    "opens_fresh_path": opens_fresh_path,
+                }
+            )
+
+        should_prefer_divergence = (
+            merge_only_streak >= merge_only_streak_limit
+            or merge_only_count >= merge_only_count_limit
+        )
+        if should_prefer_divergence:
+            merge_pressure_level = "high"
+            reason = (
+                "This branch has reconverged too often recently. The next expansion should open at least one fresh path."
+            )
+        elif merge_only_count > 0 or mixed_merge_count > 0:
+            merge_pressure_level = "medium"
+            reason = (
+                "This branch has used some quick merges recently. Another merge is still possible, but divergence should be considered first."
+            )
+        else:
+            merge_pressure_level = "low"
+            reason = "This branch has room for a quick merge if it truly fits, but fresh divergence is still welcome."
+
+        return {
+            "recent_window": recent_window,
+            "merge_only_streak": merge_only_streak,
+            "merge_only_count": merge_only_count,
+            "mixed_merge_count": mixed_merge_count,
+            "nodes_opening_fresh_paths": nodes_opening_fresh_paths,
+            "merge_pressure_level": merge_pressure_level,
+            "should_prefer_divergence": should_prefer_divergence,
+            "reason": reason,
+            "recent_nodes": recent_nodes,
+        }
+
     def list_frontier(
         self,
         *,
@@ -297,6 +403,7 @@ class StoryGraphService:
         branch_key: str | None = None,
         limit: int = 20,
         mode: str = "auto",
+        branching_policy: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         query = """
             SELECT c.*, sn.branch_key, sn.summary AS from_node_summary, sn.title AS from_node_title, sn.scene_text AS from_node_text
@@ -313,7 +420,8 @@ class StoryGraphService:
         items: list[dict[str, Any]] = []
         for row in rows:
             branch = branch_state_service.get_branch_state(row["branch_key"])
-            score, reason = self._score_frontier_item(row=row, branch=branch)
+            branch_shape = self.describe_branch_shape(row["branch_key"], branching_policy=branching_policy)
+            score, reason = self._score_frontier_item(row=row, branch=branch, branch_shape=branch_shape)
             item = {
                 "branch_key": row["branch_key"],
                 "from_node_id": row["from_node_id"],
@@ -327,6 +435,7 @@ class StoryGraphService:
                 "blocked_major_hooks": branch["blocked_major_hooks"],
                 "available_affordances": branch_state_service.list_available_affordances(row["branch_key"]),
                 "recurring_entities": branch["recurring_entities"],
+                "branch_shape": branch_shape,
                 "selection_score": score,
                 "selection_reason": reason,
                 "created_at": row["created_at"],
@@ -421,6 +530,41 @@ class StoryGraphService:
                     )
                 )
 
+            for location in candidate.new_locations:
+                canon.create_or_get_location(
+                    name=location.name,
+                    description=location.description,
+                    canonical_summary=location.canonical_summary,
+                )
+
+            for character in candidate.new_characters:
+                home_location_id = None
+                if character.home_location_name:
+                    home_location_id = self._resolve_or_create_named_entity(
+                        entity_type="location",
+                        name=character.home_location_name,
+                    )
+                canon.create_or_get_character(
+                    name=character.name,
+                    description=character.description,
+                    canonical_summary=character.canonical_summary,
+                    home_location_id=home_location_id,
+                )
+
+            for obj in candidate.new_objects:
+                default_location_id = None
+                if obj.default_location_name:
+                    default_location_id = self._resolve_or_create_named_entity(
+                        entity_type="location",
+                        name=obj.default_location_name,
+                    )
+                canon.create_or_get_object(
+                    name=obj.name,
+                    description=obj.description,
+                    canonical_summary=obj.canonical_summary,
+                    default_location_id=default_location_id,
+                )
+
             for fact in candidate.fact_updates:
                 entity_id = self._resolve_or_create_entity_id(canon=canon, fact=fact)
                 self.connection.execute(
@@ -497,6 +641,29 @@ class StoryGraphService:
                         json.dumps(updated_clue_tags),
                         json.dumps(updated_state_tags),
                         hook_update.hook_id,
+                    ),
+                )
+
+            for direction_note in candidate.global_direction_notes:
+                self.connection.execute(
+                    """
+                    INSERT INTO story_direction_notes (
+                        note_type, title, note_text, status, priority, related_entity_type, related_entity_id,
+                        related_hook_id, source_branch_key, notes, created_by
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'generation_apply')
+                    """,
+                    (
+                        direction_note.note_type,
+                        direction_note.title,
+                        direction_note.note_text,
+                        direction_note.status,
+                        direction_note.priority,
+                        direction_note.related_entity_type,
+                        direction_note.related_entity_id,
+                        direction_note.related_hook_id,
+                        direction_note.source_branch_key or request_branch_key,
+                        direction_note.notes,
                     ),
                 )
 
@@ -588,6 +755,7 @@ class StoryGraphService:
             "relationship_states",
             "branch_tags",
             "story_hooks",
+            "story_direction_notes",
         ]
         counts: dict[str, int] = {}
         for table_name in table_names:
@@ -621,7 +789,46 @@ class StoryGraphService:
             return lines
         return [{"speaker": "Narrator", "text": node["scene_text"]}]
 
-    def _score_frontier_item(self, *, row: dict[str, Any], branch: dict[str, Any]) -> tuple[float, str]:
+    def _decode_choice_rows(self, choices: list[dict[str, Any]]) -> None:
+        for choice in choices:
+            self._decode_choice(choice)
+
+    def _decode_choice(self, choice: dict[str, Any]) -> None:
+        raw_notes = choice.get("notes")
+        if not raw_notes:
+            choice["notes_data"] = None
+            choice["planning"] = None
+            return
+        try:
+            decoded = json.loads(raw_notes)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, dict):
+            choice["notes_data"] = decoded
+            planning_source = decoded.get("notes")
+        else:
+            choice["notes_data"] = None
+            planning_source = raw_notes
+        choice["planning"] = self._parse_choice_planning(planning_source)
+
+    def _parse_choice_planning(self, raw_notes: str | None) -> dict[str, str] | None:
+        if not raw_notes:
+            return None
+        match = self.CHOICE_NOTES_PATTERN.search(raw_notes.strip())
+        if match is None:
+            return None
+        return {
+            "goal": match.group("goal").strip(),
+            "intent": match.group("intent").strip(),
+        }
+
+    def _score_frontier_item(
+        self,
+        *,
+        row: dict[str, Any],
+        branch: dict[str, Any],
+        branch_shape: dict[str, Any],
+    ) -> tuple[float, str]:
         active_hooks = len(branch["active_hooks"])
         eligible_major = len(branch["eligible_major_hooks"])
         blocked_major = len(branch["blocked_major_hooks"])
@@ -636,8 +843,14 @@ class StoryGraphService:
         score += min(recurring_entities, 5) * 1.5
         score -= min(blocked_major, 3) * 2.0
         score -= depth * 1.25
+        if branch_shape.get("should_prefer_divergence"):
+            score += 8.0
+        elif branch_shape.get("merge_pressure_level") == "medium":
+            score += 3.0
 
-        if eligible_major > 0:
+        if branch_shape.get("should_prefer_divergence"):
+            reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."
+        elif eligible_major > 0:
             reason = "Strong candidate: the branch has eligible long-running hooks ready for careful advancement."
         elif affordances > 0:
             reason = "Good breadth target: this branch has unlocked affordances worth recurring naturally."

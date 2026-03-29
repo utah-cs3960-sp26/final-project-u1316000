@@ -14,7 +14,9 @@ from fastapi.testclient import TestClient
 from app.database import bootstrap_database, connect
 from app.main import create_app
 from app.services.assets import AssetService
+from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
+from app.services.story_graph import StoryGraphService
 
 
 def build_client(tmp_path: Path) -> tuple[TestClient, Path]:
@@ -54,6 +56,7 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "relationship_states",
         "branch_tags",
         "story_hooks",
+        "story_direction_notes",
     }.issubset(tables)
 
 
@@ -627,7 +630,7 @@ def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) ->
             "branch_key": "default",
             "scene_summary": "The hat reveals everything immediately.",
             "scene_text": "The hat tells you the entire truth far too early.",
-            "choices": [{"choice_text": "Keep going"}],
+            "choices": [{"choice_text": "Keep going", "notes": "Goal: continue after the reveal. Intent: move the branch onward after a supposed payoff."}],
             "hook_updates": [
                 {
                     "hook_id": hook_id,
@@ -663,7 +666,7 @@ def test_generation_validation_requires_hook_for_placeholder_mystery_entity(tmp_
             "entity_references": [
                 {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
             ],
-            "choices": [{"choice_text": "Step closer"}],
+            "choices": [{"choice_text": "Step closer", "notes": "Goal: approach the speaker. Intent: deepen the new stalk-side mystery."}],
         },
     )
 
@@ -672,6 +675,26 @@ def test_generation_validation_requires_hook_for_placeholder_mystery_entity(tmp_
     assert result["valid"] is False
     assert any("unresolved mystery/question" in issue.lower() for issue in result["issues"])
     assert any("current_scene location" in issue for issue in result["issues"])
+
+
+def test_generation_validation_requires_goal_and_intent_notes_for_choices(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A simple branch option with no planning notes.",
+            "scene_text": "The scene offers a choice but gives no intent behind it.",
+            "choices": [{"choice_text": "Step toward the bell"}],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("Goal and Intent" in issue for issue in result["issues"])
 
 
 def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_and_linked(tmp_path: Path) -> None:
@@ -701,7 +724,7 @@ def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_a
                     "min_distance_to_payoff": 1,
                 }
             ],
-            "choices": [{"choice_text": "Step closer"}],
+            "choices": [{"choice_text": "Step closer", "notes": "Goal: approach the speaker. Intent: keep the voice mystery alive as a true hook."}],
         },
     )
 
@@ -736,6 +759,7 @@ def test_generation_validation_allows_unlocked_affordance_choice(tmp_path: Path)
             "choices": [
                 {
                     "choice_text": "Blow the goose whistle",
+                    "notes": "Goal: call an emergency ride. Intent: use an unlocked affordance to open a traversal branch.",
                     "required_affordances": ["Call the Goose"],
                 }
             ],
@@ -758,6 +782,7 @@ def test_generation_validation_rejects_missing_affordance_choice(tmp_path: Path)
             "choices": [
                 {
                     "choice_text": "Blow the goose whistle",
+                    "notes": "Goal: call a goose from nowhere. Intent: shortcut the story with an unavailable affordance.",
                     "required_affordances": ["Call the Goose"],
                 }
             ],
@@ -774,6 +799,14 @@ def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path
     client, _ = build_client(tmp_path)
     client.post("/story/reset-opening-canon")
     client.post("/story/seed-opening-story")
+    client.post(
+        "/story-notes",
+        json={
+            "note_type": "plotline",
+            "title": "Tram escalation seed",
+            "note_text": "A later tram ride could erupt into a transit crisis or robbery.",
+        },
+    )
     preview_response = client.post(
         "/jobs/generation-preview",
         json={
@@ -790,6 +823,9 @@ def test_generation_preview_includes_story_bible_and_branch_state(tmp_path: Path
     assert data["context"]["branch_state"]["branch_key"] == "default"
     assert "merge_candidates" in data["context"]
     assert len(data["context"]["merge_candidates"]) >= 1
+    assert "branch_shape" in data["context"]
+    assert "global_direction_notes" in data["context"]
+    assert data["context"]["global_direction_notes"][0]["title"] == "Tram escalation seed"
     assert "Major mysteries must not resolve" in data["prompt"]
 
 
@@ -804,6 +840,67 @@ def test_frontier_returns_open_branch_ends(tmp_path: Path) -> None:
     assert all(item["choice_id"] is not None for item in items)
     assert all("selection_score" in item for item in items)
     assert all("selection_reason" in item for item in items)
+    assert all("branch_shape" in item for item in items)
+    assert all("merge_pressure_level" in item["branch_shape"] for item in items)
+
+
+def test_generation_validation_blocks_merge_only_scene_when_branch_needs_divergence(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        branch_state = BranchStateService(connection, client.app.state.llm_generation.story_bible["acts"])
+        branch_state.sync_branch_progress("default")
+
+        node_one = story.create_story_node(
+            branch_key="default",
+            title="Quick Merge One",
+            scene_text="A tiny detour points back toward the tracks.",
+            summary="First merge-only detour.",
+            parent_node_id=4,
+        )
+        story.create_choice(
+            from_node_id=int(node_one["id"]),
+            choice_text="Rejoin the silver tracks",
+            to_node_id=2,
+            status="fulfilled",
+        )
+
+        node_two = story.create_story_node(
+            branch_key="default",
+            title="Quick Merge Two",
+            scene_text="Another tiny detour still points back to the main line.",
+            summary="Second merge-only detour.",
+            parent_node_id=int(node_one["id"]),
+        )
+        story.create_choice(
+            from_node_id=int(node_two["id"]),
+            choice_text="Rejoin the silver tracks again",
+            to_node_id=2,
+            status="fulfilled",
+        )
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "Yet another tiny detour that only merges back into the same thing.",
+            "scene_text": "The scene exists only to fold back into an existing branch again.",
+            "choices": [
+                {
+                    "choice_text": "Return to the silver tracks",
+                    "notes": "Goal: fold back into the main clue trail. Intent: test whether over-merged branches are forced to diverge.",
+                    "target_node_id": 2,
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("quick-merged too often recently" in issue for issue in result["issues"])
 
 
 def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path) -> None:
@@ -830,8 +927,21 @@ def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path
                     {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True, "scale": 1.16}
                 ],
                 "choices": [
-                    {"choice_text": "Knock on the mushroom stem"},
-                    {"choice_text": "Circle around the velvet knot"},
+                    {
+                        "choice_text": "Knock on the mushroom stem",
+                        "notes": "Goal: test whether the mushroom answers. Intent: open a fresh mystery path at the marked stem.",
+                    },
+                    {
+                        "choice_text": "Circle around the velvet knot",
+                        "notes": "Goal: inspect the marker from another angle. Intent: widen the local branch with a clue-focused alternative.",
+                    },
+                ],
+                "global_direction_notes": [
+                    {
+                        "note_type": "plotline",
+                        "title": "Tram action escalation seed",
+                        "note_text": "A later tram ride could tip into a robbery or transit crisis.",
+                    }
                 ],
                 "discovered_clue_tags": ["velvet-mushroom-found"],
             },
@@ -853,6 +963,8 @@ def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path
 
     branch_state = client.get("/branches/default/state").json()
     assert any(tag["tag"] == "velvet-mushroom-found" for tag in branch_state["tags"])
+    notes = client.get("/story-notes").json()
+    assert any(note["title"] == "Tram action escalation seed" for note in notes)
 
 
 def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> None:
@@ -879,6 +991,7 @@ def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> No
                 "choices": [
                     {
                         "choice_text": "Follow the grooves after all",
+                        "notes": "Goal: return to the main clue trail. Intent: quick-merge this minor omen back into the silver-track line.",
                         "target_node_id": velvet_node["id"],
                     }
                 ],
@@ -937,6 +1050,7 @@ def test_apply_generation_rejects_missing_affordance_choice_write(tmp_path: Path
                 "choices": [
                     {
                         "choice_text": "Blow the goose whistle",
+                        "notes": "Goal: summon a nonexistent goose. Intent: force a branch through an unavailable affordance.",
                         "required_affordances": ["Call the Goose"],
                     }
                 ],
@@ -945,6 +1059,92 @@ def test_apply_generation_rejects_missing_affordance_choice_write(tmp_path: Path
     )
 
     assert response.status_code == 400
+
+
+def test_validate_generation_requires_new_entity_descriptions(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A new clerk appears.",
+            "scene_text": "A fussy little clerk pops out of the wall with a ledger.",
+            "choices": [
+                {
+                    "choice_text": "Hear the clerk out",
+                    "notes": "Goal: listen to the new clerk. Intent: open a fresh recurring bureaucratic character thread.",
+                }
+            ],
+            "relation_updates": [
+                {
+                    "subject_type": "character",
+                    "subject_name": "Clerk Sedge",
+                    "relation_type": "works_at",
+                    "object_type": "location",
+                    "object_name": "Mushroom Field",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    issues = response.json()["issues"]
+    assert any("Clerk Sedge" in issue and "new_characters" in issue for issue in issues)
+
+
+def test_apply_generation_creates_new_entity_with_description(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Clerk Arrival",
+                "scene_summary": "A neat clerk appears near the mushroom path.",
+                "scene_text": "A neat clerk steps out with a ledger and a worried little bow.",
+                "choices": [
+                    {
+                        "choice_text": "Ask the clerk what he wants",
+                        "notes": "Goal: meet the new clerk. Intent: open a fresh recurring character thread with a bureaucratic angle.",
+                    }
+                ],
+                "new_characters": [
+                    {
+                        "name": "Clerk Sedge",
+                        "description": "A tidy field clerk with a ledger, a careful bow, and an anxious respect for procedures.",
+                        "canonical_summary": "A recurring mushroom-field clerk who treats strange incidents as paperwork problems.",
+                    }
+                ],
+                "relation_updates": [
+                    {
+                        "subject_type": "character",
+                        "subject_name": "Clerk Sedge",
+                        "relation_type": "works_at",
+                        "object_type": "location",
+                        "object_name": "Mushroom Field",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+
+    with connect(db_path) as connection:
+        canon = CanonResolver(connection)
+        clerk = canon.find_character_by_name("Clerk Sedge")
+
+    assert clerk is not None
+    assert clerk["description"] == "A tidy field clerk with a ledger, a careful bow, and an anxious respect for procedures."
 
 
 def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkeypatch) -> None:
@@ -1056,6 +1256,47 @@ def test_play_scene_query_sets_start_scene_permalink(tmp_path: Path) -> None:
     assert story_data["start_scene"] == target_scene_id
 
 
+def test_play_story_payload_exposes_choice_intent(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    apply_response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Intent Test Scene",
+                "scene_summary": "A scene used to confirm intent text reaches the player payload.",
+                "scene_text": "A clear little branch for testing.",
+                "choices": [
+                    {
+                        "choice_text": "Take the careful route",
+                        "notes": "Goal: choose the safer branch. Intent: keep the mushroom-field thread alive while opening a cautious follow-up path.",
+                    }
+                ],
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+    created_node_id = str(apply_response.json()["node"]["id"])
+
+    response = client.get(f"/play?branch_key=default&scene={created_node_id}")
+    assert response.status_code == 200
+    match = re.search(
+        r'<script id="player-story-data" type="application/json">(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    assert match is not None
+    story_data = json.loads(match.group(1))
+    choice = story_data["scenes"][created_node_id]["choices"][0]
+    assert choice["intent"] == "keep the mushroom-field thread alive while opening a cautious follow-up path."
+
+
 def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     assert client.get("/").status_code == 200
@@ -1106,6 +1347,14 @@ def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
 def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
+    client.post(
+        "/story-notes",
+        json={
+            "note_type": "plotline",
+            "title": "Transit Trouble Seed",
+            "note_text": "A later tram route could erupt into a transit crisis.",
+        },
+    )
 
     command = [
         sys.executable,
@@ -1138,7 +1387,11 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
     assert "full_context" not in packet
     assert "eligible_major_hooks" in packet["context_summary"]
     assert "blocked_major_hooks" in packet["context_summary"]
+    assert packet["context_summary"]["global_direction_notes"][0]["title"] == "Transit Trouble Seed"
+    assert "branch_shape" in packet["context_summary"]
+    assert "global_direction_notes" in packet["candidate_template"]
     assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
+    assert "choice id" in packet["next_action"].lower()
 
 
 def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
@@ -1163,6 +1416,14 @@ def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Pa
     assert result.returncode == 0
     packet = json.loads(result.stdout)
     assert "full_context" in packet
+
+
+def test_player_script_renders_choice_id_badge() -> None:
+    player_js = (Path(__file__).resolve().parents[1] / "app" / "static" / "player.js").read_text(encoding="utf-8")
+    assert "choice-id" in player_js
+    assert 'id ${choice.id}' in player_js
+    assert "choice-intent-debug-visible" in player_js
+    assert "choice-intent-overlay" in player_js
 
 
 def test_branch_hooks_endpoint_and_ui_show_readiness(tmp_path: Path) -> None:
@@ -1211,6 +1472,38 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     hooks_page = client.get("/ui/hooks")
     assert hooks_page.status_code == 200
     assert "Hooks" in hooks_page.text
+
+
+def test_story_notes_endpoints_and_ui(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    create_response = client.post(
+        "/story-notes",
+        json={
+            "note_type": "future_character",
+            "title": "Future Goose Bandit",
+            "note_text": "A goose-back bandit could later interrupt a tram route and become a recurring rival.",
+            "source_branch_key": "default",
+        },
+    )
+    assert create_response.status_code == 200
+    note = create_response.json()
+    assert note["title"] == "Future Goose Bandit"
+
+    update_response = client.post(
+        f"/story-notes/{note['id']}",
+        json={"status": "parked"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["status"] == "parked"
+
+    notes_response = client.get("/story-notes")
+    assert notes_response.status_code == 200
+    assert any(item["title"] == "Future Goose Bandit" for item in notes_response.json())
+
+    ui_response = client.get("/ui/story-notes")
+    assert ui_response.status_code == 200
+    assert "Story Notes" in ui_response.text
+    assert "Future Goose Bandit" in ui_response.text
     player_page = client.get("/play")
     assert player_page.status_code == 200
     assert "Restart Adventure" in player_page.text

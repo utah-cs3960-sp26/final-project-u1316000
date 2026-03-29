@@ -103,6 +103,13 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Use `POST /jobs/validate-generation` to check a candidate scene against hook pacing and affordance continuity rules before writing it into the graph.
 - Use `GET /frontier` to pick the next unresolved branch end.
 - Use `POST /jobs/apply-generation` to atomically write a validated scene into the story graph.
+- Use `story_direction_notes` for global planning memory:
+  - future plotline ideas
+  - future character introductions
+  - escalation plans
+  - reminders about where a currently small system could lead later
+- Use [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) as the loose shared scratchpad for fun future ideas that you or a worker want to jot down quickly.
+- Hooks are branch-local in-world unresolved threads. Story direction notes are out-of-world planning memory.
 - Default worker behavior should be `2` or `3` choices per scene, not a rigid `3` forever.
 - Cycles are fine. Merges should be used carefully when branch-local state still lines up.
 - Use `POST /story/reset-opening-canon` to seed the updated bucket-hat protagonist and opening canon.

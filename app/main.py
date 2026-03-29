@@ -25,6 +25,8 @@ from app.models import (
     GenerationCandidate,
     InventoryEntryCreate,
     RelationshipStateCreate,
+    StoryDirectionNoteCreate,
+    StoryDirectionNoteUpdate,
     StoryHookCreate,
     StoryNodeCreate,
     WorldSeed,
@@ -33,6 +35,7 @@ from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
+from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 from app.services.story_setup import StorySetupService
 
@@ -179,6 +182,13 @@ PLAYER_DEMO_STORY: dict[str, Any] = {
 }
 
 
+def get_static_asset_version(project_root: Path) -> str:
+    static_dir = Path(__file__).resolve().parent / "static"
+    tracked_files = [static_dir / "player.css", static_dir / "player.js"]
+    latest_mtime = max(path.stat().st_mtime_ns for path in tracked_files)
+    return str(latest_mtime)
+
+
 def get_db(request: Request) -> sqlite3.Connection:
     database_path = request.app.state.settings.database_path
     connection = connect(database_path)
@@ -193,6 +203,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     bootstrap_database(settings.database_path)
     project_root = Path(__file__).resolve().parent.parent
     asset_root = project_root / "data" / "assets"
+    static_asset_version = get_static_asset_version(project_root)
 
     app = FastAPI(title="CYOA Prototype")
     app.state.settings = settings
@@ -249,6 +260,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "request": request,
                 "story_data": resolved_story,
                 "title": resolved_story["title"],
+                "asset_version": static_asset_version,
             },
         )
 
@@ -264,6 +276,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "request": request,
                 "title": "You Died",
                 "restart_url": f"/play?branch_key={branch_key}",
+                "asset_version": static_asset_version,
             },
         )
 
@@ -500,6 +513,48 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/story-notes", response_class=HTMLResponse)
+    def story_notes_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+        notes_service = StoryDirectionService(db)
+        return templates.TemplateResponse(
+            request,
+            "story_notes.html",
+            {
+                "request": request,
+                "notes": notes_service.list_notes(),
+            },
+        )
+
+    @app.post("/ui/story-notes/create")
+    def create_story_note_from_ui(
+        title: str = Form(...),
+        note_text: str = Form(...),
+        note_type: str = Form("plotline"),
+        status: str = Form("active"),
+        priority: int = Form(2),
+        source_branch_key: str = Form(""),
+        related_entity_type: str = Form(""),
+        related_entity_id: str = Form(""),
+        related_hook_id: str = Form(""),
+        notes: str = Form(""),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> RedirectResponse:
+        notes_service = StoryDirectionService(db)
+        notes_service.create_note(
+            note_type=note_type,
+            title=title,
+            note_text=note_text,
+            status=status,
+            priority=priority,
+            source_branch_key=source_branch_key.strip() or None,
+            related_entity_type=related_entity_type.strip() or None,
+            related_entity_id=int(related_entity_id) if related_entity_id.strip() else None,
+            related_hook_id=int(related_hook_id) if related_hook_id.strip() else None,
+            notes=notes or None,
+            created_by="ui",
+        )
+        return RedirectResponse("/ui/story-notes", status_code=303)
+
     @app.post("/ui/story/node")
     def create_story_node_form(
         branch_key: str = Form("default"),
@@ -690,9 +745,37 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def get_assets(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
         return AssetService(db, project_root).list_assets()
 
+    @app.get("/story-notes")
+    def get_story_notes(
+        status: str | None = Query(None),
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> list[dict[str, Any]]:
+        notes_service = StoryDirectionService(db)
+        return notes_service.list_notes(statuses=[status] if status else None)
+
     @app.get("/story-bible")
     def get_story_bible() -> dict[str, Any]:
         return app.state.llm_generation.story_bible
+
+    @app.post("/story-notes")
+    def create_story_note(
+        payload: StoryDirectionNoteCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        notes_service = StoryDirectionService(db)
+        return notes_service.create_note(**payload.model_dump())
+
+    @app.post("/story-notes/{note_id}")
+    def update_story_note(
+        note_id: int,
+        payload: StoryDirectionNoteUpdate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        notes_service = StoryDirectionService(db)
+        try:
+            return notes_service.update_note(note_id, **payload.model_dump(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/story/reset-opening-canon")
     def reset_opening_canon(db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
@@ -754,6 +837,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             branch_key=branch_key,
             limit=limit,
             mode=mode,
+            branching_policy=app.state.llm_generation.story_bible.get("branching_policy"),
         )
 
     @app.post("/branches/{branch_key}/tags")
@@ -881,6 +965,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         canon = CanonResolver(db)
         story = StoryGraphService(db)
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        story_notes = StoryDirectionService(db)
         current_node_id = payload.current_node_id
         if current_node_id is None and payload.choice_id is not None:
             choice = next((choice for choice in story.list_choices() if int(choice["id"]) == payload.choice_id), None)
@@ -890,6 +975,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             branch_key=payload.branch_key,
             canon=canon,
             branch_state=branch_state,
+            story_notes=story_notes,
             story_graph=story,
             focus_entity_ids=payload.focus_entity_ids,
             current_node_id=current_node_id,

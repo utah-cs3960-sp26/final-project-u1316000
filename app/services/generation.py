@@ -8,6 +8,7 @@ from typing import Any
 from app.models import GenerationCandidate
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
+from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 
 
@@ -28,6 +29,11 @@ class LLMGenerationService:
         re.compile(r"\bunknown\b", re.IGNORECASE),
         re.compile(r"\bmysterious\b", re.IGNORECASE),
     ]
+    CHOICE_NOTES_PATTERN = re.compile(
+        r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    MIN_ENTITY_DESCRIPTION_LENGTH = 12
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -40,6 +46,7 @@ class LLMGenerationService:
         branch_key: str,
         canon: CanonResolver,
         branch_state: BranchStateService,
+        story_notes: StoryDirectionService,
         story_graph: StoryGraphService,
         focus_entity_ids: list[int],
         current_node_id: int | None,
@@ -53,10 +60,15 @@ class LLMGenerationService:
         blocked_major_hooks = branch_state.list_ineligible_hooks(branch_key, importance="major")
         branch = branch_state.sync_branch_progress(branch_key)
         current_node = story_graph.get_story_node(current_node_id) if current_node_id is not None else None
+        branch_shape = story_graph.describe_branch_shape(
+            branch_key,
+            branching_policy=self.story_bible.get("branching_policy"),
+        )
         merge_candidates = story_graph.list_merge_candidates(
             branch_key,
             exclude_node_ids=[current_node_id] if current_node_id is not None else None,
         )
+        global_direction_notes = story_notes.list_notes(statuses=["active", "parked"], limit=12)
 
         relevant_locations = [location for location in canon.list_locations() if location["id"] in focus_entity_ids]
         relevant_characters = [character for character in canon.list_characters() if character["id"] in focus_entity_ids]
@@ -90,9 +102,11 @@ class LLMGenerationService:
             "available_affordances": branch_state.list_available_affordances(branch_key),
             "relationship_states": branch["relationships"],
             "branch_tags": branch["tags"],
+            "branch_shape": branch_shape,
             "active_hooks": active_hooks,
             "eligible_major_hooks": eligible_major_hooks,
             "blocked_major_hooks": blocked_major_hooks,
+            "global_direction_notes": global_direction_notes,
             "recurring_entities": recurring_entities,
             "merge_candidates": merge_candidates,
             "requested_choice_count": requested_choice_count,
@@ -102,9 +116,16 @@ class LLMGenerationService:
         return (
             "You are extending a branching whimsical fantasy world while preserving continuity.\n"
             "Follow the story bible, respect hook pacing, and keep the tone sincere rather than jokey.\n"
+            "Use a mix of lyrical narration and clearer spoken dialogue.\n"
+            "Narration may be more poetic or uncanny, but spoken dialogue should usually be more grounded and immediately understandable.\n"
+            "The player character should usually be one of the clearest voices in the scene.\n"
+            "Prefer clear weird over murky weird. If a line sounds evocative but you cannot paraphrase it plainly, rewrite it.\n"
+            "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.\n"
             "A hook is any unresolved mystery, unanswered question, ominous promise, unknown identity, suspicious clue, or strange causal thread that should matter later.\n"
             "If you introduce a new unresolved mystery or question, create a new_hook immediately unless it is clearly just advancing an already existing hook.\n"
             "If you introduce a placeholder mystery entity such as an unseen voice, unknown figure, or unnamed presence, create a hook for it immediately and link that hook to the current_scene location or another relevant entity whenever possible.\n"
+            "If you introduce a brand-new canonical location, character, or object, declare it explicitly in new_locations, new_characters, or new_objects with a short readable description.\n"
+            "Do not rely on name-only auto-creation for new canon entities.\n"
             "For major hooks, include a payoff_concept that voices the intended direction of the eventual answer without fully locking every detail. Minor and local hooks may include payoff_concept too when that helps continuity.\n"
             "Use must_not_imply on hooks when there are tempting wrong shortcuts future workers should avoid.\n"
             "A good payoff_concept should describe the general shape of the later answer, not just bind the mystery to whatever system or NPC is immediately available in the current scene.\n"
@@ -115,17 +136,22 @@ class LLMGenerationService:
             "Do not let the first nearby recurring NPC, transit system, or local mechanic swallow a long-range mystery just because it is available now.\n"
             "For any hook, min_distance_to_payoff and required clue/state tags determine whether payoff is allowed. Validation will reject early resolution.\n"
             "Persistent affordances and inventory items remain available in the branch unless explicitly changed.\n"
+            "Global direction notes are out-of-world planning memory, not player-facing canon. Use them to keep longer arcs, future characters, and stronger plot direction alive across runs.\n"
+            "When you start a medium- or long-range plotline, or you realize a future beat, character, or escalation should probably happen later, add a global_direction_note so future workers do not have to rediscover the idea from scratch.\n"
             "Treat requested_choice_count as a target, not a rigid quota. Usually return 2 or 3 choices, sometimes 1 for a forced beat, and only occasionally 4 or more when the scene genuinely blooms.\n"
             "Cycles are allowed. Careful merges are allowed when branch-local consequences still make sense; do not collapse branches that now depend on different local state.\n"
+            "Quick merges are a relief valve, not the default branch shape. If branch_shape.should_prefer_divergence is true, open at least one fresh path instead of only merging into existing scenes.\n"
+            "Every choice must include internal planning notes in this form: 'Goal: ... Intent: ...'. Goal is the immediate purpose of taking the option. Intent is what broader direction, branch shape, or future possibility the option is meant to open, reinforce, or revisit.\n"
             "If a quick merge is appropriate, a generated choice may include target_node_id pointing at one of the provided merge_candidates.\n"
             "Use scene_present_entities and hidden_on_lines when actors or objects should appear, disappear, or swap focus during the same scene.\n"
             "If a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, make the need for art obvious so the post-apply asset pass can generate it once real IDs exist.\n"
+            "Generate art on demand, not speculatively. If a place, character, or object is only being set up for later and is not yet on-screen or immediately reachable in play, defer its art until a later scene actually needs it.\n"
             "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.\n"
             "If the player has clearly arrived somewhere new, reusing the old background just to avoid art generation is usually the wrong choice.\n"
             "If a location does not yet have art, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.\n"
             "Return structured JSON only with these top-level keys:\n"
-            "scene_summary, scene_text, dialogue_lines, choices, entity_references, scene_present_entities, fact_updates, relation_updates, "
-            "new_hooks, hook_updates, inventory_changes, affordance_changes, relationship_changes, "
+            "scene_summary, scene_text, dialogue_lines, choices, new_locations, new_characters, new_objects, entity_references, scene_present_entities, fact_updates, relation_updates, "
+            "new_hooks, hook_updates, global_direction_notes, inventory_changes, affordance_changes, relationship_changes, "
             "asset_requests, discovered_clue_tags, discovered_state_tags.\n"
             f"Context:\n{json.dumps(context, indent=2)}"
         )
@@ -139,6 +165,10 @@ class LLMGenerationService:
         story_graph: StoryGraphService,
     ) -> dict[str, Any]:
         branch = branch_state_service.sync_branch_progress(candidate.branch_key)
+        branch_shape = story_graph.describe_branch_shape(
+            candidate.branch_key,
+            branching_policy=self.story_bible.get("branching_policy"),
+        )
         current_depth = int(branch["branch_depth"])
         state_tags = {row["tag"] for row in branch_state_service.list_branch_tags(candidate.branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in branch_state_service.list_branch_tags(candidate.branch_key, tag_type="clue")}
@@ -148,6 +178,44 @@ class LLMGenerationService:
 
         if len(candidate.choices) == 0:
             issues.append("Generation candidate must include at least one choice.")
+
+        entity_proposals = {
+            "location": {proposal.name.strip().lower(): proposal for proposal in candidate.new_locations},
+            "character": {proposal.name.strip().lower(): proposal for proposal in candidate.new_characters},
+            "object": {proposal.name.strip().lower(): proposal for proposal in candidate.new_objects},
+        }
+        for entity_type, proposals in entity_proposals.items():
+            for proposal in proposals.values():
+                description = (proposal.description or "").strip()
+                if len(description) < self.MIN_ENTITY_DESCRIPTION_LENGTH:
+                    issues.append(
+                        f"New {entity_type} '{proposal.name}' must include a short readable description."
+                    )
+
+        for entity_type, entity_name in self._collect_unknown_named_entities(candidate=candidate, canon=canon):
+            if entity_name.strip().lower() not in entity_proposals[entity_type]:
+                issues.append(
+                    f"New {entity_type} '{entity_name}' must be declared in new_{entity_type}s with a short description."
+                )
+
+        merge_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is not None)
+        fresh_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is None)
+        if branch_shape["should_prefer_divergence"] and merge_choice_count > 0 and fresh_choice_count == 0:
+            issues.append(
+                "This branch has quick-merged too often recently. Open at least one fresh path instead of only merging into existing scenes."
+            )
+        for choice in candidate.choices:
+            notes = (choice.notes or "").strip()
+            if not notes:
+                issues.append(
+                    f"Choice '{choice.choice_text}' must include notes describing Goal and Intent."
+                )
+                continue
+            match = self.CHOICE_NOTES_PATTERN.search(notes)
+            if match is None or len(match.group("goal").strip()) < 12 or len(match.group("intent").strip()) < 12:
+                issues.append(
+                    f"Choice '{choice.choice_text}' must use notes in the form 'Goal: ... Intent: ...' with meaningful content."
+                )
 
         beat_budget = self.story_bible["beat_budget"]
         major_hook_updates = 0
@@ -253,6 +321,36 @@ class LLMGenerationService:
             "current_depth": current_depth,
             "act_phase": branch["act_phase"],
         }
+
+    def _collect_unknown_named_entities(
+        self,
+        *,
+        candidate: GenerationCandidate,
+        canon: CanonResolver,
+    ) -> list[tuple[str, str]]:
+        unknown_entities: set[tuple[str, str]] = set()
+
+        def add_if_unknown(entity_type: str, entity_name: str | None) -> None:
+            if entity_type == "world" or not entity_name or not entity_name.strip():
+                return
+            try:
+                canon.resolve_entity_id(entity_type, entity_name)
+            except ValueError:
+                unknown_entities.add((entity_type, entity_name.strip()))
+
+        for fact in candidate.fact_updates:
+            add_if_unknown(fact.entity_type, fact.entity_name)
+        for relation in candidate.relation_updates:
+            add_if_unknown(relation.subject_type, relation.subject_name)
+            add_if_unknown(relation.object_type, relation.object_name)
+        for change in candidate.inventory_changes:
+            add_if_unknown("object", change.object_name)
+        for character in candidate.new_characters:
+            add_if_unknown("location", character.home_location_name)
+        for obj in candidate.new_objects:
+            add_if_unknown("location", obj.default_location_name)
+
+        return sorted(unknown_entities)
 
     def _detect_unresolved_mystery_markers(self, candidate: GenerationCandidate) -> list[str]:
         markers: set[str] = set()
