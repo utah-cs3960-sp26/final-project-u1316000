@@ -110,6 +110,7 @@ This is the first file an LLM should read when working in this repository. It ex
 5. Prefer the one-command worker prep path:
    - `python -m app.tools.prepare_story_run`
    - this prepares one compact packet with the selected frontier item, pre-change URL, preview payload, and branch context
+   - normal packets also include `asset_availability` so a worker can see which current-scene entities already have usable art
    - use it instead of rediscovering the repo structure in a new thread
    - planning mode may trigger automatically on some runs, or can be forced with `python -m app.tools.prepare_story_run --plan`
 6. If you want the repo itself to orchestrate one full local LM Studio worker run, use:

@@ -1499,6 +1499,8 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["preview_payload"]["branch_key"] == "default"
         assert packet["context_summary"]["branch_key"] == "default"
         assert "focus_canon_slice" in packet
+        assert "asset_availability" in packet
+        assert any(item["entity_type"] == "location" for item in packet["asset_availability"])
         assert "ideas_file_summary" in packet
         assert any(idea["title"] == "Clockseed Stampede" for idea in packet["ideas_file_summary"]["open_ideas"])
         assert "validation_checklist" in packet
@@ -1513,6 +1515,7 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
         assert "choice id" in packet["next_action"].lower()
         assert "ideas.md" in packet["next_action"].lower()
+        assert "asset_availability" in packet["next_action"]
         assert packet["planning_policy"]["chance"] == 0.25
         assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
     finally:

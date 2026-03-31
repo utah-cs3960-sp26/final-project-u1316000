@@ -27,6 +27,7 @@ This is the single per-run entrypoint for the story-expansion loop.
 - Executes explicit post-apply `asset_requests`.
 
 So your main job is to return the right JSON for the current mode. Do not inspect the repo broadly, write SQL, or rediscover whether the endpoints exist. They do.
+Pay attention to `asset_availability` in the packet. If usable art already exists, reuse it instead of requesting replacement generation.
 
 ## Core Job
 - Most of the time, do not change code.
@@ -294,6 +295,8 @@ Planning runs are a particularly good time to use:
   - you may generate assets immediately
 - `portrait` and `object_render` generations automatically create cutouts.
 - The runner can execute `asset_requests` after apply, but only if you actually include them.
+- Read `asset_availability` in the packet before requesting art.
+- If a location already has `background`, a character already has `portrait`/`cutout`, or an object already has `object_render`/`cutout`, reuse that art and do not request duplicates.
 
 ## Per-Run Workflow
 1. Read this file.
@@ -459,7 +462,6 @@ Each `ideas_to_append` item should look like:
   "filename_base": "madam-bei-stationmaster"
 }
 ```
-- If apply creates a new linked location such as `Velvet Platform`, generate a background for that location. ANY TIME a new character, object, or location is introduced, generate art for it.
 - If apply creates a new linked location such as `Velvet Platform`, generate a background for that location only if it does not already have one.
 - If a recurring character or reusable object already has art, reuse it instead of generating replacement art by default.
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from app.config import Settings
 from app.database import connect, fetch_one
+from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
@@ -188,6 +189,54 @@ def build_focus_canon_slice(context: dict[str, Any], canon: CanonResolver) -> di
         },
         "recurring_entities": recurring_details,
     }
+
+
+def build_asset_availability_summary(
+    *,
+    context: dict[str, Any],
+    canon: CanonResolver,
+    assets: AssetService,
+) -> list[dict[str, Any]]:
+    current_node = context.get("current_node") or {}
+    entity_keys: set[tuple[str, int]] = set()
+    for reference in current_node.get("entities", []) or []:
+        entity_type = reference.get("entity_type")
+        entity_id = reference.get("entity_id")
+        if entity_type in {"location", "character", "object"} and entity_id is not None:
+            entity_keys.add((entity_type, int(entity_id)))
+    for present in current_node.get("present_entities", []) or []:
+        entity_type = present.get("entity_type")
+        entity_id = present.get("entity_id")
+        if entity_type in {"character", "object"} and entity_id is not None:
+            entity_keys.add((entity_type, int(entity_id)))
+
+    summary: list[dict[str, Any]] = []
+    for entity_type, entity_id in sorted(entity_keys):
+        if entity_type == "location":
+            record = canon.get_location(entity_id)
+            relevant_kinds = ["background"]
+        elif entity_type == "character":
+            record = canon.get_character(entity_id)
+            relevant_kinds = ["portrait", "cutout"]
+        else:
+            record = canon.get_object(entity_id)
+            relevant_kinds = ["object_render", "cutout"]
+        if record is None:
+            continue
+        available_asset_kinds = [
+            asset_kind
+            for asset_kind in relevant_kinds
+            if assets.get_latest_asset(entity_type=entity_type, entity_id=entity_id, asset_kind=asset_kind) is not None
+        ]
+        summary.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "name": record.get("name"),
+                "available_asset_kinds": available_asset_kinds,
+            }
+        )
+    return summary
 
 
 def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) -> list[str]:
@@ -513,6 +562,7 @@ def build_normal_packet(
     context: dict[str, Any],
     canon: CanonResolver,
     ideas_file: dict[str, Any],
+    asset_availability: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "run_mode": "normal",
@@ -536,6 +586,7 @@ def build_normal_packet(
         },
         "context_summary": summarize_context(context),
         "focus_canon_slice": build_focus_canon_slice(context, canon),
+        "asset_availability": asset_availability,
         "ideas_file_summary": {
             "path": ideas_file["path"],
             "open_ideas": ideas_file.get("open_ideas", [])[:8],
@@ -563,6 +614,8 @@ def build_normal_packet(
             "Run now. Do not ask the human for permission. Return one GenerationCandidate JSON only, "
             "You may steer the current leaf toward one of the active IDEAS.md ideas when it genuinely fits the branch, hooks, and current scene, "
             "but do not force a mismatch just to use an idea. "
+            "Check asset_availability before requesting art. If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation. "
+            "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props. "
             "validate it, apply it if valid, generate any required art, report the pre-change URL, "
             "report the concrete choice id(s) a human should click from that state to reach the new content, "
             "and explicitly say whether you added any hooks, global direction notes, or IDEAS.md entries. "
@@ -632,6 +685,7 @@ def main() -> None:
     connection = connect(settings.database_path)
     try:
         canon = CanonResolver(connection)
+        assets = AssetService(connection, project_root)
         story = StoryGraphService(connection)
         branch_state = BranchStateService(connection, llm_generation.story_bible["acts"])
         story_notes = StoryDirectionService(connection)
@@ -708,6 +762,11 @@ def main() -> None:
                 context=context,
                 canon=canon,
                 ideas_file=ideas_file,
+                asset_availability=build_asset_availability_summary(
+                    context=context,
+                    canon=canon,
+                    assets=assets,
+                ),
             )
             packet["planning_policy"] = planning_policy
             packet["runtime_state_before"] = runtime_before

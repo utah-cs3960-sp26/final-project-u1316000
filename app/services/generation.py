@@ -175,6 +175,8 @@ class LLMGenerationService:
             "Use scene_present_entities and hidden_on_lines when actors or objects should appear, disappear, or swap focus during the same scene.\n"
             "If a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, make the need for art obvious so the post-apply asset pass can generate it once real IDs exist.\n"
             "Generate art on demand, not speculatively. If a place, character, or object is only being set up for later and is not yet on-screen or immediately reachable in play, defer its art until a later scene actually needs it.\n"
+            "If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation.\n"
+            "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props.\n"
             "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.\n"
             "If the player has clearly arrived somewhere new, reusing the old background just to avoid art generation is usually the wrong choice.\n"
             "If a location does not yet have art, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.\n"
