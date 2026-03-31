@@ -85,7 +85,10 @@
     "planning_runs_allowed": true,
     "planning_runs_guidance": [
       "Occasional planning runs are good and should not write a new story scene.",
-      "A planning run should add a few fun ideas to IDEAS.md, strengthen frontier choice Goal/Intent notes, and add structured story_direction_notes when needed.",
+      "A planning run should add a few fun categorized ideas to IDEAS.md, strengthen frontier choice Goal/Intent notes, and add structured story_direction_notes when needed.",
+      "Planning ideas should be concrete seeds in the categories character, location, object, or event.",
+      "Across a planning run, cover at least 2 of those categories.",
+      "Read the current ideas file first and add genuinely new ideas rather than repeating existing entries or copying example seeds verbatim.",
       "Planning runs exist to reduce over-incremental one-scene thinking and keep longer arcs alive."
     ],
     "good_uses": [
@@ -93,6 +96,10 @@
       "future character introductions",
       "escalation plans",
       "reminders about where a currently small system may lead later"
+    ],
+    "normal_run_guidance": [
+      "Normal scene-writing runs may also use current IDEAS.md entries as direction when the current branch genuinely fits one of them.",
+      "An idea in IDEAS.md is an invitation, not a command. Use it when it enriches the current leaf, not just because it exists."
     ],
     "example": "A later tram ride could become a train robbery or transit crisis that introduces new characters and turns the network into a more active plotline."
   },

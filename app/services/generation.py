@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import GenerationCandidate
+from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_notes import StoryDirectionService
@@ -34,6 +35,7 @@ class LLMGenerationService:
         re.IGNORECASE | re.DOTALL,
     )
     MIN_ENTITY_DESCRIPTION_LENGTH = 12
+    PROMPT_ENTITY_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -203,6 +205,7 @@ class LLMGenerationService:
         discovered_state_tags = state_tags | set(candidate.discovered_state_tags)
         discovered_clue_tags = clue_tags | set(candidate.discovered_clue_tags)
         issues: list[str] = []
+        assets = AssetService(branch_state_service.connection, self.project_root)
 
         if len(candidate.choices) == 0:
             issues.append("Generation candidate must include at least one choice.")
@@ -283,7 +286,43 @@ class LLMGenerationService:
 
         proposed_minor_hooks = sum(1 for hook in candidate.new_hooks if hook.importance in {"minor", "local"})
         if proposed_minor_hooks > int(beat_budget["max_minor_hooks_per_scene"]):
-            issues.append("Candidate introduces too many minor/local hooks in one scene.")
+                issues.append("Candidate introduces too many minor/local hooks in one scene.")
+
+        prompt_blocked_names = self._collect_prompt_blocked_entity_names(candidate=candidate, canon=canon)
+        for asset_request in candidate.asset_requests:
+            if asset_request.entity_type is None or asset_request.entity_id is None:
+                issues.append("Asset requests must include entity_type and entity_id.")
+                continue
+            if asset_request.asset_kind == "background" and asset_request.entity_type != "location":
+                issues.append("Background asset requests must target a location entity.")
+            if asset_request.asset_kind == "portrait" and asset_request.entity_type != "character":
+                issues.append("Portrait asset requests must target a character entity.")
+            if asset_request.asset_kind == "object_render" and asset_request.entity_type != "object":
+                issues.append("Object render requests must target an object entity.")
+
+            existing_asset = assets.get_latest_asset(
+                entity_type=asset_request.entity_type,
+                entity_id=asset_request.entity_id,
+                asset_kind=asset_request.asset_kind,
+            )
+            if existing_asset is not None:
+                issues.append(
+                    f"{asset_request.asset_kind} art already exists for {asset_request.entity_type}:{asset_request.entity_id}; do not request duplicate generation."
+                )
+
+            prompt_text = (asset_request.prompt or "").strip()
+            if asset_request.asset_kind == "background" and prompt_text:
+                normalized_prompt_tokens = set(self.PROMPT_ENTITY_TOKEN_PATTERN.findall(prompt_text.lower()))
+                mentioned_blocked_names = [
+                    name for name, name_tokens in prompt_blocked_names
+                    if name_tokens and name_tokens.issubset(normalized_prompt_tokens)
+                ]
+                if mentioned_blocked_names:
+                    issues.append(
+                        "Background prompts must describe the static environment only and must not include on-screen or separately-rendered character/object names: "
+                        + ", ".join(sorted(mentioned_blocked_names))
+                        + "."
+                    )
 
         available_affordances = {row["name"] for row in branch_state_service.list_available_affordances(candidate.branch_key)}
         unlocked_affordances = available_affordances | {
@@ -355,6 +394,52 @@ class LLMGenerationService:
             "projected_depth": projected_depth,
             "act_phase": branch["act_phase"],
         }
+
+    def _collect_prompt_blocked_entity_names(
+        self,
+        *,
+        candidate: GenerationCandidate,
+        canon: CanonResolver,
+    ) -> list[tuple[str, set[str]]]:
+        names: set[str] = set()
+
+        for reference in candidate.entity_references:
+            if reference.entity_type == "character":
+                character = canon.get_character(reference.entity_id)
+                if character and character.get("name"):
+                    names.add(str(character["name"]))
+            elif reference.entity_type == "object":
+                obj = canon.get_object(reference.entity_id)
+                if obj and obj.get("name"):
+                    names.add(str(obj["name"]))
+
+        for present in candidate.scene_present_entities:
+            if present.entity_type == "character":
+                character = canon.get_character(present.entity_id)
+                if character and character.get("name"):
+                    names.add(str(character["name"]))
+            elif present.entity_type == "object":
+                obj = canon.get_object(present.entity_id)
+                if obj and obj.get("name"):
+                    names.add(str(obj["name"]))
+
+        for character in candidate.new_characters:
+            if character.name.strip():
+                names.add(character.name.strip())
+        for obj in candidate.new_objects:
+            if obj.name.strip():
+                names.add(obj.name.strip())
+
+        blocked_names: list[tuple[str, set[str]]] = []
+        for name in sorted(names):
+            tokens = {
+                token
+                for token in self.PROMPT_ENTITY_TOKEN_PATTERN.findall(name.lower())
+                if token not in {"the"}
+            }
+            if tokens:
+                blocked_names.append((name, tokens))
+        return blocked_names
 
     def _collect_unknown_named_entities(
         self,

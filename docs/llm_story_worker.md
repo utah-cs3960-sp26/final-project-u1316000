@@ -58,10 +58,20 @@ So your main job is to return the right JSON for the current mode. Do not inspec
 - In planning mode:
   - do not generate or apply a new story scene
   - do not call validation/apply for a `GenerationCandidate`
-  - append new ideas to `IDEAS.md`
+  - append new categorized ideas to `IDEAS.md`
   - strengthen returned frontier choice notes in `Goal: ... Intent: ...` format
   - add structured `story_direction_notes` when useful
 - Planning mode exists to reduce over-incremental one-scene thinking and keep medium-range direction alive.
+- Planning ideas should be concrete seeds, not only broad vibe statements.
+- Each planning idea must be categorized as:
+  - `character`
+  - `location`
+  - `object`
+  - `event`
+- Across the run, cover at least 2 of those categories.
+- Read the current `IDEAS.md` content first and add only genuinely new ideas.
+- Do not repeat ideas that are already in `IDEAS.md`.
+- Do not copy example seeds from this file, the story bible, or the ideas scratchpad verbatim.
 
 ## Scene Control
 - You are allowed to change who is visibly on stage.
@@ -152,6 +162,8 @@ Bad over-binding:
 - Hooks are mostly in-world unresolved threads inside a specific branch.
 - `story_direction_notes` are out-of-world planning memory for future workers.
 - `IDEAS.md` is the loose, human-editable scratchpad for fun future ideas, scenes, characters, locations, and plot possibilities.
+- Both planning runs and normal scene-writing runs may use existing `IDEAS.md` entries as direction when the current leaf genuinely fits them.
+- Do not force an idea just because it exists; use it when it helps the current branch open into something richer and more intentional.
 
 Use hooks for:
 - mysteries
@@ -175,6 +187,13 @@ Example story direction note:
 Planning runs are a particularly good time to use:
 - `story_direction_notes` for structured medium-range direction
 - `IDEAS.md` for looser future possibilities
+- Even in `IDEAS.md`, prefer concrete seeds like:
+  - a new clerk rival
+  - a bell orchard stop
+  - a counterfeit route token
+  - a tram robbery
+  over broad statements with no clear future handle.
+- Normal runs may also steer toward one of the active `IDEAS.md` seeds when the prep packet surfaces it and the fit feels earned.
 
 ## Hard Rules
 - Do not resolve major hooks early.
@@ -261,6 +280,9 @@ Planning runs are a particularly good time to use:
 - If the player has clearly arrived somewhere new or a new character introduced, `no new art required` is usually the wrong conclusion.
 - If a new recurring character enters the story and is actually appearing now, make sure there is a portrait plan for them.
 - If a new reusable or visually important prop matters to play or continuity now, make sure there is an object render plan for it.
+- Do not request art for an entity that already has usable art in the current asset set.
+- Backgrounds are static environment art. Do not include separately rendered characters or object assets in background prompts.
+- In particular, do not put named character portraits or reusable props like the tram into a location background prompt when those already exist as their own assets.
 - Do not generate art for every passing noun.
 - Do not generate art just because a new canon entity exists on paper.
 - If a location has not already been visually defined, give it a distinct whimsical-fantasy identity that is readable and not too complicated for image generation.
@@ -303,6 +325,7 @@ Planning runs are a particularly good time to use:
    - whether you added any hooks
    - whether you added any global story direction notes
    - whether you appended anything to `IDEAS.md`
+   - in planning mode, also report the exact categorized ideas, choice-note updates, and story notes you added
 
 ## Recommended Loop Contract
 1. `python -m app.tools.prepare_story_run`
@@ -346,6 +369,15 @@ Return JSON with:
 - `choice_note_updates`
 - `story_direction_notes`
 - optional `summary`
+
+Each `ideas_to_append` item should look like:
+```json
+{
+  "category": "event",
+  "title": "Transit Robbery",
+  "note_text": "A later tram ride could erupt into a robbery that introduces new rivals and turns the network into a more active plotline."
+}
+```
 
 ## Output Guidance
 - `scene_text` may be compact prose, but use `dialogue_lines` whenever the scene has meaningful speaker turns or staged entrances.
@@ -428,6 +460,8 @@ Return JSON with:
 }
 ```
 - If apply creates a new linked location such as `Velvet Platform`, generate a background for that location. ANY TIME a new character, object, or location is introduced, generate art for it.
+- If apply creates a new linked location such as `Velvet Platform`, generate a background for that location only if it does not already have one.
+- If a recurring character or reusable object already has art, reuse it instead of generating replacement art by default.
 
 ## Tone Reminder
 - Read [story_bible.md](D:/Documents/CS/CS%203960/adventure-test/docs/story_bible.md) if you need broader tone guidance.

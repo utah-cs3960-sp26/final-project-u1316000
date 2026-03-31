@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -443,9 +444,21 @@ def select_planning_targets(
 def read_ideas_file(project_root: Path) -> dict[str, Any]:
     ideas_path = project_root / "IDEAS.md"
     content = ideas_path.read_text(encoding="utf-8") if ideas_path.exists() else ""
+    open_ideas: list[dict[str, str]] = []
+    for line in content.splitlines():
+        match = re.match(r"^- \[(?P<category>[^\]]+)\] (?P<title>[^:]+): (?P<note_text>.+)$", line.strip())
+        if match:
+            open_ideas.append(
+                {
+                    "category": match.group("category").strip(),
+                    "title": match.group("title").strip(),
+                    "note_text": match.group("note_text").strip(),
+                }
+            )
     return {
         "path": str(ideas_path),
         "current_content": content,
+        "open_ideas": open_ideas,
     }
 
 
@@ -499,6 +512,7 @@ def build_normal_packet(
     selected: dict[str, Any],
     context: dict[str, Any],
     canon: CanonResolver,
+    ideas_file: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "run_mode": "normal",
@@ -522,6 +536,10 @@ def build_normal_packet(
         },
         "context_summary": summarize_context(context),
         "focus_canon_slice": build_focus_canon_slice(context, canon),
+        "ideas_file_summary": {
+            "path": ideas_file["path"],
+            "open_ideas": ideas_file.get("open_ideas", [])[:8],
+        },
         "validation_checklist": build_validation_checklist(branch_shape=context.get("branch_shape")),
         "candidate_template": build_candidate_template(selected["branch_key"]),
         "endpoint_contract": {
@@ -543,6 +561,8 @@ def build_normal_packet(
         },
         "next_action": (
             "Run now. Do not ask the human for permission. Return one GenerationCandidate JSON only, "
+            "You may steer the current leaf toward one of the active IDEAS.md ideas when it genuinely fits the branch, hooks, and current scene, "
+            "but do not force a mismatch just to use an idea. "
             "validate it, apply it if valid, generate any required art, report the pre-change URL, "
             "report the concrete choice id(s) a human should click from that state to reach the new content, "
             "and explicitly say whether you added any hooks, global direction notes, or IDEAS.md entries. "
@@ -578,7 +598,7 @@ def build_planning_packet(
         "endpoint_contract": {
             "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'Goal: ... Intent: ...'} to strengthen future direction for that frontier choice.",
             "story_notes": "POST /story-notes to add structured global planning memory when a medium- or long-range direction deserves to persist across workers.",
-            "ideas_file": "Append directly to IDEAS.md when you have fun future-facing ideas for scenes, characters, locations, factions, systems, events, or plotlines.",
+            "ideas_file": "Append directly to IDEAS.md using categorized ideas for characters, locations, objects, or events when you have fun future-facing possibilities worth preserving.",
         },
         "manual_commands": {
             "prepare_normal": "python -m app.tools.prepare_story_run",
@@ -589,11 +609,13 @@ def build_planning_packet(
         "next_action": (
             "Run now. Do not ask the human for permission. This is planning mode. "
             "Append exactly "
-            f"{planning_policy['ideas_per_run']} new ideas to IDEAS.md, then update the notes on each planning target "
+            f"{planning_policy['ideas_per_run']} new categorized ideas to IDEAS.md. Each idea must be a concrete character, location, object, or event seed, "
+            "and together they must cover at least 2 of those categories. Read the current IDEAS.md content first and add only genuinely new ideas, "
+            "not duplicates and not recycled example seeds from the docs or existing ideas file. Then update the notes on each planning target "
             "with clearer Goal/Intent direction for future workers. Decide whether any existing hook or global idea is worth steering toward "
             "from those targets, even if it will take several later scenes to matter. If useful, add one or two structured story direction notes. "
             "Do not generate, validate, or apply a new story scene in this run. "
-            "At the end, report which choice ids you updated, whether you added story notes, and whether you appended IDEAS.md."
+            "At the end, report the exact categorized ideas you appended, the exact choice notes you updated, any story notes you added, and whether you appended IDEAS.md."
         ),
     }
 
@@ -605,6 +627,7 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[2]
     settings = Settings.from_env()
     llm_generation = LLMGenerationService(project_root)
+    ideas_file = read_ideas_file(project_root)
 
     connection = connect(settings.database_path)
     try:
@@ -684,6 +707,7 @@ def main() -> None:
                 selected=selected,
                 context=context,
                 canon=canon,
+                ideas_file=ideas_file,
             )
             packet["planning_policy"] = planning_policy
             packet["runtime_state_before"] = runtime_before
@@ -696,7 +720,10 @@ def main() -> None:
                     "ideas_file": packet["ideas_file"],
                 }
             else:
-                packet["full_context"] = context
+                packet["full_context"] = {
+                    "generation_context": context,
+                    "ideas_file": ideas_file,
+                }
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc

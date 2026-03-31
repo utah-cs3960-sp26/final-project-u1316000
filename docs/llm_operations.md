@@ -116,6 +116,7 @@ This is the first file an LLM should read when working in this repository. It ex
    - `python -m app.tools.run_story_worker_local --model <loaded-model-id>`
    - add `--plan` to force planning mode
    - add `--dry-run` to validate/plan without writing changes
+   - planning mode now expects categorized ideas for characters, locations, objects, or events, and the runner prints the exact ideas and planning notes it wrote
 7. Inspect current data only if needed:
    - `python -m pytest`
    - `python -m uvicorn app.main:app --reload --port 8001`
@@ -197,6 +198,8 @@ This is the first file an LLM should read when working in this repository. It ex
 - Scene-authoring policy:
   - if a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object that the player is actually seeing or reaching now, treat image generation as part of finishing that scene
   - if the new canon entity is only being set up for later, do not generate speculative art yet
+  - if a usable asset already exists for that entity and asset kind, reuse it instead of generating duplicate art
+  - backgrounds are static environment art; do not include separately rendered characters or reusable object assets in a background prompt
   - for brand-new canon entities, apply the scene first so SQLite assigns real IDs, then call `/assets/generate`
   - use same-location variants sparingly for now because the renderer currently prefers the latest asset per entity and does not yet support explicit active-asset assignment
 ## Story Direction Notes

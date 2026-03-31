@@ -53,11 +53,16 @@ This file is the human-readable story bible for the current prototype. The machi
 - Occasional planning runs are good.
 - A planning run should not write a new story scene.
 - Instead it should:
-  - add a few fun future-facing ideas to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md)
+  - add a few fun future-facing categorized ideas to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md)
   - strengthen the `Goal: ... Intent: ...` notes on several frontier choices
   - leave behind any structured `story_direction_notes` needed to keep longer arcs from drifting
 - Planning runs help counter the natural one-scene conservatism of the normal worker loop.
 - [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the informal human-editable scratchpad for fun possibilities, half-formed ideas, and future scene/location/character concepts.
+- Planning ideas should be concrete seeds and categorized as characters, locations, objects, or events.
+- Across a planning run, cover at least 2 of those categories.
+- Read the current ideas file first and add genuinely new ideas rather than repeating existing entries or copying example seeds verbatim.
+- Normal scene-writing runs may also use current `IDEAS.md` entries as direction when the current branch genuinely fits one of them.
+- An idea in `IDEAS.md` is an invitation, not a command. Use it when it enriches the current leaf, not just because it exists.
 - Use them for:
   - plotline ideas
   - future character introductions

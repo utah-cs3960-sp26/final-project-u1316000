@@ -17,6 +17,7 @@ from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
+from app.tools.run_story_worker_local import build_asset_prompt, infer_missing_asset_requests
 
 
 def build_client(tmp_path: Path) -> tuple[TestClient, Path]:
@@ -1455,6 +1456,8 @@ def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
 def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
+    ideas_path = Path(__file__).resolve().parents[1] / "IDEAS.md"
+    original_ideas = ideas_path.read_text(encoding="utf-8")
     client.post(
         "/story-notes",
         json={
@@ -1463,46 +1466,57 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
             "note_text": "A later tram route could erupt into a transit crisis.",
         },
     )
+    try:
+        ideas_path.write_text(
+            original_ideas.rstrip()
+            + "\n- [Event] Clockseed Stampede: A delayed route could spill sentient stamps across the platform and force a frantic sorting scene.\n",
+            encoding="utf-8",
+        )
 
-    command = [
-        sys.executable,
-        "-m",
-        "app.tools.prepare_story_run",
-        "--play-base-url",
-        "http://127.0.0.1:8001",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=Path(__file__).resolve().parents[1],
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
-    )
+        command = [
+            sys.executable,
+            "-m",
+            "app.tools.prepare_story_run",
+            "--play-base-url",
+            "http://127.0.0.1:8001",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+        )
 
-    assert result.returncode == 0
-    packet = json.loads(result.stdout)
-    assert packet["run_mode"] == "normal"
-    assert "Everything is already wired through" in packet["message"]
-    assert "continue the worker loop immediately" in packet["message"]
-    assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
-    assert packet["selected_frontier_item"]["choice_id"] is not None
-    assert packet["preview_payload"]["branch_key"] == "default"
-    assert packet["context_summary"]["branch_key"] == "default"
-    assert "focus_canon_slice" in packet
-    assert "validation_checklist" in packet
-    assert "candidate_template" in packet
-    assert "endpoint_contract" in packet
-    assert "full_context" not in packet
-    assert "eligible_major_hooks" in packet["context_summary"]
-    assert "blocked_major_hooks" in packet["context_summary"]
-    assert packet["context_summary"]["global_direction_notes"][0]["title"] == "Transit Trouble Seed"
-    assert "branch_shape" in packet["context_summary"]
-    assert "global_direction_notes" in packet["candidate_template"]
-    assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
-    assert "choice id" in packet["next_action"].lower()
-    assert packet["planning_policy"]["chance"] == 0.25
-    assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
+        assert result.returncode == 0
+        packet = json.loads(result.stdout)
+        assert packet["run_mode"] == "normal"
+        assert "Everything is already wired through" in packet["message"]
+        assert "continue the worker loop immediately" in packet["message"]
+        assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
+        assert packet["selected_frontier_item"]["choice_id"] is not None
+        assert packet["preview_payload"]["branch_key"] == "default"
+        assert packet["context_summary"]["branch_key"] == "default"
+        assert "focus_canon_slice" in packet
+        assert "ideas_file_summary" in packet
+        assert any(idea["title"] == "Clockseed Stampede" for idea in packet["ideas_file_summary"]["open_ideas"])
+        assert "validation_checklist" in packet
+        assert "candidate_template" in packet
+        assert "endpoint_contract" in packet
+        assert "full_context" not in packet
+        assert "eligible_major_hooks" in packet["context_summary"]
+        assert "blocked_major_hooks" in packet["context_summary"]
+        assert packet["context_summary"]["global_direction_notes"][0]["title"] == "Transit Trouble Seed"
+        assert "branch_shape" in packet["context_summary"]
+        assert "global_direction_notes" in packet["candidate_template"]
+        assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
+        assert "choice id" in packet["next_action"].lower()
+        assert "ideas.md" in packet["next_action"].lower()
+        assert packet["planning_policy"]["chance"] == 0.25
+        assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
+    finally:
+        ideas_path.write_text(original_ideas, encoding="utf-8")
 
 
 def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
@@ -1671,9 +1685,21 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
         json.dumps(
             {
                 "ideas_to_append": [
-                    "A tram receipt that hums when danger is imminent.",
-                    "A bell orchard where departures ripen on trees.",
-                    "A duck inspector who only trusts counterfeit maps.",
+                    {
+                        "category": "object",
+                        "title": "Humming Receipt",
+                        "note_text": "A tram receipt that hums when danger is imminent.",
+                    },
+                    {
+                        "category": "location",
+                        "title": "Needle Marsh Depot",
+                        "note_text": "A reed-thick marsh depot where arrivals are logged on dragonfly wings.",
+                    },
+                    {
+                        "category": "character",
+                        "title": "Duck Inspector",
+                        "note_text": "A duck inspector who only trusts counterfeit maps.",
+                    },
                 ],
                 "choice_note_updates": [
                     {
@@ -1684,8 +1710,8 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
                 "story_direction_notes": [
                     {
                         "note_type": "plotline",
-                        "title": "Bell Orchard Seed",
-                        "note_text": "One tram branch could later open into a bell orchard where departures grow like fruit.",
+                        "title": "Needle Marsh Seed",
+                        "note_text": "One tram branch could later open into Needle Marsh Depot where dragonflies carry route ledgers between platforms.",
                         "status": "active",
                         "priority": 2,
                     }
@@ -1725,14 +1751,240 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
     assert payload["updated_choice_ids"] == [target_choice_id]
     assert payload["ideas_added"] == 3
     assert payload["story_notes_added"] == 1
+    assert payload["ideas_appended"][0]["category"] == "object"
+    assert payload["choice_note_updates"][0]["choice_id"] == target_choice_id
+    assert "Goal:" in payload["choice_note_updates"][0]["notes"]
+    assert payload["story_notes_created"][0]["title"] == "Needle Marsh Seed"
 
     updated_choice = client.get("/choices").json()
     matching = next(choice for choice in updated_choice if choice["id"] == target_choice_id)
     assert "Goal:" in matching["notes"]
     ideas_text = ideas_file.read_text(encoding="utf-8")
-    assert "bell orchard" in ideas_text.lower()
+    assert "[Location] Needle Marsh Depot" in ideas_text
     story_notes = client.get("/story-notes").json()
-    assert any(note["title"] == "Bell Orchard Seed" for note in story_notes)
+    assert any(note["title"] == "Needle Marsh Seed" for note in story_notes)
+
+
+def test_run_story_worker_local_planning_mode_rejects_duplicate_ideas(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    ideas_file = tmp_path / "IDEAS.md"
+    ideas_file.write_text(
+        "# Ideas Scratchpad\n\n## Open Ideas\n\n- [Location] Bell Orchard: A branch could later open into a bell orchard where departures grow like fruit.\n",
+        encoding="utf-8",
+    )
+
+    response_file = tmp_path / "planning_duplicate_response.json"
+    response_file.write_text(
+        json.dumps(
+            {
+                "ideas_to_append": [
+                    {
+                        "category": "location",
+                        "title": "Bell Orchard",
+                        "note_text": "A branch could later open into a bell orchard where departures grow like fruit.",
+                    },
+                    {
+                        "category": "event",
+                        "title": "Moss Toll",
+                        "note_text": "A living toll gate could demand memories instead of coins.",
+                    },
+                    {
+                        "category": "character",
+                        "title": "Ledger Wren",
+                        "note_text": "A meticulous bird clerk could follow the player across routes with increasingly personal paperwork.",
+                    },
+                ],
+                "choice_note_updates": [
+                    {
+                        "choice_id": client.get("/frontier").json()[0]["choice_id"],
+                        "notes": "Goal: strengthen one frontier lane. Intent: prove duplicate planning ideas are rejected before writeback.",
+                    }
+                ],
+                "story_direction_notes": [],
+                "summary": "Should fail because one idea already exists.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.run_story_worker_local",
+        "--model",
+        "mock-model",
+        "--plan",
+        "--ideas-file",
+        str(ideas_file),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_LOCAL_WORKER_RESPONSE_FILE": str(response_file),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "reuses a built-in example seed" in result.stderr or "reuses a built-in example seed" in result.stdout
+
+
+def test_infer_missing_asset_requests_detects_current_scene_background(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    seed = client.post("/story/seed-opening-story").json()
+    node = next(row for row in client.get("/story-nodes").json() if row["id"] == seed["start_node_id"])
+
+    inferred = infer_missing_asset_requests(
+        node=node,
+        explicit_requests=[],
+        project_root=Path(__file__).resolve().parents[1],
+        client=client,
+    )
+
+    background_request = next(
+        request for request in inferred if request["asset_kind"] == "background" and request["entity_type"] == "location"
+    )
+    assert background_request["entity_id"] == 1
+    assert "Mushroom Field" in background_request["prompt"]
+
+
+def test_infer_missing_asset_requests_skips_explicit_requests(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    seed = client.post("/story/seed-opening-story").json()
+    node = next(row for row in client.get("/story-nodes").json() if row["id"] == seed["start_node_id"])
+
+    inferred = infer_missing_asset_requests(
+        node=node,
+        explicit_requests=[
+            {"asset_kind": "background", "entity_type": "location", "entity_id": 1},
+            {"asset_kind": "portrait", "entity_type": "character", "entity_id": 1},
+        ],
+        project_root=Path(__file__).resolve().parents[1],
+        client=client,
+    )
+
+    assert all(request["asset_kind"] != "background" for request in inferred)
+    assert all(not (request["asset_kind"] == "portrait" and request["entity_id"] == 1) for request in inferred)
+
+
+def test_build_asset_prompt_for_location_ignores_scene_actor_text() -> None:
+    prompt = build_asset_prompt(
+        entity_type="location",
+        entity={
+            "name": "Velvet Platform",
+            "description": "A velvet-edged tram platform hidden beneath the mushroom field.",
+            "canonical_summary": "Brass bells, stitched rail markings, and warm lantern haze.",
+        },
+        scene_summary="Madam Bei points at the tram while the Tall Gnome hesitates.",
+        scene_text="Madam Bei waves from beside the teacup tram.",
+    )
+
+    assert "Velvet Platform" in prompt
+    assert "Madam Bei" not in prompt
+    assert "Teacup Tram" not in prompt
+    assert "No characters" in prompt
+
+
+def test_validate_generation_rejects_duplicate_existing_asset_request(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        assets = AssetService(connection, Path(__file__).resolve().parents[1])
+        background_path = tmp_path / "velvet-platform-bg.png"
+        Image.new("RGB", (32, 32), color=(90, 110, 160)).save(background_path)
+        assets.add_asset(
+            entity_type="location",
+            entity_id=1,
+            asset_kind="background",
+            file_path=str(background_path),
+        )
+
+    response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A duplicate-art request test.",
+            "scene_text": "The field waits for no replacement background.",
+            "choices": [
+                {
+                    "choice_text": "Keep walking",
+                    "notes": "Goal: keep the scene valid. Intent: test duplicate asset rejection without changing branch shape.",
+                }
+            ],
+            "asset_requests": [
+                {
+                    "job_type": "generate_background",
+                    "asset_kind": "background",
+                    "entity_type": "location",
+                    "entity_id": 1,
+                    "prompt": "Mushroom Field at dawn.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["valid"] is False
+    assert any("already exists" in issue for issue in payload["issues"])
+
+
+def test_validate_generation_rejects_background_prompt_with_character_or_object_names(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed_response = client.post(
+        "/seed-world",
+        json={
+            "locations": [{"name": "Velvet Platform"}],
+            "characters": [{"name": "Madam Bei", "description": "A poised frog stationmaster."}],
+            "objects": [{"name": "Teacup Tram", "description": "A jewel-bright tram shaped like a teacup."}],
+        },
+    )
+    assert seed_response.status_code == 200
+
+    response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A new platform background is requested badly.",
+            "scene_text": "The platform should be static scenery only.",
+            "choices": [
+                {
+                    "choice_text": "Wait for a better prompt",
+                    "notes": "Goal: keep the scene valid. Intent: prove background prompts cannot absorb separate actor and object assets.",
+                }
+            ],
+            "new_characters": [
+                {"name": "Madam Bei", "description": "A poised frog stationmaster."}
+            ],
+            "new_objects": [
+                {"name": "Teacup Tram", "description": "A jewel-bright tram shaped like a teacup."}
+            ],
+            "asset_requests": [
+                {
+                    "job_type": "generate_background",
+                    "asset_kind": "background",
+                    "entity_type": "location",
+                    "entity_id": 1,
+                    "prompt": "Velvet Platform with Madam Bei standing by the Teacup Tram under lantern light.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["valid"] is False
+    assert any("Background prompts must describe the static environment only" in issue for issue in payload["issues"])
 
 
 def test_player_script_renders_choice_id_badge() -> None:

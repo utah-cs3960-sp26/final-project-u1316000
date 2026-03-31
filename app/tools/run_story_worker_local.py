@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi.testclient import TestClient
@@ -14,6 +15,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.main import create_app
 from app.models import DirectionNoteProposal, GenerationCandidate
+from app.services.assets import AssetService
+from app.services.canon import CanonResolver
 
 
 class PlanningChoiceUpdate(BaseModel):
@@ -21,11 +24,31 @@ class PlanningChoiceUpdate(BaseModel):
     notes: str
 
 
+PlanningIdeaCategory = Literal["character", "location", "object", "event"]
+
+
+class PlanningIdea(BaseModel):
+    category: PlanningIdeaCategory
+    title: str
+    note_text: str
+
+
 class PlanningResult(BaseModel):
-    ideas_to_append: list[str] = Field(default_factory=list)
+    ideas_to_append: list[PlanningIdea] = Field(default_factory=list)
     choice_note_updates: list[PlanningChoiceUpdate] = Field(default_factory=list)
     story_direction_notes: list[DirectionNoteProposal] = Field(default_factory=list)
     summary: str | None = None
+
+
+DISALLOWED_PLANNING_IDEA_SEEDS = {
+    "transit robbery",
+    "clerk nettle s rival",
+    "bell orchard",
+    "goose back courier route",
+    "name bureaucracy",
+    "yesterday s orchard",
+    "the apology bridge",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,7 +126,13 @@ def build_system_prompt(worker_guide: str) -> str:
 def build_user_prompt(packet: dict[str, Any]) -> str:
     if packet["run_mode"] == "planning":
         response_schema = {
-            "ideas_to_append": ["idea one", "idea two", "idea three"],
+            "ideas_to_append": [
+                {
+                    "category": "character|location|object|event",
+                    "title": "A unique idea title not already present in IDEAS.md",
+                    "note_text": "One or two clear sentences describing a distinct future possibility.",
+                }
+            ],
             "choice_note_updates": [
                 {"choice_id": 0, "notes": "Goal: ... Intent: ..."}
             ],
@@ -121,6 +150,9 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         return (
             "This is a planning-mode packet.\n"
             "Do not generate or apply a scene.\n"
+            "Use the existing IDEAS.md content in the packet as shared memory.\n"
+            "Add only unique ideas that are not already present there.\n"
+            "Do not reuse or lightly remix example seeds from the docs or packet.\n"
             "Return only JSON matching this shape:\n"
             f"{json.dumps(response_schema, indent=2)}\n\n"
             "Packet:\n"
@@ -229,7 +261,7 @@ def get_test_client() -> TestClient:
     return TestClient(create_app())
 
 
-def append_ideas(ideas_path: Path, ideas: list[str]) -> None:
+def append_ideas(ideas_path: Path, ideas: list[PlanningIdea]) -> None:
     if not ideas:
         return
     existing = ideas_path.read_text(encoding="utf-8") if ideas_path.exists() else ""
@@ -240,11 +272,60 @@ def append_ideas(ideas_path: Path, ideas: list[str]) -> None:
         lines.extend(["## Open Ideas", ""])
     output = "\n".join(lines).rstrip() + "\n\n"
     for idea in ideas:
-        cleaned = idea.strip()
-        if not cleaned:
+        category = idea.category.strip().title()
+        title = idea.title.strip()
+        note_text = idea.note_text.strip()
+        if not category or not title or not note_text:
             continue
-        output += f"- {cleaned}\n"
+        output += f"- [{category}] {title}: {note_text}\n"
     ideas_path.write_text(output.rstrip() + "\n", encoding="utf-8")
+
+
+def normalize_idea_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def validate_planning_result(packet: dict[str, Any], result: PlanningResult) -> None:
+    required_count = int((packet.get("planning_policy") or {}).get("ideas_per_run") or 0)
+    if len(result.ideas_to_append) < max(required_count, 2):
+        raise RuntimeError(
+            f"Planning mode requires at least {max(required_count, 2)} categorized ideas, but only {len(result.ideas_to_append)} were returned."
+        )
+
+    categories = {idea.category for idea in result.ideas_to_append}
+    if len(categories) < 2:
+        raise RuntimeError(
+            "Planning mode ideas must span at least 2 categories across character/location/object/event."
+        )
+
+    if not result.choice_note_updates:
+        raise RuntimeError("Planning mode must update at least one frontier choice note.")
+
+    existing_content = normalize_idea_text(((packet.get("ideas_file") or {}).get("current_content") or ""))
+    seen_titles: set[str] = set()
+    seen_signatures: set[str] = set()
+    for idea in result.ideas_to_append:
+        normalized_title = normalize_idea_text(idea.title)
+        normalized_text = normalize_idea_text(idea.note_text)
+        if normalized_title in DISALLOWED_PLANNING_IDEA_SEEDS:
+            raise RuntimeError(
+                f"Planning idea '{idea.title}' reuses a built-in example seed. Add a different unique idea."
+            )
+        if normalized_title in seen_titles:
+            raise RuntimeError(f"Planning idea '{idea.title}' duplicates another new idea title in this run.")
+        seen_titles.add(normalized_title)
+        signature = f"{idea.category}:{normalized_title}:{normalized_text}"
+        if signature in seen_signatures:
+            raise RuntimeError(f"Planning idea '{idea.title}' duplicates another new idea in this run.")
+        seen_signatures.add(signature)
+        if normalized_title and normalized_title in existing_content:
+            raise RuntimeError(
+                f"Planning idea '{idea.title}' already appears in IDEAS.md. Add a genuinely new idea."
+            )
+        if normalized_text and normalized_text in existing_content:
+            raise RuntimeError(
+                f"Planning idea '{idea.title}' repeats wording already present in IDEAS.md. Add a genuinely new idea."
+            )
 
 
 def apply_planning_result(
@@ -255,8 +336,9 @@ def apply_planning_result(
     ideas_path: Path,
     dry_run: bool,
 ) -> dict[str, Any]:
+    validate_planning_result(packet, result)
     choice_updates: list[int] = []
-    note_ids: list[int] = []
+    note_records: list[dict[str, Any]] = []
     if not dry_run:
         append_ideas(ideas_path, result.ideas_to_append)
         for update in result.choice_note_updates:
@@ -266,17 +348,32 @@ def apply_planning_result(
         for note in result.story_direction_notes:
             response = client.post("/story-notes", json=note.model_dump())
             response.raise_for_status()
-            note_ids.append(int(response.json()["id"]))
+            note_records.append(response.json())
     else:
         choice_updates = [update.choice_id for update in result.choice_note_updates]
+
+    target_labels = {
+        int(target["choice_id"]): target["choice_text"]
+        for target in packet.get("planning_targets", [])
+    }
 
     return {
         "run_mode": "planning",
         "planning_reason": packet.get("planning_reason"),
         "dry_run": dry_run,
         "updated_choice_ids": choice_updates,
+        "choice_note_updates": [
+            {
+                "choice_id": update.choice_id,
+                "choice_text": target_labels.get(update.choice_id),
+                "notes": update.notes,
+            }
+            for update in result.choice_note_updates
+        ],
         "ideas_added": len(result.ideas_to_append),
-        "story_notes_added": len(note_ids) if not dry_run else len(result.story_direction_notes),
+        "ideas_appended": [idea.model_dump() for idea in result.ideas_to_append],
+        "story_notes_added": len(note_records) if not dry_run else len(result.story_direction_notes),
+        "story_notes_created": note_records if not dry_run else [note.model_dump() for note in result.story_direction_notes],
         "summary": result.summary,
     }
 
@@ -287,6 +384,7 @@ def apply_normal_result(
     candidate: GenerationCandidate,
     client: TestClient,
     dry_run: bool,
+    project_root: Path,
 ) -> dict[str, Any]:
     validation = client.post("/jobs/validate-generation", json=candidate.model_dump(mode="json"))
     validation.raise_for_status()
@@ -314,6 +412,7 @@ def apply_normal_result(
     applied = apply_response.json()
 
     generated_assets: list[dict[str, Any]] = []
+    inferred_assets: list[dict[str, Any]] = []
     for asset_request in candidate.asset_requests:
         if (
             asset_request.asset_kind == "cutout"
@@ -339,6 +438,17 @@ def apply_normal_result(
         generated.raise_for_status()
         generated_assets.append(generated.json())
 
+    inferred_requests = infer_missing_asset_requests(
+        node=applied["node"],
+        explicit_requests=[request.model_dump(mode="json") for request in candidate.asset_requests],
+        project_root=project_root,
+        client=client,
+    )
+    for payload in inferred_requests:
+        generated = client.post("/assets/generate", json=payload)
+        generated.raise_for_status()
+        inferred_assets.append(generated.json())
+
     return {
         "run_mode": "normal",
         "dry_run": False,
@@ -348,10 +458,138 @@ def apply_normal_result(
         "new_node_id": applied["node"]["id"],
         "new_node_title": applied["node"]["title"],
         "created_choice_ids": [choice["id"] for choice in applied["created_choices"]],
-        "generated_asset_count": len(generated_assets),
+        "generated_asset_count": len(generated_assets) + len(inferred_assets),
+        "explicit_asset_count": len(generated_assets),
+        "inferred_asset_count": len(inferred_assets),
         "hooks_added": len(candidate.new_hooks),
         "global_direction_notes_added": len(candidate.global_direction_notes),
     }
+
+
+def infer_missing_asset_requests(
+    *,
+    node: dict[str, Any],
+    explicit_requests: list[dict[str, Any]],
+    project_root: Path,
+    client: TestClient,
+) -> list[dict[str, Any]]:
+    explicit_pairs = {
+        (
+            request.get("asset_kind"),
+            request.get("entity_type"),
+            int(request["entity_id"]),
+        )
+        for request in explicit_requests
+        if request.get("asset_kind") and request.get("entity_type") and request.get("entity_id") is not None
+    }
+
+    settings = client.app.state.settings
+    from app.database import connect
+
+    connection = connect(settings.database_path)
+    try:
+        assets = AssetService(connection, project_root)
+        canon = CanonResolver(connection)
+        inferred: list[dict[str, Any]] = []
+
+        current_scene = next(
+            (entity for entity in node.get("entities", []) if entity.get("role") == "current_scene" and entity.get("entity_type") == "location"),
+            None,
+        )
+        if current_scene is not None:
+            location_id = int(current_scene["entity_id"])
+            if ("background", "location", location_id) not in explicit_pairs:
+                background = assets.get_latest_asset(
+                    entity_type="location",
+                    entity_id=location_id,
+                    asset_kind="background",
+                )
+                if background is None:
+                    location = canon.get_location(location_id)
+                    if location is not None:
+                        inferred.append(
+                            {
+                                "asset_kind": "background",
+                                "entity_type": "location",
+                                "entity_id": location_id,
+                                "prompt": build_asset_prompt(
+                                    entity_type="location",
+                                    entity=location,
+                                    scene_summary=node.get("summary"),
+                                    scene_text=node.get("scene_text"),
+                                ),
+                                "width": 1600,
+                                "height": 896,
+                                "metadata": {"source": "inferred_post_apply"},
+                            }
+                        )
+
+        for present in node.get("present_entities", []):
+            entity_type = present.get("entity_type")
+            if entity_type not in {"character", "object"}:
+                continue
+            entity_id = int(present["entity_id"])
+            preferred_kind = "portrait" if entity_type == "character" else "object_render"
+            if (preferred_kind, entity_type, entity_id) in explicit_pairs:
+                continue
+            preferred_asset = assets.get_preferred_asset(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                preferred_kinds=["cutout", preferred_kind],
+            )
+            if preferred_asset is not None:
+                continue
+            if entity_type == "character":
+                record = canon.get_character(entity_id)
+                width, height = 1024, 1536
+            else:
+                record = canon.get_object(entity_id)
+                width, height = 1024, 1024
+            if record is None:
+                continue
+            inferred.append(
+                {
+                    "asset_kind": preferred_kind,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "prompt": build_asset_prompt(
+                        entity_type=entity_type,
+                        entity=record,
+                        scene_summary=node.get("summary"),
+                        scene_text=node.get("scene_text"),
+                    ),
+                    "width": width,
+                    "height": height,
+                    "metadata": {"source": "inferred_post_apply"},
+                }
+            )
+
+        return inferred
+    finally:
+        connection.close()
+
+
+def build_asset_prompt(
+    *,
+    entity_type: str,
+    entity: dict[str, Any],
+    scene_summary: str | None,
+    scene_text: str | None,
+) -> str:
+    name = (entity.get("name") or "").strip()
+    description = (entity.get("description") or "").strip()
+    canonical_summary = (entity.get("canonical_summary") or "").strip()
+    if entity_type == "location":
+        fragments = [fragment for fragment in [description, canonical_summary] if fragment]
+        joined = ". ".join(fragments[:2]).strip()
+        suffix = "Static environment only. No characters. No separately rendered props or vehicles."
+        return " ".join(part for part in [name + ".", joined, suffix] if part).strip()
+    scene_hint = (scene_summary or scene_text or "").strip()
+    fragments = [fragment for fragment in [description, canonical_summary, scene_hint] if fragment]
+    joined = ". ".join(fragments[:3]).strip()
+    if entity_type == "character":
+        return f"Full-body portrait of {name}. {joined}".strip()
+    return f"{name}. {joined}".strip()
 
 
 def main() -> None:
@@ -401,6 +639,7 @@ def main() -> None:
                 candidate=parsed,
                 client=client,
                 dry_run=args.dry_run,
+                project_root=project_root,
             )
 
     print(json.dumps(result, indent=2))

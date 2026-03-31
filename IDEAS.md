@@ -15,6 +15,7 @@ This file is intentionally informal.
 - It is okay to be rough.
 - It is okay to leave fragments.
 - It is okay to suggest something and never use it.
+- If you are a worker appending new ideas, read the current file first and add genuinely new ideas rather than repeating or lightly remixing existing examples.
 
 Use this file when:
 - you have a fun idea for later
@@ -63,3 +64,14 @@ Suggested format:
 - Keep ideas readable and concrete.
 - Prefer one or two clear sentences over vague mood-only fragments.
 - If an idea starts shaping real future continuity, it can also be copied into `story_direction_notes`.
+- Treat the example seeds in this file as examples, not defaults to repeat verbatim.
+
+## Open Ideas
+
+- [Character] Clerk Nettle's Rival: A rival correction clerk could eventually challenge Clerk Nettle's careful local authority, introducing a procedural antagonist who questions the rules.
+- [Location] Bell Orchard: A branch could later open into a bell orchard where departures grow like fruit and time is measured by chimes rather than clocks.
+- [Event] Transit Robbery: A later tram ride could erupt into a robbery that introduces new characters and turns the network from eerie logistics into an active action plotline.
+
+- [Character] The Clockwork Gnome's Apprentice: A small gnome apprentice who repairs the clockwork trams but speaks only in riddles about lost time, hinting at a deeper temporal anomaly tied to the protagonist's missing past.
+- [Location] The Echoing Orchard: A hidden orchard where fallen apples replay the sounds of tram departures, serving as a memory archive that only reveals one clue per season.
+- [Object] The Fifth-Notch Compass: A brass compass that spins when the protagonist's altered hand is near, pointing toward places where identity corrections are being made.
