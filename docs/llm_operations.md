@@ -111,37 +111,42 @@ This is the first file an LLM should read when working in this repository. It ex
    - `python -m app.tools.prepare_story_run`
    - this prepares one compact packet with the selected frontier item, pre-change URL, preview payload, and branch context
    - use it instead of rediscovering the repo structure in a new thread
-6. Inspect current data only if needed:
+   - planning mode may trigger automatically on some runs, or can be forced with `python -m app.tools.prepare_story_run --plan`
+6. If you want the repo itself to orchestrate one full local LM Studio worker run, use:
+   - `python -m app.tools.run_story_worker_local --model <loaded-model-id>`
+   - add `--plan` to force planning mode
+   - add `--dry-run` to validate/plan without writing changes
+7. Inspect current data only if needed:
    - `python -m pytest`
    - `python -m uvicorn app.main:app --reload --port 8001`
    - open the UI at `http://127.0.0.1:8001`
    - inspect `/ui/seed`, `/ui/story`, `/story-bible`, and `/branches/default/state`
-7. If the opening canon needs to be reset to the current protagonist design:
+8. If the opening canon needs to be reset to the current protagonist design:
    - call `POST /story/reset-opening-canon`
    - call `POST /story/seed-opening-story`
    - optionally call `POST /story/refresh-protagonist-assets`
-8. Before adding new canon:
+9. Before adding new canon:
    - look for an existing location, character, or object by normalized name
    - inspect nearby relations and existing facts
-9. When adding story content later:
+10. When adding story content later:
    - create or reuse canonical entities first
    - update branch state when the player gains a persistent item, relationship change, clue, or affordance
    - create a `story_node`
    - attach canonical entity references in `node_entities`
    - add `choices` as outgoing edges
    - store any new world truths in `facts` and `relations`
-10. Before treating generated content as valid:
+11. Before treating generated content as valid:
    - get a target from `GET /frontier`
    - build context with `POST /jobs/generation-preview`
    - validate the candidate with `POST /jobs/validate-generation`
    - apply it with `POST /jobs/apply-generation`
-11. After applying a scene, generate any required missing visuals:
+12. After applying a scene, generate any required missing visuals:
    - new recurring character who is actually appearing now -> `portrait`
    - new linked visually distinct location the player has actually arrived at now -> `background`
    - new reusable visually important object that is actually on-screen or immediately playable now -> `object_render`
    - if the entity is only future-facing, defer art until it is about to matter in play
-12. Do not duplicate entities just because a branch rediscovers them.
-13. When reporting a completed worker run, include:
+13. Do not duplicate entities just because a branch rediscovers them.
+14. When reporting a completed worker run, include:
    - the pre-change URL
    - the specific choice id(s) to click from that state
    - not just prose like `pick option 1`

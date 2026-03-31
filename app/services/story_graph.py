@@ -499,6 +499,14 @@ class StoryGraphService:
             if choice["to_node_id"] is not None:
                 raise ValueError("choice_id is already fulfilled.")
         development_depth = int(branch_state_service.ensure_branch(request_branch_key)["branch_depth"]) + 1
+        inherited_referenced_entities = self._inherit_referenced_entities(
+            parent_node=parent_node,
+            candidate=candidate,
+        )
+        inherited_present_entities = self._inherit_present_entities(
+            parent_node=parent_node,
+            candidate=candidate,
+        )
         with self.connection:
             node = self.create_story_node(
                 branch_key=request_branch_key,
@@ -507,8 +515,8 @@ class StoryGraphService:
                 summary=candidate.scene_summary,
                 parent_node_id=parent_node_id,
                 dialogue_lines=[line.model_dump() for line in candidate.dialogue_lines],
-                referenced_entities=[reference.model_dump() for reference in candidate.entity_references],
-                present_entities=[entity.model_dump() for entity in candidate.scene_present_entities],
+                referenced_entities=inherited_referenced_entities,
+                present_entities=inherited_present_entities,
                 commit=False,
             )
             new_node_id = int(node["id"])
@@ -817,7 +825,59 @@ class StoryGraphService:
             lines = []
         if lines:
             return lines
-        return [{"speaker": "Narrator", "text": node["scene_text"]}]
+        scene_text = (node.get("scene_text") or "").strip()
+        if not scene_text:
+            return []
+        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", scene_text) if paragraph.strip()]
+        if not paragraphs:
+            paragraphs = [scene_text]
+        return [{"speaker": "Narrator", "text": paragraph} for paragraph in paragraphs]
+
+    def _inherit_referenced_entities(
+        self,
+        *,
+        parent_node: dict[str, Any],
+        candidate: GenerationCandidate,
+    ) -> list[dict[str, Any]]:
+        references = [reference.model_dump() for reference in candidate.entity_references]
+        has_current_scene = any(reference.get("role") == "current_scene" for reference in references)
+        if has_current_scene:
+            return references
+        parent_current_scene = next(
+            (entity for entity in (parent_node.get("entities") or []) if entity.get("role") == "current_scene"),
+            None,
+        )
+        if parent_current_scene is not None:
+            references.append(
+                {
+                    "entity_type": parent_current_scene["entity_type"],
+                    "entity_id": int(parent_current_scene["entity_id"]),
+                    "role": parent_current_scene.get("role", "current_scene"),
+                }
+            )
+        return references
+
+    def _inherit_present_entities(
+        self,
+        *,
+        parent_node: dict[str, Any],
+        candidate: GenerationCandidate,
+    ) -> list[dict[str, Any]]:
+        if candidate.scene_present_entities:
+            return [entity.model_dump() for entity in candidate.scene_present_entities]
+        return [
+            {
+                "entity_type": entity["entity_type"],
+                "entity_id": int(entity["entity_id"]),
+                "slot": entity["slot"],
+                "scale": entity.get("scale"),
+                "offset_x_percent": float(entity.get("offset_x_percent") or 0.0),
+                "offset_y_percent": float(entity.get("offset_y_percent") or 0.0),
+                "focus": bool(entity.get("focus", False)),
+                "hidden_on_lines": list(entity.get("hidden_on_lines", [])),
+            }
+            for entity in (parent_node.get("present_entities") or [])
+        ]
 
     def _decode_choice_rows(self, choices: list[dict[str, Any]]) -> None:
         for choice in choices:

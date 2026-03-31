@@ -1038,6 +1038,43 @@ def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path
     assert any(note["title"] == "Tram action escalation seed" for note in notes)
 
 
+def test_apply_generation_inherits_scene_location_and_present_entities_when_omitted(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+    parent_story = client.get(f"/play?branch_key=default&scene={frontier_item['from_node_id']}")
+    assert parent_story.status_code == 200
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_summary": "A continuation scene with no explicit staging metadata.",
+                "scene_text": "First paragraph of narration.\n\nSecond paragraph of narration.",
+                "choices": [
+                    {
+                        "choice_text": "Keep going",
+                        "notes": "Goal: keep the same scene moving. Intent: confirm inherited staging keeps the same visual context when metadata is omitted.",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    node = response.json()["node"]
+    assert any(entity["role"] == "current_scene" for entity in node["entities"])
+    assert node["present_entities"]
+
+    branch_nodes = client.get("/story-nodes").json()
+    created_node = next(row for row in branch_nodes if row["id"] == node["id"])
+    assert len(created_node["dialogue_lines"]) == 2
+
+
 def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     seed = client.post("/story/seed-opening-story").json()
@@ -1562,6 +1599,140 @@ def test_prepare_story_run_random_plan_respects_cooldown_and_chance(tmp_path: Pa
     assert json.loads(first.stdout)["run_mode"] == "normal"
     assert json.loads(second.stdout)["run_mode"] == "normal"
     assert json.loads(third.stdout)["run_mode"] == "planning"
+
+
+def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    response_file = tmp_path / "normal_response.json"
+    response_file.write_text(
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_title": "Mock Loop Scene",
+                "scene_summary": "A valid mocked scene candidate.",
+                "scene_text": "The mocked local worker produces a scene without touching the database in dry-run mode.",
+                "choices": [
+                    {
+                        "choice_text": "Take the mocked path",
+                        "notes": "Goal: confirm the local runner can validate a mocked scene. Intent: prove the CLI works before real model calls.",
+                    },
+                    {
+                        "choice_text": "Stay put and inspect the result",
+                        "notes": "Goal: keep the branch stable while testing. Intent: preserve a second valid option for schema coverage.",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.run_story_worker_local",
+        "--model",
+        "mock-model",
+        "--dry-run",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_LOCAL_WORKER_RESPONSE_FILE": str(response_file),
+            "CYOA_PLANNING_ROLL": "1.0",
+        },
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["run_mode"] == "normal"
+    assert payload["dry_run"] is True
+    assert payload["expanded_choice_id"] if "expanded_choice_id" in payload else payload["choice_id"]
+    assert payload["validation"]["valid"] is True
+
+
+def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier = client.get("/frontier").json()
+    target_choice_id = frontier[0]["choice_id"]
+    ideas_file = tmp_path / "IDEAS.md"
+    ideas_file.write_text("# Ideas Scratchpad\n\n## Open Ideas\n", encoding="utf-8")
+
+    response_file = tmp_path / "planning_response.json"
+    response_file.write_text(
+        json.dumps(
+            {
+                "ideas_to_append": [
+                    "A tram receipt that hums when danger is imminent.",
+                    "A bell orchard where departures ripen on trees.",
+                    "A duck inspector who only trusts counterfeit maps.",
+                ],
+                "choice_note_updates": [
+                    {
+                        "choice_id": target_choice_id,
+                        "notes": "Goal: push the branch toward a reusable tram-side mystery. Intent: set up a later bell-orchard detour or a careful merge back if the beat stays small.",
+                    }
+                ],
+                "story_direction_notes": [
+                    {
+                        "note_type": "plotline",
+                        "title": "Bell Orchard Seed",
+                        "note_text": "One tram branch could later open into a bell orchard where departures grow like fruit.",
+                        "status": "active",
+                        "priority": 2,
+                    }
+                ],
+                "summary": "Planning pass completed.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.run_story_worker_local",
+        "--model",
+        "mock-model",
+        "--plan",
+        "--ideas-file",
+        str(ideas_file),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_LOCAL_WORKER_RESPONSE_FILE": str(response_file),
+        },
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["run_mode"] == "planning"
+    assert payload["updated_choice_ids"] == [target_choice_id]
+    assert payload["ideas_added"] == 3
+    assert payload["story_notes_added"] == 1
+
+    updated_choice = client.get("/choices").json()
+    matching = next(choice for choice in updated_choice if choice["id"] == target_choice_id)
+    assert "Goal:" in matching["notes"]
+    ideas_text = ideas_file.read_text(encoding="utf-8")
+    assert "bell orchard" in ideas_text.lower()
+    story_notes = client.get("/story-notes").json()
+    assert any(note["title"] == "Bell Orchard Seed" for note in story_notes)
 
 
 def test_player_script_renders_choice_id_badge() -> None:

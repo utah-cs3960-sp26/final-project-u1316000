@@ -71,6 +71,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `docs/story_bible.md` human-readable tone and pacing guide
 - `app/tools/snapshot_db.py` CLI tool for taking a manual SQLite snapshot before a story session
 - `app/tools/prepare_story_run.py` CLI tool for preparing one compact story-worker packet for the next scene expansion
+- `app/tools/run_story_worker_local.py` CLI tool for running one local LM Studio-backed worker loop
 - `app/tools/remove_background.py` CLI tool for local background removal
 - `app/tools/download_hf_model.py` CLI tool for downloading model repos into the local cache
 - `tests/test_app.py` integration tests
@@ -120,6 +121,10 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - `python -m app.tools.snapshot_db --name before-session`
 - If you want to hand a fresh thread one compact story-run packet instead of making it inspect the repo first, use:
   - `python -m app.tools.prepare_story_run`
+- If you want to run one local worker loop against LM Studio instead of copy-pasting packets by hand, use:
+  - `python -m app.tools.run_story_worker_local --model <loaded-model-id>`
+  - add `--plan` to force planning mode
+  - add `--dry-run` to validate or plan without writing changes
 
 ## Asset Pipeline Notes
 - `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.

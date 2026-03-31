@@ -32,4 +32,9 @@ aider --model openai/nemotron-3-nano-4b --openai-api-key "dummy-api-key" --opena
 
 aider --model openai/gpt-oss-20b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message-file docs/llm_story_worker.md
 
-aider --model openai/qwen3.5-35b-a3b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --file docs/llm_story_worker.md --message "Please read the contents of this file and tell me what you find"
+aider --model openai/qwen/qwen3.5-35b-a3b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --file docs/llm_story_worker.md --message "Please read the contents of this file and tell me what you find"
+
+aider --model openai/qwen/qwen3.5-35b-a3b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message-file docs/llm_story_worker.md
+
+
+python -m app.tools.run_story_worker_local --model qwen/qwen3.5-35b-a3b
