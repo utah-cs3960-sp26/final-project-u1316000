@@ -3,40 +3,21 @@
 This file is the human-readable story bible for the current prototype. The machine-readable companion lives at `data/story_bible.json`.
 
 ## Tone
-- Whimsical, surreal, wacky, slightly unhinged fantasy.
+- Whimsical, surreal, wacky, slightly unhinged fantasy. This applies to the setting and character appearances only. Dialogue should be clear and coherent. 
 - Sincerity over parody.
 - No cringe in pursuit of funny.
 - Weirdness must feel consequential, curious, or emotionally textured.
 - The world can surprise the player, but continuity must hold once something exists.
 
 ## Voice And Readability
-- A mix of lyrical and plain language is good.
-- Narration may be more poetic, strange, or image-rich than spoken dialogue.
-- Character dialogue should usually be more grounded and immediately understandable.
-- Player dialogue should usually be the clearest voice in the scene, even when reacting to bizarre things.
-- Surreal wording is welcome, but each line should still cash out into a clear thought on first read.
-- If a line sounds evocative but cannot be paraphrased plainly, it is probably too muddy.
-- Prefer `clear weird` over `murky weird`.
-- Good:
-  - `Why does this fit my hand at all?`
-  - `Hats should not do that.`
-  - `The brim twitches like a clerk straightening its papers.`
-- Worse:
-  - `Who taught the ground my hand badly?`
-  - `That is too much behavior for a brim.`
-- A line that introduces a rule, clue, or system behavior should be especially clear.
+- Clear language is best, but more poetic or lyrical is fine for specific characters as long as meaning is easily understood aka is immediately understandable.
 
-## Protagonist Reset
+## Protagonist at the start of the story
 - The protagonist is an abnormally tall gnome.
 - The protagonist's left hand has five thumbs.
 - The protagonist wears a red-and-white striped bucket hat and does not know how they got it.
 - The protagonist begins with significant amnesia.
 
-## Story Shape
-- Main mystery beats should be lightly scaffolded, not fully outlined.
-- Early story should scatter clues and strange invitations into the world.
-- Middle story should connect patterns, recurring entities, and reusable affordances.
-- Late story may begin paying off identity and origin mysteries if the groundwork exists.
 
 ## Branching Shape
 - Default to `2` or `3` meaningful choices, not a rigid `3` every scene.
@@ -45,17 +26,11 @@ This file is the human-readable story bible for the current prototype. The machi
 - More than `3` choices should be rare and should happen only when the scene truly opens outward.
 - Cycles and revisits are desirable when they reinforce continuity.
 - Merges are allowed, but only when branch-local consequences still fit the merged scene.
-- A **quick merge** is a normal and useful pattern:
-  - Example: `A -> examine your five thumbs -> C`
-  - and also `A -> follow the silver tracks -> C`
-  - where `C` is still the same larger event because the branch difference is only a small informational detour
-- Quick merges are especially good for:
-  - minor inspection choices
-  - small lore reveals
-  - brief tone or character beats
-  - optional extra information before a larger event that would happen either way
-- Use quick merges to prevent meaningless branch explosion when the real dramatic structure is still converging.
-- Quick merges are a pressure-release valve, not the default branch shape.
+- A "quick merge" can be used when the difference between choices is a minor difference in dialogue or small lore details / inspection choices but ultimately have the same outcome. For example:
+"Which tram car do you enter? front -> narration about appearance of front tram -> tram sequence"
+"Which tram car do you enter? back -> narration about appearance of back tram -> tram sequence"
+- Use quick merges to prevent meaningless branch explosion
+- Quick merges are a pressure-release valve, not the default branch shape, use them sparingly.
 - If a branch has reconverged repeatedly in its recent scenes, the next expansion should usually open at least one fresh path instead of merging again.
 - Do not use a quick merge when the detour should create lasting branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge that must change the next scene.
 - When testing or reviewing a worker run, the useful "before" URL is the scene URL for the parent choice state:
@@ -68,13 +43,20 @@ This file is the human-readable story bible for the current prototype. The machi
 
 ## Pacing Rules
 - Major mysteries should not pay off immediately after introduction.
-- Use delayed payoff gating with both minimum distance and readiness conditions.
+- Use delayed payoff gating with both minimum distance and readiness conditions as well as min distance to next development.
 - Let small/local stories resolve even when the central mystery stays open.
 
 ## Global Planning Notes
 - Global story direction notes are allowed and encouraged.
 - They are not player-facing canon.
 - Their job is to preserve medium- and long-range direction across many one-scene worker runs.
+- Occasional planning runs are good.
+- A planning run should not write a new story scene.
+- Instead it should:
+  - add a few fun future-facing ideas to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md)
+  - strengthen the `Goal: ... Intent: ...` notes on several frontier choices
+  - leave behind any structured `story_direction_notes` needed to keep longer arcs from drifting
+- Planning runs help counter the natural one-scene conservatism of the normal worker loop.
 - [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the informal human-editable scratchpad for fun possibilities, half-formed ideas, and future scene/location/character concepts.
 - Use them for:
   - plotline ideas
@@ -112,16 +94,23 @@ This file is the human-readable story bible for the current prototype. The machi
   - a strange announcement with no owner
 - If a mystery is anchored to a place, object, or recurring person, tie the hook to that entity when possible.
 - `min_distance_to_payoff` is not just flavor text. It is part of the pacing contract.
+- `min_distance_to_next_development` is also part of the pacing contract.
+- A hook may be temporarily off-limits even for exploration or hinting at if its next development distance has not elapsed yet.
 - A hook is only really ready to pay off once:
   - enough branch distance has passed
   - and the required clue/state tags exist
+- A hook is only really ready to be explored again once:
+  - enough branch distance has passed since its last meaningful development
 - Major hooks should generally only pay off when they are explicitly surfaced as eligible by the branch context.
-- Blocked major hooks should usually gain:
+- Major hooks should generally only be explored when they are explicitly surfaced as developable by the branch context.
+- Blocked major hooks that are eligible for development should usually gain:
   - ambiguity
   - provenance hints
   - eerie recognition
   - partial constraints
+  - some info
   rather than immediate operational instructions from the nearest local system.
+- But if a hook is blocked by development cooldown, do not even do that much yet. Leave it alone until the cooldown expires.
 - Do not let the first nearby recurring NPC, transit line, or strange machine absorb a long-range identity mystery just because it is currently on stage.
 - A good clue can imply `this mystery touches that system somewhere` without collapsing into `this object is just part of that system and here are the rules right now`.
 

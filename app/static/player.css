@@ -660,13 +660,16 @@ button {
     position: absolute;
     inset: 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
+    justify-content: center;
     padding: 1rem 1.1rem;
     border-radius: 1rem;
-    background: rgba(93, 101, 115, 0.44);
+    background: rgba(87, 94, 107, 0.34);
+    backdrop-filter: blur(14px);
     color: rgba(246, 239, 228, 0.88);
     font-size: 0.84rem;
     line-height: 1.45;
+    text-align: center;
     opacity: 0;
     pointer-events: none;
     transition: opacity 140ms ease;

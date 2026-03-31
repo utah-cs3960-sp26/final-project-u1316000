@@ -234,6 +234,8 @@ SCHEMA_STATEMENTS = [
         linked_entity_id INTEGER,
         introduced_at_depth INTEGER NOT NULL DEFAULT 0,
         min_distance_to_payoff INTEGER NOT NULL DEFAULT 0,
+        min_distance_to_next_development INTEGER NOT NULL DEFAULT 0,
+        last_development_depth INTEGER NOT NULL DEFAULT 0,
         required_clue_tags_json TEXT NOT NULL DEFAULT '[]',
         required_state_tags_json TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL DEFAULT 'active',
@@ -263,6 +265,14 @@ SCHEMA_STATEMENTS = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS loop_runtime_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        normal_runs_since_plan INTEGER NOT NULL DEFAULT 0,
+        last_run_mode TEXT NOT NULL DEFAULT 'normal',
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
 
@@ -286,6 +296,15 @@ def bootstrap_database(database_path: str | Path) -> None:
         _ensure_column(connection, "assets", "normalization_json", "TEXT NOT NULL DEFAULT '{}'")
         _ensure_column(connection, "story_hooks", "payoff_concept", "TEXT")
         _ensure_column(connection, "story_hooks", "must_not_imply_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "story_hooks", "min_distance_to_next_development", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "story_hooks", "last_development_depth", "INTEGER NOT NULL DEFAULT 0")
+        connection.execute(
+            """
+            INSERT INTO loop_runtime_state (id, normal_runs_since_plan, last_run_mode)
+            VALUES (1, 0, 'normal')
+            ON CONFLICT(id) DO NOTHING
+            """
+        )
         connection.commit()
 
 

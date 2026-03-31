@@ -259,6 +259,29 @@ class StoryGraphService:
             self.connection.commit()
         return fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (cursor.lastrowid,)) or {}
 
+    def update_choice_notes(self, choice_id: int, notes: str) -> dict[str, Any]:
+        self.connection.execute(
+            """
+            UPDATE choices
+            SET notes = ?
+            WHERE id = ?
+            """,
+            (notes, choice_id),
+        )
+        self.connection.commit()
+        choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if choice is None:
+            return {}
+        self._decode_choice(choice)
+        return choice
+
+    def get_choice(self, choice_id: int) -> dict[str, Any] | None:
+        choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if choice is None:
+            return None
+        self._decode_choice(choice)
+        return choice
+
     def link_entity(self, *, story_node_id: int, entity_type: str, entity_id: int, role: str = "mentioned") -> None:
         self.connection.execute(
             """
@@ -475,6 +498,7 @@ class StoryGraphService:
                 raise ValueError("choice_id does not belong to parent_node_id.")
             if choice["to_node_id"] is not None:
                 raise ValueError("choice_id is already fulfilled.")
+        development_depth = int(branch_state_service.ensure_branch(request_branch_key)["branch_depth"]) + 1
         with self.connection:
             node = self.create_story_node(
                 branch_key=request_branch_key,
@@ -594,15 +618,15 @@ class StoryGraphService:
                 )
 
             for hook in candidate.new_hooks:
-                introduced_at_depth = int(branch_state_service.ensure_branch(request_branch_key)["branch_depth"]) + 1
                 self.connection.execute(
                     """
                     INSERT INTO story_hooks (
                         branch_key, hook_type, importance, summary, payoff_concept, must_not_imply_json, linked_entity_type, linked_entity_id,
-                        introduced_at_depth, min_distance_to_payoff, required_clue_tags_json, required_state_tags_json,
+                        introduced_at_depth, min_distance_to_payoff, min_distance_to_next_development, last_development_depth,
+                        required_clue_tags_json, required_state_tags_json,
                         status, notes
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
                     """,
                     (
                         request_branch_key,
@@ -613,8 +637,10 @@ class StoryGraphService:
                         json.dumps(hook.must_not_imply),
                         hook.linked_entity_type,
                         hook.linked_entity_id,
-                        introduced_at_depth,
+                        development_depth,
                         hook.min_distance_to_payoff,
+                        hook.min_distance_to_next_development,
+                        development_depth,
                         json.dumps(hook.required_clue_tags),
                         json.dumps(hook.required_state_tags),
                         hook.notes,
@@ -631,6 +657,8 @@ class StoryGraphService:
                     """
                     UPDATE story_hooks
                     SET status = ?, notes = COALESCE(?, notes), resolution_text = COALESCE(?, resolution_text),
+                        min_distance_to_next_development = COALESCE(?, min_distance_to_next_development),
+                        last_development_depth = ?,
                         required_clue_tags_json = ?, required_state_tags_json = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
@@ -638,6 +666,8 @@ class StoryGraphService:
                         hook_update.status,
                         hook_update.progress_note,
                         hook_update.resolution_text,
+                        hook_update.next_min_distance_to_development,
+                        development_depth,
                         json.dumps(updated_clue_tags),
                         json.dumps(updated_state_tags),
                         hook_update.hook_id,

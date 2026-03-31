@@ -250,6 +250,28 @@ def test_asset_service_prefers_latest_asset_for_entity_kind(tmp_path: Path) -> N
     assert selected["id"] == latest["id"]
 
 
+def test_media_url_for_path_includes_mtime_version(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    asset_dir = project_root / "data" / "assets" / "test-fixtures"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    file_path = asset_dir / f"{tmp_path.name}-versioned.png"
+    try:
+        file_path.write_bytes(b"test")
+        with connect(tmp_path / "media_url.db") as connection:
+            service = AssetService(connection, project_root)
+            media_url = service.media_url_for_path(file_path)
+
+        assert media_url is not None
+        assert f"/media/test-fixtures/{file_path.name}?v=" in media_url
+    finally:
+        if file_path.exists():
+            file_path.unlink()
+        try:
+            asset_dir.rmdir()
+        except OSError:
+            pass
+
+
 def test_comfyui_generation_registers_asset(tmp_path: Path, monkeypatch) -> None:
     output_dir = tmp_path / "comfy_output" / "background"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -544,6 +566,8 @@ def test_seed_opening_story_creates_long_range_major_hooks(tmp_path: Path) -> No
 
     assert hat_hook["min_distance_to_payoff"] == 20
     assert body_hook["min_distance_to_payoff"] == 20
+    assert hat_hook["min_distance_to_next_development"] == 4
+    assert body_hook["min_distance_to_next_development"] == 4
     assert hat_hook["introduced_at_depth"] == 0
     assert body_hook["introduced_at_depth"] == 0
     assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
@@ -561,6 +585,7 @@ def test_create_story_hook_route_persists_direction_fields(tmp_path: Path) -> No
             "importance": "minor",
             "summary": "A brass slot hums your missing name but refuses to print it.",
             "payoff_concept": "The slot is connected to the same paperwork logic that keeps misnaming the protagonist.",
+            "min_distance_to_next_development": 2,
             "must_not_imply": [
                 "Do not treat the slot as a random one-scene gag.",
             ],
@@ -570,6 +595,7 @@ def test_create_story_hook_route_persists_direction_fields(tmp_path: Path) -> No
     assert response.status_code == 200
     hook = response.json()
     assert "paperwork logic" in hook["payoff_concept"]
+    assert hook["min_distance_to_next_development"] == 2
     assert hook["must_not_imply"] == ["Do not treat the slot as a random one-scene gag."]
 
 
@@ -647,6 +673,51 @@ def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) ->
     assert any("min_distance_to_payoff" in issue for issue in result["issues"])
     assert any("required clue tags" in issue.lower() for issue in result["issues"])
     assert any("required state tags" in issue.lower() for issue in result["issues"])
+
+
+def test_generation_validation_blocks_hook_development_during_cooldown(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    hook_response = client.post(
+        "/branches/default/hooks",
+        json={
+            "hook_type": "minor_mystery",
+            "importance": "minor",
+            "summary": "The bucket hat seam twitches when the bell rings.",
+            "min_distance_to_next_development": 2,
+        },
+    )
+    assert hook_response.status_code == 200
+    hook_id = hook_response.json()["id"]
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "The seam is interrogated again immediately.",
+            "scene_text": "The scene tries to push the same hook again before enough distance has passed.",
+            "choices": [
+                {
+                    "choice_text": "Keep tugging at the seam",
+                    "notes": "Goal: immediately press the same clue again. Intent: force another development before the cooldown expires.",
+                }
+            ],
+            "hook_updates": [
+                {
+                    "hook_id": hook_id,
+                    "status": "active",
+                    "progress_note": "The seam offers another clue too soon.",
+                    "next_min_distance_to_development": 2,
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("development cooldown" in issue.lower() for issue in result["issues"])
 
 
 def test_generation_validation_requires_hook_for_placeholder_mystery_entity(tmp_path: Path) -> None:
@@ -1374,6 +1445,7 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     packet = json.loads(result.stdout)
+    assert packet["run_mode"] == "normal"
     assert "Everything is already wired through" in packet["message"]
     assert "continue the worker loop immediately" in packet["message"]
     assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
@@ -1392,6 +1464,8 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
     assert "global_direction_notes" in packet["candidate_template"]
     assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
     assert "choice id" in packet["next_action"].lower()
+    assert packet["planning_policy"]["chance"] == 0.25
+    assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
 
 
 def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
@@ -1418,6 +1492,78 @@ def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Pa
     assert "full_context" in packet
 
 
+def test_prepare_story_run_tool_forced_plan_outputs_planning_packet(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--plan",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert packet["run_mode"] == "planning"
+    assert "Do not generate or apply a new story scene" in packet["message"]
+    assert packet["planning_reason"] == "forced by --plan"
+    assert len(packet["planning_targets"]) >= 3
+    assert len(packet["planning_targets"]) <= 4
+    assert packet["ideas_file"]["path"].endswith("IDEAS.md")
+    assert "Ideas Scratchpad" in packet["ideas_file"]["current_content"]
+    assert packet["next_action"].startswith("Run now. Do not ask the human for permission. This is planning mode.")
+    assert "update_choice_notes" in packet["endpoint_contract"]
+    assert packet["runtime_state_after"]["last_run_mode"] == "planning"
+    assert packet["runtime_state_after"]["normal_runs_since_plan"] == 0
+
+
+def test_prepare_story_run_random_plan_respects_cooldown_and_chance(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    command = [sys.executable, "-m", "app.tools.prepare_story_run"]
+
+    first = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path), "CYOA_PLANNING_ROLL": "0.0"},
+    )
+    second = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path), "CYOA_PLANNING_ROLL": "0.0"},
+    )
+    third = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path), "CYOA_PLANNING_ROLL": "0.0"},
+    )
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+    assert third.returncode == 0
+    assert json.loads(first.stdout)["run_mode"] == "normal"
+    assert json.loads(second.stdout)["run_mode"] == "normal"
+    assert json.loads(third.stdout)["run_mode"] == "planning"
+
+
 def test_player_script_renders_choice_id_badge() -> None:
     player_js = (Path(__file__).resolve().parents[1] / "app" / "static" / "player.js").read_text(encoding="utf-8")
     assert "choice-id" in player_js
@@ -1438,6 +1584,7 @@ def test_branch_hooks_endpoint_and_ui_show_readiness(tmp_path: Path) -> None:
             "linked_entity_type": "location",
             "linked_entity_id": 1,
             "min_distance_to_payoff": 2,
+            "min_distance_to_next_development": 1,
             "required_clue_tags": ["bell-heard"],
         },
     )
@@ -1448,11 +1595,14 @@ def test_branch_hooks_endpoint_and_ui_show_readiness(tmp_path: Path) -> None:
     hooks = hooks_response.json()
     assert len(hooks) >= 1
     assert "readiness" in hooks[0]
+    assert "development_required_depth" in hooks[0]["readiness"]
+    assert "remaining_development_distance" in hooks[0]["readiness"]
 
     ui_response = client.get("/ui/hooks")
     assert ui_response.status_code == 200
     assert "Branch hook pacing and payoff readiness." in ui_response.text
     assert "Min payoff distance" in ui_response.text
+    assert "Min development distance" in ui_response.text
 
 
 def test_ui_pages_render(tmp_path: Path) -> None:

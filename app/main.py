@@ -21,6 +21,7 @@ from app.models import (
     BackgroundRemovalRequest,
     BranchTagCreate,
     ChoiceCreate,
+    ChoiceUpdate,
     GenerationPayload,
     GenerationCandidate,
     InventoryEntryCreate,
@@ -923,6 +924,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             linked_entity_id=payload.linked_entity_id,
             introduced_at_depth=payload.introduced_at_depth,
             min_distance_to_payoff=payload.min_distance_to_payoff,
+            min_distance_to_next_development=payload.min_distance_to_next_development,
             required_clue_tags=payload.required_clue_tags,
             required_state_tags=payload.required_state_tags,
             status=payload.status,
@@ -958,6 +960,14 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             status=payload.status,
             notes=payload.notes,
         )
+
+    @app.post("/choices/{choice_id}")
+    def update_choice(choice_id: int, payload: ChoiceUpdate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        story = StoryGraphService(db)
+        choice = story.update_choice_notes(choice_id, payload.notes)
+        if not choice:
+            raise HTTPException(status_code=404, detail=f"Unknown choice id: {choice_id}")
+        return choice
 
     @app.post("/jobs/generation-stub")
     @app.post("/jobs/generation-preview")

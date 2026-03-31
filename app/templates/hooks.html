@@ -31,9 +31,10 @@
                 {% if hook.payoff_concept %}
                     <p class="meta">Payoff concept: {{ hook.payoff_concept }}</p>
                 {% endif %}
-                <p class="meta">Introduced at depth {{ hook.introduced_at_depth }} · Min payoff distance {{ hook.min_distance_to_payoff }}</p>
-                <p class="meta">Payoff required depth: {{ hook.readiness.required_depth }} · Remaining distance: {{ hook.readiness.remaining_distance }}</p>
-                <p class="meta">Distance ready: {{ "yes" if hook.readiness.distance_ready else "no" }} · Conditions ready: {{ "yes" if hook.readiness.conditions_ready else "no" }} · Eligible now: {{ "yes" if hook.readiness.eligible else "no" }}</p>
+                <p class="meta">Introduced at depth {{ hook.introduced_at_depth }} · Min payoff distance {{ hook.min_distance_to_payoff }} · Min development distance {{ hook.min_distance_to_next_development }}</p>
+                <p class="meta">Payoff required depth: {{ hook.readiness.required_depth }} · Remaining payoff distance: {{ hook.readiness.remaining_distance }}</p>
+                <p class="meta">Next development depth: {{ hook.readiness.development_required_depth }} · Remaining development distance: {{ hook.readiness.remaining_development_distance }}</p>
+                <p class="meta">Development ready: {{ "yes" if hook.readiness.development_distance_ready else "no" }} · Payoff distance ready: {{ "yes" if hook.readiness.distance_ready else "no" }} · Conditions ready: {{ "yes" if hook.readiness.conditions_ready else "no" }} · Payoff eligible now: {{ "yes" if hook.readiness.eligible else "no" }}</p>
                 {% if hook.linked_entity_type and hook.linked_entity_id %}
                     <p class="meta">Linked entity: {{ hook.linked_entity_type }}:{{ hook.linked_entity_id }}</p>
                 {% endif %}

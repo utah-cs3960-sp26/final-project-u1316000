@@ -122,7 +122,14 @@ class AssetService:
             relative_path = resolved_path.relative_to(asset_root)
         except ValueError:
             return None
-        return f"/media/{relative_path.as_posix()}"
+        try:
+            version = resolved_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            version = None
+        base_url = f"/media/{relative_path.as_posix()}"
+        if version is None:
+            return base_url
+        return f"{base_url}?v={version}"
 
     def resolve_scene_assets(self, scene_definition: dict[str, Any]) -> dict[str, Any]:
         resolved_scene = copy.deepcopy(scene_definition)

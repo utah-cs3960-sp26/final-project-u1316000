@@ -55,10 +55,33 @@ class LLMGenerationService:
     ) -> dict[str, Any]:
         premise_facts = [fact for fact in canon.list_facts() if fact["entity_type"] == "world"]
         recurring_entities = branch_state.list_recurring_entities(branch_key)
-        active_hooks = branch_state.list_hooks(branch_key, statuses=["active", "payoff_ready", "blocked"])
-        eligible_major_hooks = branch_state.list_eligible_hooks(branch_key, importance="major")
-        blocked_major_hooks = branch_state.list_ineligible_hooks(branch_key, importance="major")
         branch = branch_state.sync_branch_progress(branch_key)
+        projected_depth = int(branch["branch_depth"]) + 1
+        active_hooks = branch_state.list_hooks_with_readiness(
+            branch_key,
+            statuses=["active", "payoff_ready", "blocked"],
+            depth_override=projected_depth,
+        )
+        eligible_major_hooks = branch_state.list_eligible_hooks(
+            branch_key,
+            importance="major",
+            depth_override=projected_depth,
+        )
+        blocked_major_hooks = branch_state.list_ineligible_hooks(
+            branch_key,
+            importance="major",
+            depth_override=projected_depth,
+        )
+        developable_major_hooks = branch_state.list_development_eligible_hooks(
+            branch_key,
+            importance="major",
+            depth_override=projected_depth,
+        )
+        blocked_major_developments = branch_state.list_development_ineligible_hooks(
+            branch_key,
+            importance="major",
+            depth_override=projected_depth,
+        )
         current_node = story_graph.get_story_node(current_node_id) if current_node_id is not None else None
         branch_shape = story_graph.describe_branch_shape(
             branch_key,
@@ -106,6 +129,8 @@ class LLMGenerationService:
             "active_hooks": active_hooks,
             "eligible_major_hooks": eligible_major_hooks,
             "blocked_major_hooks": blocked_major_hooks,
+            "developable_major_hooks": developable_major_hooks,
+            "blocked_major_developments": blocked_major_developments,
             "global_direction_notes": global_direction_notes,
             "recurring_entities": recurring_entities,
             "merge_candidates": merge_candidates,
@@ -131,7 +156,9 @@ class LLMGenerationService:
             "A good payoff_concept should describe the general shape of the later answer, not just bind the mystery to whatever system or NPC is immediately available in the current scene.\n"
             "Broad direction does not mean vague direction: if a hook likely resolves into a known character, place, or system, say that directly instead of writing mushy placeholder notes.\n"
             "Major mysteries must not resolve before their minimum distance and readiness conditions.\n"
+            "Hooks may also have a cooldown before they are allowed to be developed again. If a hook is blocked for development, do not explore it, advance it, or even strongly hint at it in the new scene.\n"
             "Major hook payoffs are only safe when the relevant hook appears in eligible_major_hooks. If it is still blocked, deepen it without resolving it.\n"
+            "Only develop a major hook when it appears in developable_major_hooks. If it appears in blocked_major_developments, leave it alone for now.\n"
             "When a major hook is still blocked, prefer ambiguous clues, provenance fragments, eerie recognition, or partial constraints over explicit procedural instructions, ownership reveals, or local-system explanations unless several prior clues already support that connection.\n"
             "Do not let the first nearby recurring NPC, transit system, or local mechanic swallow a long-range mystery just because it is available now.\n"
             "For any hook, min_distance_to_payoff and required clue/state tags determine whether payoff is allowed. Validation will reject early resolution.\n"
@@ -170,6 +197,7 @@ class LLMGenerationService:
             branching_policy=self.story_bible.get("branching_policy"),
         )
         current_depth = int(branch["branch_depth"])
+        projected_depth = current_depth + 1
         state_tags = {row["tag"] for row in branch_state_service.list_branch_tags(candidate.branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in branch_state_service.list_branch_tags(candidate.branch_key, tag_type="clue")}
         discovered_state_tags = state_tags | set(candidate.discovered_state_tags)
@@ -224,10 +252,15 @@ class LLMGenerationService:
             if hook is None:
                 issues.append(f"Unknown hook id referenced in hook_updates: {hook_update.hook_id}")
                 continue
+            readiness = branch_state_service._hook_readiness(hook, projected_depth, state_tags, clue_tags)
+            if not readiness["development_eligible"]:
+                issues.append(
+                    f"Hook {hook_update.hook_id} is still on development cooldown and cannot be explored yet."
+                )
             if hook["importance"] == "major" and hook_update.status in {"payoff_ready", "resolved"}:
                 major_hook_updates += 1
             if hook_update.status == "resolved":
-                if current_depth < int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"]):
+                if projected_depth < int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"]):
                     issues.append(
                         f"Hook {hook_update.hook_id} resolves before min_distance_to_payoff allows."
                     )
@@ -319,6 +352,7 @@ class LLMGenerationService:
             "valid": not issues,
             "issues": issues,
             "current_depth": current_depth,
+            "projected_depth": projected_depth,
             "act_phase": branch["act_phase"],
         }
 

@@ -117,6 +117,10 @@ class ChoiceCreate(BaseModel):
     notes: str | None = None
 
 
+class ChoiceUpdate(BaseModel):
+    notes: str
+
+
 class BranchTagCreate(BaseModel):
     branch_key: str = "default"
     tag: str
@@ -165,6 +169,7 @@ class StoryHookCreate(BaseModel):
     linked_entity_id: int | None = None
     introduced_at_depth: int | None = None
     min_distance_to_payoff: int = 0
+    min_distance_to_next_development: int = 0
     required_clue_tags: list[str] = Field(default_factory=list)
     required_state_tags: list[str] = Field(default_factory=list)
     status: HookStatus = "active"
@@ -223,6 +228,7 @@ class HookProposal(BaseModel):
     linked_entity_type: RelationEntityType | None = None
     linked_entity_id: int | None = None
     min_distance_to_payoff: int = 0
+    min_distance_to_next_development: int = 0
     required_clue_tags: list[str] = Field(default_factory=list)
     required_state_tags: list[str] = Field(default_factory=list)
     notes: str | None = None
@@ -233,6 +239,7 @@ class HookUpdate(BaseModel):
     status: HookStatus
     progress_note: str | None = None
     resolution_text: str | None = None
+    next_min_distance_to_development: int | None = None
     add_required_clue_tags: list[str] = Field(default_factory=list)
     add_required_state_tags: list[str] = Field(default_factory=list)
 

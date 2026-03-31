@@ -31,7 +31,7 @@ How this differs from `story_direction_notes`:
 
 Suggested format:
 
-## Open Ideas
+## Event or encounter Ideas
 
 - Transit crisis / tram robbery:
   A later tram ride could erupt into a robbery, transit strike, or route seizure that introduces new characters and turns the tram network into a more active plotline.
@@ -46,6 +46,7 @@ Suggested format:
 
 - A nervous duck herald who announces disasters too early.
 - A cabin-dwelling frog scholar who studies impolite hats.
+- A man with 5 thumbs on his right hand (could be used to explore origin of main character's 5 thumbed left hand)
 
 ## Location Seeds
 
@@ -54,6 +55,8 @@ Suggested format:
 
 - The Apology Bridge:
   A bridge that only stabilizes when both sides admit what they actually want.
+
+- A steampunk cottage nestled within a dense jungle
 
 ## Notes
 

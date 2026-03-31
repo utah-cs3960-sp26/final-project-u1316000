@@ -300,7 +300,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-    if (event.key === "c" || event.key === "C") {
+    if (event.key === "i" || event.key === "I") {
         event.preventDefault();
         toggleChoiceIntentOverlay();
         return;

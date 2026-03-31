@@ -82,6 +82,12 @@
     "allowed": true,
     "player_facing": false,
     "purpose": "Preserve medium- and long-range story direction across many one-scene worker runs.",
+    "planning_runs_allowed": true,
+    "planning_runs_guidance": [
+      "Occasional planning runs are good and should not write a new story scene.",
+      "A planning run should add a few fun ideas to IDEAS.md, strengthen frontier choice Goal/Intent notes, and add structured story_direction_notes when needed.",
+      "Planning runs exist to reduce over-incremental one-scene thinking and keep longer arcs alive."
+    ],
     "good_uses": [
       "plotline ideas",
       "future character introductions",
@@ -106,8 +112,12 @@
       "Placeholder mystery entities such as an unseen voice, unknown figure, or unnamed recurring presence count as hooks if they are meant to matter later.",
       "When a mystery is anchored to a place, object, or recurring person, link the hook to that entity when possible.",
       "min_distance_to_payoff and required clue/state tags are real pacing constraints, not flavor text.",
+      "min_distance_to_next_development is also a real pacing constraint; a hook may be temporarily off-limits even for exploration if its cooldown has not elapsed yet.",
+      "A hook should only be explored again once enough branch distance has passed since its last meaningful development.",
       "Major hooks should generally only pay off when they are surfaced as eligible by the branch context.",
+      "Major hooks should generally only be explored when they are surfaced as developable by the branch context.",
       "Blocked major hooks should usually gain ambiguity, provenance hints, eerie recognition, or partial constraints rather than immediate local-system instructions.",
+      "But if a hook is blocked by development cooldown, do not even do that much yet. Leave it alone until the cooldown expires.",
       "Do not let the first nearby recurring NPC, transit system, or strange machine absorb a long-range identity mystery just because it is available in the current scene."
     ]
   },
@@ -138,6 +148,12 @@
       "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge.",
       "For manual testing and review, the useful pre-change URL is /play?branch_key=<branch_key>&scene=<from_node_id>."
     ]
+  },
+  "planning_mode": {
+    "chance": 0.25,
+    "min_normal_runs_between_plans": 2,
+    "frontier_count": 4,
+    "ideas_per_run": 3
   },
   "visual_policy": {
     "new_recurring_character_requires_art": true,

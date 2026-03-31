@@ -74,6 +74,8 @@ class BranchStateService:
         branch["resolved_hooks"] = self.list_hooks(branch_key, statuses=["resolved"])
         branch["eligible_major_hooks"] = self.list_eligible_hooks(branch_key, importance="major")
         branch["blocked_major_hooks"] = self.list_ineligible_hooks(branch_key, importance="major")
+        branch["developable_major_hooks"] = self.list_development_eligible_hooks(branch_key, importance="major")
+        branch["blocked_major_developments"] = self.list_development_ineligible_hooks(branch_key, importance="major")
         branch["recurring_entities"] = self.list_recurring_entities(branch_key)
         return branch
 
@@ -329,20 +331,23 @@ class BranchStateService:
         linked_entity_id: int | None = None,
         introduced_at_depth: int | None = None,
         min_distance_to_payoff: int = 0,
+        min_distance_to_next_development: int = 0,
         required_clue_tags: list[str] | None = None,
         required_state_tags: list[str] | None = None,
         status: str = "active",
         notes: str | None = None,
     ) -> dict[str, Any]:
         branch = self.sync_branch_progress(branch_key)
+        introduced_depth = branch["branch_depth"] if introduced_at_depth is None else introduced_at_depth
         cursor = self.connection.execute(
             """
             INSERT INTO story_hooks (
                 branch_key, hook_type, importance, summary, payoff_concept, must_not_imply_json, linked_entity_type, linked_entity_id,
-                introduced_at_depth, min_distance_to_payoff, required_clue_tags_json, required_state_tags_json,
+                introduced_at_depth, min_distance_to_payoff, min_distance_to_next_development, last_development_depth,
+                required_clue_tags_json, required_state_tags_json,
                 status, notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 branch_key,
@@ -353,8 +358,10 @@ class BranchStateService:
                 json.dumps(must_not_imply or []),
                 linked_entity_type,
                 linked_entity_id,
-                branch["branch_depth"] if introduced_at_depth is None else introduced_at_depth,
+                introduced_depth,
                 min_distance_to_payoff,
+                min_distance_to_next_development,
+                introduced_depth,
                 json.dumps(required_clue_tags or []),
                 json.dumps(required_state_tags or []),
                 status,
@@ -369,8 +376,10 @@ class BranchStateService:
         *,
         hook_id: int,
         status: str,
+        current_depth: int | None = None,
         progress_note: str | None = None,
         resolution_text: str | None = None,
+        next_min_distance_to_development: int | None = None,
         add_required_clue_tags: list[str] | None = None,
         add_required_state_tags: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -383,6 +392,8 @@ class BranchStateService:
             """
             UPDATE story_hooks
             SET status = ?, notes = COALESCE(?, notes), resolution_text = COALESCE(?, resolution_text),
+                min_distance_to_next_development = COALESCE(?, min_distance_to_next_development),
+                last_development_depth = ?,
                 required_clue_tags_json = ?, required_state_tags_json = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
@@ -390,6 +401,8 @@ class BranchStateService:
                 status,
                 progress_note,
                 resolution_text,
+                next_min_distance_to_development,
+                int(hook["last_development_depth"]) if current_depth is None else current_depth,
                 json.dumps(clue_tags),
                 json.dumps(state_tags),
                 hook_id,
@@ -430,41 +443,71 @@ class BranchStateService:
         *,
         statuses: list[str] | None = None,
         importance: str | None = None,
+        depth_override: int | None = None,
     ) -> list[dict[str, Any]]:
         branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        readiness_depth = int(branch["branch_depth"]) if depth_override is None else depth_override
         state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
         hooks = self.list_hooks(branch_key, statuses=statuses, importance=importance)
         for hook in hooks:
             hook["readiness"] = self._hook_readiness(
                 hook,
-                int(branch["branch_depth"]),
+                readiness_depth,
                 state_tags,
                 clue_tags,
             )
         return hooks
 
-    def list_eligible_hooks(self, branch_key: str, importance: str | None = None) -> list[dict[str, Any]]:
+    def list_eligible_hooks(self, branch_key: str, importance: str | None = None, depth_override: int | None = None) -> list[dict[str, Any]]:
         branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        readiness_depth = int(branch["branch_depth"]) if depth_override is None else depth_override
         state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
         eligible: list[dict[str, Any]] = []
         for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready"], importance=importance):
-            readiness = self._hook_readiness(hook, branch["branch_depth"], state_tags, clue_tags)
+            readiness = self._hook_readiness(hook, readiness_depth, state_tags, clue_tags)
             hook["readiness"] = readiness
             if readiness["eligible"]:
                 eligible.append(hook)
         return eligible
 
-    def list_ineligible_hooks(self, branch_key: str, importance: str | None = None) -> list[dict[str, Any]]:
+    def list_ineligible_hooks(self, branch_key: str, importance: str | None = None, depth_override: int | None = None) -> list[dict[str, Any]]:
         branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        readiness_depth = int(branch["branch_depth"]) if depth_override is None else depth_override
         state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
         clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
         ineligible: list[dict[str, Any]] = []
         for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready", "blocked"], importance=importance):
-            readiness = self._hook_readiness(hook, branch["branch_depth"], state_tags, clue_tags)
+            readiness = self._hook_readiness(hook, readiness_depth, state_tags, clue_tags)
             hook["readiness"] = readiness
             if not readiness["eligible"]:
+                ineligible.append(hook)
+        return ineligible
+
+    def list_development_eligible_hooks(self, branch_key: str, importance: str | None = None, depth_override: int | None = None) -> list[dict[str, Any]]:
+        branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        readiness_depth = int(branch["branch_depth"]) if depth_override is None else depth_override
+        state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
+        clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
+        eligible: list[dict[str, Any]] = []
+        for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready", "blocked"], importance=importance):
+            readiness = self._hook_readiness(hook, readiness_depth, state_tags, clue_tags)
+            hook["readiness"] = readiness
+            if readiness["development_eligible"]:
+                eligible.append(hook)
+        return eligible
+
+    def list_development_ineligible_hooks(self, branch_key: str, importance: str | None = None, depth_override: int | None = None) -> list[dict[str, Any]]:
+        branch = self._read_branch_row(branch_key) or self.ensure_branch(branch_key)
+        readiness_depth = int(branch["branch_depth"]) if depth_override is None else depth_override
+        state_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="state")}
+        clue_tags = {row["tag"] for row in self.list_branch_tags(branch_key, tag_type="clue")}
+        ineligible: list[dict[str, Any]] = []
+        for hook in self.list_hooks(branch_key, statuses=["active", "payoff_ready", "blocked"], importance=importance):
+            readiness = self._hook_readiness(hook, readiness_depth, state_tags, clue_tags)
+            hook["readiness"] = readiness
+            if not readiness["development_eligible"]:
                 ineligible.append(hook)
         return ineligible
 
@@ -501,6 +544,10 @@ class BranchStateService:
     ) -> dict[str, Any]:
         required_depth = int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"])
         distance_ready = branch_depth >= required_depth
+        development_required_depth = int(hook.get("last_development_depth") or 0) + int(
+            hook.get("min_distance_to_next_development") or 0
+        )
+        development_distance_ready = branch_depth >= development_required_depth
         required_state_tags = set(hook.get("required_state_tags", []))
         required_clue_tags = set(hook.get("required_clue_tags", []))
         missing_state_tags = sorted(required_state_tags - state_tags)
@@ -508,10 +555,14 @@ class BranchStateService:
         conditions_ready = not missing_state_tags and not missing_clue_tags
         return {
             "eligible": distance_ready and conditions_ready and hook["status"] != "resolved",
+            "development_eligible": development_distance_ready and hook["status"] != "resolved",
             "distance_ready": distance_ready,
             "required_depth": required_depth,
             "current_depth": branch_depth,
             "remaining_distance": max(required_depth - branch_depth, 0),
+            "development_distance_ready": development_distance_ready,
+            "development_required_depth": development_required_depth,
+            "remaining_development_distance": max(development_required_depth - branch_depth, 0),
             "conditions_ready": conditions_ready,
             "missing_state_tags": missing_state_tags,
             "missing_clue_tags": missing_clue_tags,

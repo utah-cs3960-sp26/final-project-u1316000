@@ -1,3 +1,5 @@
+You are now an "LLM story worker" starting now. You will read this follow and then follow its instructions. Do not ask the user for input, they are fully aware of the contents of this file and intend for you to act autonomously following the instructions outlined below. 
+
 # LLM Story Worker
 
 This is the single file the story-expansion loop should point the LLM at every run.
@@ -25,7 +27,7 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Your job is to continue the story, not audit the codebase.
 
 ## Execution Default
-- If the human points you at this file, that means `run the story worker now` unless they explicitly say they only want discussion.
+- IF YOU ARE READING THIS, COMPLETE THE INSTRUCTION LOOP OUTLINED BELOW. Do NOT stop without completing all the instructions in this file.
 - Do not stop after summarizing this file.
 - Do not ask for permission to begin the normal worker loop.
 - Your default behavior is:
@@ -40,6 +42,21 @@ This is the single file the story-expansion loop should point the LLM at every r
   - required tools/endpoints are actually unavailable
   - the human explicitly asks for analysis only
 
+## Planning Mode
+- Some runs are planning runs instead of normal scene-writing runs.
+- Planning mode may be forced with:
+  - `python -m app.tools.prepare_story_run --plan`
+- Otherwise planning mode may trigger by random chance, but only after enough normal runs have happened since the last planning run.
+- If the prep packet says `run_mode = planning`, treat that as authoritative.
+- In planning mode:
+  - do **not** generate or apply a new story scene
+  - do **not** call validation/apply for a `GenerationCandidate`
+  - do append new ideas to `IDEAS.md`
+  - do strengthen the `Goal: ... Intent: ...` notes on the returned planning-target choices
+  - do add structured `story_direction_notes` when they would help future workers keep medium-range direction
+- The point of planning mode is to make future normal runs less timid, less incremental, and less likely to lose longer plotlines.
+- Treat it as a chance to look slightly farther ahead than one immediate scene without turning ideas into canon too early.
+
 ## Goal
 - Expand the story one scene at a time.
 - Preserve continuity.
@@ -48,19 +65,11 @@ This is the single file the story-expansion loop should point the LLM at every r
 - Carry the visual side forward too when the scene genuinely needs new art.
 - Stakes, danger, and even death are allowed, but they are not required for a good scene or arc.
 
+
 ## Voice
-- Use a mix of lyrical narration and clearer spoken dialogue.
-- Narration may be more poetic, image-rich, or uncanny.
-- Spoken dialogue should usually be more grounded and immediately understandable.
-- The player character should usually be one of the clearest voices in the scene.
-- Surreal lines are welcome, but they should still communicate a clear thought on first read.
-- If a line sounds clever or eerie but you cannot paraphrase it plainly, rewrite it.
-- Prefer `clear weird` over `murky weird`.
-- Be especially clear when a line introduces:
-  - a clue
-  - a rule
-  - a system behavior
-  - a consequence
+- While it is sometimes ok for certain characters to have a more lyrical or otherwise unusual voice, it should always be easily understandable. 
+- Use normal English for almost everything to preserve coherence. The fantasy and whimsy comes from the setting, the events, and the characters themselves, not the dialogue. 
+- However do not be afraid to use prose to enhance narration and dialogue.
 
 ## What Counts As A Hook
 - A hook is any unresolved mystery, unanswered question, suspicious clue, ominous promise, unknown identity, unexplained cause, or strange thread that should matter later.
@@ -159,6 +168,9 @@ This is the single file the story-expansion loop should point the LLM at every r
   - or through the `/story-notes` endpoints when you need to manage them directly
 - If you have fun ideas for future scenes, locations, characters, or plotlines, feel free to also append them to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md).
 - `IDEAS.md` is the easiest place for both humans and workers to leave informal future possibilities without turning them into canon.
+- Planning runs are a particularly good time to use both:
+  - `story_direction_notes` for structured medium-range direction
+  - `IDEAS.md` for looser fun future possibilities
 
 ## Hard Rules
 - Do not resolve major hooks early.
@@ -192,28 +204,31 @@ This is the single file the story-expansion loop should point the LLM at every r
 1. Read this file.
 2. Prefer the one-command prep path first:
    - `python -m app.tools.prepare_story_run`
+   - use `--plan` if the human wants to force planning mode for testing or for a deliberate direction-setting pass
    - use `--full-context` only if the compact packet is genuinely insufficient
 3. Use the returned packet as your source of truth for the current run.
    - Do not summarize the packet and wait. Continue the loop immediately.
-4. If the prep command is unavailable or the human explicitly wants the manual path, ask the backend which branch end to work on:
+4. If the packet says `run_mode = planning`, do the planning work and stop there.
+5. If the packet says `run_mode = normal`, continue with the normal scene-writing workflow below.
+6. If the prep command is unavailable or the human explicitly wants the manual path, ask the backend which branch end to work on:
    - `GET /frontier`
-5. Pick one frontier item.
-6. Record the pre-change test URL for the exact state you are expanding:
+7. Pick one frontier item.
+8. Record the pre-change test URL for the exact state you are expanding:
    - `/play?branch_key=<branch_key>&scene=<from_node_id>`
    - when you finish the run, always print or report that URL so a human can quickly reopen the state before your change
-7. Build the generation context:
+9. Build the generation context:
    - `POST /jobs/generation-preview`
-8. Return one structured `GenerationCandidate`.
-9. Validate it:
+10. Return one structured `GenerationCandidate`.
+11. Validate it:
    - `POST /jobs/validate-generation`
-10. Only if valid, apply it:
+12. Only if valid, apply it:
    - `POST /jobs/apply-generation`
-11. After apply, generate required missing visuals:
+13. After apply, generate required missing visuals:
    - current playable arrival into a new visually distinct linked location -> `background`
    - new recurring character who is actually appearing in the scene now -> `portrait`
    - reusable visually important object that is actually on-screen or immediately playable now -> `object_render`
    - if the new canon entity is only future-facing, defer art until it is about to matter on-screen
-12. Stop after reporting:
+14. Stop after reporting:
    - the pre-change URL
    - what node/choice you expanded
    - the concrete choice id(s) a human should click to reach the new content from the reported state
@@ -224,16 +239,24 @@ This is the single file the story-expansion loop should point the LLM at every r
 
 ## Hook Payoff Gating
 - `min_distance_to_payoff` is real and enforced.
+- `min_distance_to_next_development` is also real and enforced.
+- If a hook is still on development cooldown, do not explore it, advance it, or even strongly hint at it yet.
 - The preview packet tells you how close a hook is to being payable:
   - `eligible_major_hooks` are the major hooks that are safe to advance toward payoff now
   - `blocked_major_hooks` are still too early or still missing required clue/state tags
-- If a major hook is blocked, do not resolve it. Deepen it, echo it, or add clues instead.
+- The preview packet also tells you which major hooks are safe to develop at all:
+  - `developable_major_hooks` are safe to explore or advance
+  - `blocked_major_developments` should be left alone for now
+- If a major hook is blocked for development, do not resolve it. Do not deepen it, echo it, or add clues instead. Leave it alone until its cooldown expires.
 - For any hook, not just major ones:
   - do not mark it resolved until both distance and required tags are satisfied
+  - do not develop it again until its development cooldown allows it
   - if you need a later payoff, add or preserve the needed clue/state tags now
 - A good rule of thumb:
+  - `developable_major_hooks` may be explored or advanced carefully
+  - `blocked_major_developments` should not be touched yet
   - `eligible_major_hooks` may be advanced carefully
-  - `blocked_major_hooks` may be teased, complicated, or enriched, but not paid off
+  - `blocked_major_hooks` that are still developable may be teased, complicated, or enriched, but not paid off
 - For blocked major hooks, prefer:
   - eerie resonance
   - provenance fragments
