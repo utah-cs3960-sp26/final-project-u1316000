@@ -13,10 +13,13 @@ import httpx
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field, ValidationError
 
+from app.config import Settings
+from app.database import connect
 from app.main import create_app
 from app.models import DirectionNoteProposal, GenerationCandidate
 from app.services.assets import AssetService
 from app.services.canon import CanonResolver
+from app.services.story_graph import StoryGraphService
 
 
 class PlanningChoiceUpdate(BaseModel):
@@ -68,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=0.4)
     parser.add_argument("--max-tokens", type=int, default=8000)
     parser.add_argument("--max-retries", type=int, default=2)
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=1800.0,
+        help="HTTP timeout in seconds for the LM Studio chat completion request.",
+    )
     parser.add_argument(
         "--ideas-file",
         help="Optional override for IDEAS.md path, useful for testing or alternate notebooks.",
@@ -125,46 +134,22 @@ def build_system_prompt(worker_guide: str) -> str:
 
 def build_user_prompt(packet: dict[str, Any]) -> str:
     if packet["run_mode"] == "planning":
-        response_schema = {
-            "ideas_to_append": [
-                {
-                    "category": "character|location|object|event",
-                    "title": "A unique idea title not already present in IDEAS.md",
-                    "note_text": "One or two clear sentences describing a distinct future possibility.",
-                }
-            ],
-            "choice_note_updates": [
-                {"choice_id": 0, "notes": "Goal: ... Intent: ..."}
-            ],
-            "story_direction_notes": [
-                {
-                    "note_type": "plotline",
-                    "title": "Optional",
-                    "note_text": "Optional",
-                    "status": "active",
-                    "priority": 2,
-                }
-            ],
-            "summary": "Optional planning summary.",
-        }
         return (
             "This is a planning-mode packet.\n"
             "Do not generate or apply a scene.\n"
             "Use the existing IDEAS.md content in the packet as shared memory.\n"
             "Add only unique ideas that are not already present there.\n"
             "Do not reuse or lightly remix example seeds from the docs or packet.\n"
-            "Return only JSON matching this shape:\n"
-            f"{json.dumps(response_schema, indent=2)}\n\n"
+            "The API already supplied the required structured-output schema. Return only JSON.\n\n"
             "Packet:\n"
             f"{json.dumps(packet, indent=2)}"
         )
 
-    response_schema = GenerationCandidate.model_json_schema()
     return (
         "This is a normal story-worker packet.\n"
-        "Return only a valid GenerationCandidate JSON object.\n"
-        "JSON schema:\n"
-        f"{json.dumps(response_schema, indent=2)}\n\n"
+        "The API already supplied the required GenerationCandidate structured-output schema.\n"
+        "If validation issues are returned later, revise the JSON and try again until it passes validation.\n"
+        "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
         "Packet:\n"
         f"{json.dumps(packet, indent=2)}"
     )
@@ -199,6 +184,7 @@ def call_lm_studio(
     response_format: dict[str, Any],
     temperature: float,
     max_tokens: int,
+    request_timeout: float,
 ) -> str:
     mock_response_path = os.environ.get("CYOA_LOCAL_WORKER_RESPONSE_FILE")
     if mock_response_path:
@@ -215,7 +201,7 @@ def call_lm_studio(
             {"role": "user", "content": user_prompt},
         ],
     }
-    response = httpx.post(url, json=payload, timeout=300.0)
+    response = httpx.post(url, json=payload, timeout=request_timeout)
     response.raise_for_status()
     data = response.json()
     message = data["choices"][0]["message"]
@@ -225,7 +211,12 @@ def call_lm_studio(
     reasoning_content = message.get("reasoning_content") or ""
     if reasoning_content.strip():
         return reasoning_content
-    raise RuntimeError("LM Studio returned neither content nor reasoning_content.")
+    finish_reason = data["choices"][0].get("finish_reason")
+    raise RuntimeError(
+        "LM Studio returned neither content nor reasoning_content. "
+        f"finish_reason={finish_reason!r}. This often means the request disconnected or timed out "
+        "during prompt processing."
+    )
 
 
 def extract_json_text(raw_text: str) -> str:
@@ -257,8 +248,142 @@ def parse_llm_result(packet: dict[str, Any], raw_text: str) -> GenerationCandida
     return GenerationCandidate.model_validate_json(json_text)
 
 
+def build_validation_retry_user_prompt(
+    *,
+    packet: dict[str, Any],
+    previous_candidate: GenerationCandidate,
+    issues: list[str],
+) -> str:
+    return (
+        "Your previous GenerationCandidate failed validation.\n"
+        "Fix the listed issues and return a corrected GenerationCandidate JSON object only.\n"
+        "Do not explain the changes. Do not stop. Keep trying until validation passes.\n\n"
+        "Important reminders:\n"
+        "- Every choice.notes value must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+        "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
+        "- Reuse existing art instead of requesting duplicate generation.\n\n"
+        "- Do not name a canonical character in scene text or choice text unless they have already appeared on this path or you are explicitly introducing them now.\n\n"
+        f"Validation issues:\n{json.dumps(issues, indent=2)}\n\n"
+        "Previous invalid candidate:\n"
+        f"{json.dumps(previous_candidate.model_dump(mode='json'), indent=2)}\n\n"
+        "Original packet:\n"
+        f"{json.dumps(packet, indent=2)}"
+    )
+
+
+def build_schema_retry_user_prompt(
+    *,
+    packet: dict[str, Any],
+    raw_text: str,
+    issues: list[str],
+) -> str:
+    return (
+        "Your previous response did not match the required JSON/schema.\n"
+        "Fix the listed schema issues and return a corrected JSON object only.\n"
+        "Do not explain the changes. Do not stop. Keep trying until the JSON parses and validates.\n\n"
+        "Important reminders:\n"
+        "- Use only allowed slot values in scene_present_entities: "
+        "'hero-center', 'left-support', 'right-support', 'left-foreground-object', "
+        "'right-foreground-object', or 'center-foreground-object'.\n"
+        "- Every choice.notes value must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+        "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
+        "- Return JSON only, with no markdown fences or commentary.\n\n"
+        f"Schema issues:\n{json.dumps(issues, indent=2)}\n\n"
+        "Previous invalid response:\n"
+        f"{raw_text.strip()}\n\n"
+        "Original packet:\n"
+        f"{json.dumps(packet, indent=2)}"
+    )
+
+
+def build_planning_retry_user_prompt(
+    *,
+    packet: dict[str, Any],
+    previous_result: PlanningResult,
+    issues: list[str],
+) -> str:
+    return (
+        "Your previous planning result failed validation.\n"
+        "Fix the listed planning issues and return a corrected planning JSON object only.\n"
+        "Do not explain the changes. Do not stop. Keep trying until the planning result passes validation.\n\n"
+        "Important reminders:\n"
+        "- Read the current IDEAS.md content in the packet before proposing new ideas.\n"
+        "- Every new planning idea must be genuinely new, not already present in IDEAS.md.\n"
+        "- Do not reuse built-in example seeds from the docs or prior examples.\n"
+        "- Across the run, your ideas must span at least 2 categories across character/location/object/event.\n"
+        "- Update at least one frontier choice note.\n\n"
+        f"Planning issues:\n{json.dumps(issues, indent=2)}\n\n"
+        "Previous invalid planning result:\n"
+        f"{json.dumps(previous_result.model_dump(mode='json'), indent=2)}\n\n"
+        "Original packet:\n"
+        f"{json.dumps(packet, indent=2)}"
+    )
+
+
 def get_test_client() -> TestClient:
     return TestClient(create_app())
+
+
+def validate_candidate(client: TestClient, candidate: GenerationCandidate) -> dict[str, Any]:
+    validation = client.post("/jobs/validate-generation", json=candidate.model_dump(mode="json"))
+    validation.raise_for_status()
+    return validation.json()
+
+
+def collect_character_continuity_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    selected = packet.get("selected_frontier_item") or {}
+    parent_node_id = selected.get("from_node_id")
+    if parent_node_id is None:
+        return []
+
+    settings = Settings.from_env()
+    connection = connect(settings.database_path)
+    try:
+        canon = CanonResolver(connection)
+        story = StoryGraphService(connection)
+        encountered_ids = story.list_lineage_entity_ids(int(parent_node_id), "character")
+        introduced_names = {
+            (character.name or "").strip().lower()
+            for character in candidate.new_characters
+            if (character.name or "").strip()
+        }
+        allowed_names = {
+            (character.get("name") or "").strip().lower()
+            for character_id in encountered_ids
+            if (character := canon.get_character(character_id)) is not None and (character.get("name") or "").strip()
+        }
+        allowed_names.update(introduced_names)
+
+        texts = [
+            candidate.scene_summary,
+            candidate.scene_text,
+            *(line.text for line in candidate.dialogue_lines),
+            *(choice.choice_text for choice in candidate.choices),
+        ]
+
+        issues: list[str] = []
+        seen_names: set[str] = set()
+        for character in canon.list_characters():
+            name = (character.get("name") or "").strip()
+            if not name:
+                continue
+            lowered = name.lower()
+            if lowered in allowed_names or lowered in seen_names:
+                continue
+            pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.IGNORECASE)
+            if any(pattern.search(text or "") for text in texts):
+                issues.append(
+                    f"Character '{name}' is named in the new scene/choices but has not appeared on this path yet. "
+                    "Either introduce them explicitly in-scene first or remove the reference."
+                )
+                seen_names.add(lowered)
+        return issues
+    finally:
+        connection.close()
 
 
 def append_ideas(ideas_path: Path, ideas: list[PlanningIdea]) -> None:
@@ -285,21 +410,22 @@ def normalize_idea_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
-def validate_planning_result(packet: dict[str, Any], result: PlanningResult) -> None:
+def get_planning_validation_issues(packet: dict[str, Any], result: PlanningResult) -> list[str]:
+    issues: list[str] = []
     required_count = int((packet.get("planning_policy") or {}).get("ideas_per_run") or 0)
     if len(result.ideas_to_append) < max(required_count, 2):
-        raise RuntimeError(
+        issues.append(
             f"Planning mode requires at least {max(required_count, 2)} categorized ideas, but only {len(result.ideas_to_append)} were returned."
         )
 
     categories = {idea.category for idea in result.ideas_to_append}
     if len(categories) < 2:
-        raise RuntimeError(
+        issues.append(
             "Planning mode ideas must span at least 2 categories across character/location/object/event."
         )
 
     if not result.choice_note_updates:
-        raise RuntimeError("Planning mode must update at least one frontier choice note.")
+        issues.append("Planning mode must update at least one frontier choice note.")
 
     existing_content = normalize_idea_text(((packet.get("ideas_file") or {}).get("current_content") or ""))
     seen_titles: set[str] = set()
@@ -308,24 +434,31 @@ def validate_planning_result(packet: dict[str, Any], result: PlanningResult) -> 
         normalized_title = normalize_idea_text(idea.title)
         normalized_text = normalize_idea_text(idea.note_text)
         if normalized_title in DISALLOWED_PLANNING_IDEA_SEEDS:
-            raise RuntimeError(
+            issues.append(
                 f"Planning idea '{idea.title}' reuses a built-in example seed. Add a different unique idea."
             )
         if normalized_title in seen_titles:
-            raise RuntimeError(f"Planning idea '{idea.title}' duplicates another new idea title in this run.")
+            issues.append(f"Planning idea '{idea.title}' duplicates another new idea title in this run.")
         seen_titles.add(normalized_title)
         signature = f"{idea.category}:{normalized_title}:{normalized_text}"
         if signature in seen_signatures:
-            raise RuntimeError(f"Planning idea '{idea.title}' duplicates another new idea in this run.")
+            issues.append(f"Planning idea '{idea.title}' duplicates another new idea in this run.")
         seen_signatures.add(signature)
         if normalized_title and normalized_title in existing_content:
-            raise RuntimeError(
+            issues.append(
                 f"Planning idea '{idea.title}' already appears in IDEAS.md. Add a genuinely new idea."
             )
         if normalized_text and normalized_text in existing_content:
-            raise RuntimeError(
+            issues.append(
                 f"Planning idea '{idea.title}' repeats wording already present in IDEAS.md. Add a genuinely new idea."
             )
+    return issues
+
+
+def validate_planning_result(packet: dict[str, Any], result: PlanningResult) -> None:
+    issues = get_planning_validation_issues(packet, result)
+    if issues:
+        raise RuntimeError("\n".join(issues))
 
 
 def apply_planning_result(
@@ -385,10 +518,9 @@ def apply_normal_result(
     client: TestClient,
     dry_run: bool,
     project_root: Path,
+    validation_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    validation = client.post("/jobs/validate-generation", json=candidate.model_dump(mode="json"))
-    validation.raise_for_status()
-    validation_payload = validation.json()
+    validation_payload = validation_payload or validate_candidate(client, candidate)
     if not validation_payload["valid"]:
         raise RuntimeError(f"Validation failed: {json.dumps(validation_payload['issues'], indent=2)}")
 
@@ -605,25 +737,79 @@ def main() -> None:
 
     last_error: Exception | None = None
     parsed: GenerationCandidate | PlanningResult | None = None
-    for _ in range(max(args.max_retries, 1)):
-        try:
-            raw = call_lm_studio(
-                api_base=args.api_base,
-                model=args.model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_format=response_format,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-            )
-            parsed = parse_llm_result(packet, raw)
-            break
-        except (httpx.HTTPError, json.JSONDecodeError, ValidationError, RuntimeError) as exc:
-            last_error = exc
-    if parsed is None:
-        raise SystemExit(f"Local worker failed: {last_error}")
+    validated_payload: dict[str, Any] | None = None
 
     with get_test_client() as client:
+        for _ in range(max(args.max_retries, 1)):
+            raw = ""
+            try:
+                raw = call_lm_studio(
+                    api_base=args.api_base,
+                    model=args.model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_format=response_format,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    request_timeout=args.request_timeout,
+                )
+                parsed = parse_llm_result(packet, raw)
+                if packet["run_mode"] == "planning":
+                    assert isinstance(parsed, PlanningResult)
+                    planning_issues = get_planning_validation_issues(packet, parsed)
+                    if not planning_issues:
+                        break
+                    last_error = RuntimeError("Planning validation failed: " + json.dumps(planning_issues, indent=2))
+                    user_prompt = build_planning_retry_user_prompt(
+                        packet=packet,
+                        previous_result=parsed,
+                        issues=planning_issues,
+                    )
+                    continue
+                assert isinstance(parsed, GenerationCandidate)
+                validated_payload = validate_candidate(client, parsed)
+                continuity_issues = collect_character_continuity_issues(
+                    packet=packet,
+                    candidate=parsed,
+                )
+                if continuity_issues:
+                    validated_payload["valid"] = False
+                    validated_payload["issues"] = list(validated_payload.get("issues", [])) + continuity_issues
+                if validated_payload["valid"]:
+                    break
+                last_error = RuntimeError(
+                    f"Validation failed: {json.dumps(validated_payload['issues'], indent=2)}"
+                )
+                user_prompt = build_validation_retry_user_prompt(
+                    packet=packet,
+                    previous_candidate=parsed,
+                    issues=validated_payload["issues"],
+                )
+            except ValidationError as exc:
+                last_error = exc
+                issue_lines = [
+                    " -> ".join(str(part) for part in error.get("loc", [])) + f": {error.get('msg')}"
+                    for error in exc.errors()
+                ] or [str(exc)]
+                if raw.strip():
+                    user_prompt = build_schema_retry_user_prompt(
+                        packet=packet,
+                        raw_text=raw,
+                        issues=issue_lines,
+                    )
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                if raw.strip():
+                    user_prompt = build_schema_retry_user_prompt(
+                        packet=packet,
+                        raw_text=raw,
+                        issues=[str(exc)],
+                    )
+            except (httpx.HTTPError, RuntimeError) as exc:
+                last_error = exc
+        if parsed is None:
+            raise SystemExit(f"Local worker failed: {last_error}")
+
         if packet["run_mode"] == "planning":
             ideas_path = Path(args.ideas_file) if args.ideas_file else project_root / "IDEAS.md"
             result = apply_planning_result(
@@ -634,12 +820,14 @@ def main() -> None:
                 dry_run=args.dry_run,
             )
         else:
+            assert isinstance(parsed, GenerationCandidate)
             result = apply_normal_result(
                 packet=packet,
                 candidate=parsed,
                 client=client,
                 dry_run=args.dry_run,
                 project_root=project_root,
+                validation_payload=validated_payload,
             )
 
     print(json.dumps(result, indent=2))

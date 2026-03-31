@@ -242,6 +242,7 @@ def build_asset_availability_summary(
 def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) -> list[str]:
     checklist = [
         "Return valid GenerationCandidate JSON only; do not wrap it in prose.",
+        "If validation fails, fix the listed issues and retry until it passes. Do not stop at the first invalid draft.",
         "Include at least one choice.",
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
         "Every choice must include notes in this exact pattern: `Goal: ... Intent: ...`.",
@@ -616,6 +617,7 @@ def build_normal_packet(
             "but do not force a mismatch just to use an idea. "
             "Check asset_availability before requesting art. If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation. "
             "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props. "
+            "If validation fails, correct the JSON and try again until it passes. "
             "validate it, apply it if valid, generate any required art, report the pre-change URL, "
             "report the concrete choice id(s) a human should click from that state to reach the new content, "
             "and explicitly say whether you added any hooks, global direction notes, or IDEAS.md entries. "

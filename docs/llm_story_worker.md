@@ -42,6 +42,7 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
   - prepare
   - generate one candidate
   - validate
+  - if validation fails, correct the candidate and validate again
   - apply
   - trigger required art
   - report the pre-change URL and what changed
@@ -225,6 +226,9 @@ Planning runs are a particularly good time to use:
   - if the player is seeing it now, arriving there now, or the next playable scene immediately depends on it, generate the art now
   - if it is only future-facing or offscreen, defer art until it is about to matter on-screen
 - If a scene gives you a meaningful future idea, add a `global_direction_note` instead of hoping the next worker rediscovers it.
+- Validation failure is a repair step, not a stopping point.
+- If your first candidate fails validation, fix the listed issues and try again until it passes.
+- Do not stop after producing one invalid draft.
 
 ## Hook Gating
 - `min_distance_to_payoff` is real and enforced.

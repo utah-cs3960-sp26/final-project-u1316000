@@ -238,6 +238,47 @@ class StoryGraphService:
         )
         return node
 
+    def list_lineage_node_ids(self, node_id: int) -> list[int]:
+        lineage: list[int] = []
+        current_id: int | None = node_id
+        seen: set[int] = set()
+        while current_id is not None and current_id not in seen:
+            seen.add(current_id)
+            row = fetch_one(
+                self.connection,
+                "SELECT id, parent_node_id FROM story_nodes WHERE id = ?",
+                (current_id,),
+            )
+            if row is None:
+                break
+            lineage.append(int(row["id"]))
+            parent_node_id = row.get("parent_node_id")
+            current_id = int(parent_node_id) if parent_node_id is not None else None
+        lineage.reverse()
+        return lineage
+
+    def list_lineage_entity_ids(self, node_id: int, entity_type: str) -> set[int]:
+        lineage_ids = self.list_lineage_node_ids(node_id)
+        if not lineage_ids:
+            return set()
+        placeholders = ",".join("?" for _ in lineage_ids)
+        rows = fetch_all(
+            self.connection,
+            f"""
+            SELECT DISTINCT entity_id
+            FROM node_entities
+            WHERE entity_type = ?
+              AND story_node_id IN ({placeholders})
+            UNION
+            SELECT DISTINCT entity_id
+            FROM story_node_present_entities
+            WHERE entity_type = ?
+              AND story_node_id IN ({placeholders})
+            """,
+            (entity_type, *lineage_ids, entity_type, *lineage_ids),
+        )
+        return {int(row["entity_id"]) for row in rows if row.get("entity_id") is not None}
+
     def create_choice(
         self,
         *,

@@ -214,7 +214,10 @@ class GenerationPayload(BaseModel):
 
 class GeneratedChoice(BaseModel):
     choice_text: str
-    notes: str | None = None
+    notes: str = Field(
+        min_length=20,
+        pattern=r"^Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*$",
+    )
     required_affordances: list[str] = Field(default_factory=list)
     target_node_id: int | None = None
 

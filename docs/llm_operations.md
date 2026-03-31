@@ -141,6 +141,7 @@ This is the first file an LLM should read when working in this repository. It ex
    - get a target from `GET /frontier`
    - build context with `POST /jobs/generation-preview`
    - validate the candidate with `POST /jobs/validate-generation`
+   - if validation fails, correct the candidate and validate again until it passes
    - apply it with `POST /jobs/apply-generation`
 12. After applying a scene, generate any required missing visuals:
    - new recurring character who is actually appearing now -> `portrait`
