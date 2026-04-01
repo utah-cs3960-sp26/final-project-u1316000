@@ -10,3 +10,9 @@ __pycache__/
 
 .aider*
 data/worker_logs/
+
+
+data/assets/generated/object_render
+data/assets/generated/portrait
+data/assets/comfy_output/generated/object_render
+data/assets/comfy_output/generated/portrait
