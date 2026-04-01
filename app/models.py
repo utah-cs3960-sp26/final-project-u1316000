@@ -70,7 +70,7 @@ class WorldSeed(BaseModel):
 
 class EntityReference(BaseModel):
     entity_type: RelationEntityType
-    entity_id: int
+    entity_id: int = Field(ge=1)
     role: str = "mentioned"
 
 
@@ -81,7 +81,7 @@ class DialogueLine(BaseModel):
 
 class ScenePresentEntity(BaseModel):
     entity_type: RelationEntityType
-    entity_id: int
+    entity_id: int = Field(ge=1)
     slot: Literal[
         "hero-center",
         "left-support",
@@ -117,8 +117,16 @@ class ChoiceCreate(BaseModel):
     notes: str | None = None
 
 
+class ChoiceIdeaBinding(BaseModel):
+    title: str
+    category: Literal["character", "location", "object", "event"]
+    source: Literal["fresh", "existing"] = "fresh"
+    steering_note: str | None = None
+
+
 class ChoiceUpdate(BaseModel):
     notes: str
+    idea_binding: ChoiceIdeaBinding | None = None
 
 
 class BranchTagCreate(BaseModel):

@@ -75,3 +75,7 @@ Suggested format:
 - [Character] The Clockwork Gnome's Apprentice: A small gnome apprentice who repairs the clockwork trams but speaks only in riddles about lost time, hinting at a deeper temporal anomaly tied to the protagonist's missing past.
 - [Location] The Echoing Orchard: A hidden orchard where fallen apples replay the sounds of tram departures, serving as a memory archive that only reveals one clue per season.
 - [Object] The Fifth-Notch Compass: A brass compass that spins when the protagonist's altered hand is near, pointing toward places where identity corrections are being made.
+
+- [Character] The Chrono-Swallower of Forgotten Lullabies: A frog with translucent skin that absorbs the weight of memories and releases them as glowing lullaby notes when it leaps. It cannot forget, only transform.
+- [Location] The Library of Unwritten Apologies: A subterranean vault where glass shelves hold books that have never been written—each page glows faintly with the emotional residue of unsaid words. The air hums with the sound of futures being mourned.
+- [Object] The Gravity-Refracting Umbrella of Unsettled Pauses: A large, iridescent umbrella that only opens when someone is about to make a decision they cannot name. When deployed, it causes time to stutter in localized loops, allowing brief moments of perfect stillness.

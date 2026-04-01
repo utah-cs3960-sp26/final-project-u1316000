@@ -964,7 +964,12 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     @app.post("/choices/{choice_id}")
     def update_choice(choice_id: int, payload: ChoiceUpdate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         story = StoryGraphService(db)
-        choice = story.update_choice_notes(choice_id, payload.notes)
+        kwargs: dict[str, Any] = {}
+        if "idea_binding" in payload.model_fields_set:
+            kwargs["idea_binding"] = (
+                payload.idea_binding.model_dump(mode="json") if payload.idea_binding is not None else None
+            )
+        choice = story.update_choice_notes(choice_id, payload.notes, **kwargs)
         if not choice:
             raise HTTPException(status_code=404, detail=f"Unknown choice id: {choice_id}")
         return choice

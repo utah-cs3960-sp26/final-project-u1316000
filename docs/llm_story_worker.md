@@ -62,6 +62,7 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
   - do not call validation/apply for a `GenerationCandidate`
   - append new categorized ideas to `IDEAS.md`
   - strengthen returned frontier choice notes in `Goal: ... Intent: ...` format
+  - bind at least one frontier choice to a specific idea so later normal runs have a concrete direction signal
   - add structured `story_direction_notes` when useful
 - Planning mode exists to reduce over-incremental one-scene thinking and keep medium-range direction alive.
 - Planning ideas should be concrete seeds, not only broad vibe statements.
@@ -71,6 +72,7 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
   - `object`
   - `event`
 - Across the run, cover at least 2 of those categories.
+- Prefer at least one `event` idea in every planning batch so the world feels active and in motion, not just explorable.
 - Read the current `IDEAS.md` content first and add only genuinely new ideas.
 - Do not repeat ideas that are already in `IDEAS.md`.
 - Do not copy example seeds from this file, the story bible, or the ideas scratchpad verbatim.
@@ -89,6 +91,13 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
 - Use:
   - `entity_references` for canonical scene references
   - `scene_present_entities` for what is visibly on screen
+- Shape rules:
+  - `entity_references` entries should be just `entity_type`, `entity_id`, and `role`
+  - `scene_present_entities` entries should use a real positive existing `entity_id`
+  - `scene_present_entities` uses `slot`, not `role`
+  - locations usually belong in `entity_references` with role `current_scene`, not in `scene_present_entities`
+  - `new_locations` / `new_characters` / `new_objects` are only for brand-new canon entities, not existing ones
+  - `new_hooks` are only for brand-new hooks, so do not include existing hook ids there
 - If the current place does not change, it is okay to keep the same `current_scene`.
 - If the player clearly arrives somewhere new, explicitly change `current_scene`.
 
@@ -166,6 +175,7 @@ Bad over-binding:
 - `IDEAS.md` is the loose, human-editable scratchpad for fun future ideas, scenes, characters, locations, and plot possibilities.
 - Both planning runs and normal scene-writing runs may use existing `IDEAS.md` entries as direction when the current leaf genuinely fits them.
 - Do not force an idea just because it exists; use it when it helps the current branch open into something richer and more intentional.
+- If the prep packet surfaces `selected_frontier_item.bound_idea`, treat that as the strongest current medium-range steering signal for this specific leaf unless continuity strongly argues otherwise.
 
 Use hooks for:
 - mysteries
@@ -200,6 +210,9 @@ Planning runs are a particularly good time to use:
 ## Hard Rules
 - Do not resolve major hooks early.
 - Do not forget branch-local affordances, inventory, or relationship changes.
+- Leave `affordance_changes` empty unless you are deliberately changing an affordance in this scene.
+- Use `available_affordance_names` as read-only context for what is already unlocked on this branch.
+- Do not copy `available_affordance_names` from the packet into `affordance_changes`; each item there must be a real `AffordanceChange` with fields like `action` and `name`.
 - Do not casually duplicate world entities.
 - Do not introduce a meaningful unresolved mystery and then fail to register it as a hook.
 - Keep notes, clues, unlocked capabilities, and player consequences branch-local unless they become true world canon.
@@ -216,6 +229,7 @@ Planning runs are a particularly good time to use:
   - `new_locations`
   - `new_characters`
   - `new_objects`
+- Do not put existing canon like `Madam Bei` into `new_characters`; reference existing canon with `entity_references` and stage it with `scene_present_entities`.
 - Every new canonical entity should include a short readable description.
 - Cycles are allowed.
 - Merges are allowed only when the resulting scene still fits the relevant branch-local consequences.
@@ -229,6 +243,7 @@ Planning runs are a particularly good time to use:
 - Validation failure is a repair step, not a stopping point.
 - If your first candidate fails validation, fix the listed issues and try again until it passes.
 - Do not stop after producing one invalid draft.
+- Return only the actual `GenerationCandidate` fields for normal runs. Do not include report/meta fields like `pre_change_url`, `ideas_to_append`, `validation_status`, or `next_action`.
 
 ## Hook Gating
 - `min_distance_to_payoff` is real and enforced.
@@ -371,11 +386,14 @@ Strongly recommended:
 - `discovered_state_tags`
 
 ### Planning Mode
-Return JSON with:
-- `ideas_to_append`
-- `choice_note_updates`
-- `story_direction_notes`
-- optional `summary`
+Planning may happen in two stages:
+- fresh-idea generation:
+  - return `ideas_to_append`
+- followthrough on planning targets:
+  - return `choice_note_updates`
+  - return `story_direction_notes`
+  - optional `summary`
+  - if the packet already includes `fresh_ideas_for_this_run`, do not invent replacement ideas in that step
 
 Each `ideas_to_append` item should look like:
 ```json
@@ -383,6 +401,20 @@ Each `ideas_to_append` item should look like:
   "category": "event",
   "title": "Transit Robbery",
   "note_text": "A later tram ride could erupt into a robbery that introduces new rivals and turns the network into a more active plotline."
+}
+```
+
+Each `choice_note_updates` item may also bind the leaf to a concrete idea:
+```json
+{
+  "choice_id": 42,
+  "notes": "Goal: follow the glass tracks into stranger territory. Intent: steer this branch toward a future depot reveal without forcing it immediately.",
+  "bound_idea": {
+    "title": "Porcelain Switchyard",
+    "category": "location",
+    "source": "fresh",
+    "steering_note": "This leaf can widen into that location once the local mystery matures."
+  }
 }
 ```
 
@@ -405,6 +437,59 @@ Each `ideas_to_append` item should look like:
   - `left-foreground-object`
   - `right-foreground-object`
   - `center-foreground-object`
+- Good staging example:
+```json
+{
+  "entity_references": [
+    {"entity_type": "location", "entity_id": 3, "role": "current_scene"}
+  ],
+  "scene_present_entities": [
+    {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": true},
+    {"entity_type": "object", "entity_id": 2, "slot": "right-foreground-object"}
+  ]
+}
+```
+- Good new-hook / asset-request example:
+```json
+{
+  "new_hooks": [
+    {
+      "hook_type": "minor_mystery",
+      "summary": "The bell answers before the protagonist speaks.",
+      "payoff_concept": "The bell is part of a larger route-memory system that recognizes the hat."
+    }
+  ],
+  "asset_requests": [
+    {
+      "job_type": "generate_portrait",
+      "asset_kind": "portrait",
+      "entity_type": "character",
+      "entity_id": 2,
+      "prompt": "A poised frog stationmaster in a formal conductor coat."
+    }
+  ]
+}
+```
+- Bad new-hook / asset-request example:
+```json
+{
+  "new_hooks": [
+    {"hook_id": 2, "summary": "The bell already knows the name."}
+  ],
+  "asset_requests": [
+    {"entity_type": "character", "entity_id": 2, "requested_asset_kinds": ["portrait", "cutout"]}
+  ]
+}
+```
+- Bad staging example:
+```json
+{
+  "scene_present_entities": [
+    {"entity_type": "location", "entity_id": 3, "role": "current_scene"},
+    {"entity_type": "character", "entity_id": 1, "role": "hero-center"}
+  ]
+}
+```
 - Optional staging nudges:
   - `offset_x_percent`
   - `offset_y_percent`

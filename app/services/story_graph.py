@@ -18,6 +18,7 @@ class StoryGraphService:
         r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
         re.IGNORECASE | re.DOTALL,
     )
+    _CHOICE_BINDING_UNSET = object()
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -50,7 +51,9 @@ class StoryGraphService:
         return nodes
 
     def list_choices(self) -> list[dict[str, Any]]:
-        return fetch_all(self.connection, "SELECT * FROM choices ORDER BY id")
+        choices = fetch_all(self.connection, "SELECT * FROM choices ORDER BY id")
+        self._decode_choice_rows(choices)
+        return choices
 
     def get_branch_start_node(self, branch_key: str) -> dict[str, Any] | None:
         return fetch_one(
@@ -81,7 +84,16 @@ class StoryGraphService:
                 """,
                 (node_id,),
             )
-            current_location = next((entity for entity in entities if entity["entity_type"] == "location"), None)
+            current_location = next(
+                (
+                    entity
+                    for entity in entities
+                    if entity["entity_type"] == "location" and entity.get("role") == "current_scene"
+                ),
+                None,
+            )
+            if current_location is None:
+                current_location = next((entity for entity in entities if entity["entity_type"] == "location"), None)
             location_name = None
             if current_location is not None:
                 location = fetch_one(self.connection, "SELECT name FROM locations WHERE id = ?", (current_location["entity_id"],))
@@ -300,14 +312,58 @@ class StoryGraphService:
             self.connection.commit()
         return fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (cursor.lastrowid,)) or {}
 
-    def update_choice_notes(self, choice_id: int, notes: str) -> dict[str, Any]:
+    def update_choice_notes(
+        self,
+        choice_id: int,
+        notes: str,
+        *,
+        idea_binding: dict[str, Any] | None | object = _CHOICE_BINDING_UNSET,
+    ) -> dict[str, Any]:
+        existing = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        existing_payload: dict[str, Any] | None = None
+        if existing is not None and existing.get("notes"):
+            try:
+                decoded = json.loads(existing["notes"])
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, dict):
+                existing_payload = decoded
+
+        if idea_binding is self._CHOICE_BINDING_UNSET:
+            resolved_binding = (
+                existing_payload.get("idea_binding")
+                if isinstance(existing_payload, dict)
+                else None
+            )
+        else:
+            resolved_binding = idea_binding
+
+        if existing_payload is not None or resolved_binding is not None:
+            stored_notes: str = json.dumps(
+                {
+                    **(
+                        {
+                            key: value
+                            for key, value in existing_payload.items()
+                            if key not in {"notes", "idea_binding"}
+                        }
+                        if isinstance(existing_payload, dict)
+                        else {}
+                    ),
+                    "notes": notes,
+                    **({"idea_binding": resolved_binding} if resolved_binding is not None else {}),
+                }
+            )
+        else:
+            stored_notes = notes
+
         self.connection.execute(
             """
             UPDATE choices
             SET notes = ?
             WHERE id = ?
             """,
-            (notes, choice_id),
+            (stored_notes, choice_id),
         )
         self.connection.commit()
         choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
@@ -929,6 +985,7 @@ class StoryGraphService:
         if not raw_notes:
             choice["notes_data"] = None
             choice["planning"] = None
+            choice["idea_binding"] = None
             return
         try:
             decoded = json.loads(raw_notes)
@@ -937,9 +994,11 @@ class StoryGraphService:
         if isinstance(decoded, dict):
             choice["notes_data"] = decoded
             planning_source = decoded.get("notes")
+            choice["idea_binding"] = decoded.get("idea_binding")
         else:
             choice["notes_data"] = None
             planning_source = raw_notes
+            choice["idea_binding"] = None
         choice["planning"] = self._parse_choice_planning(planning_source)
 
     def _parse_choice_planning(self, raw_notes: str | None) -> dict[str, str] | None:

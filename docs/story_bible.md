@@ -60,9 +60,11 @@ This file is the human-readable story bible for the current prototype. The machi
 - [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the informal human-editable scratchpad for fun possibilities, half-formed ideas, and future scene/location/character concepts.
 - Planning ideas should be concrete seeds and categorized as characters, locations, objects, or events.
 - Across a planning run, cover at least 2 of those categories.
+- Prefer at least one event idea in each planning pass so the story keeps gaining motion and pressure, not just scenery and lore.
 - Read the current ideas file first and add genuinely new ideas rather than repeating existing entries or copying example seeds verbatim.
 - Normal scene-writing runs may also use current `IDEAS.md` entries as direction when the current branch genuinely fits one of them.
 - An idea in `IDEAS.md` is an invitation, not a command. Use it when it enriches the current leaf, not just because it exists.
+- Planning runs should bind at least one frontier choice to a specific fresh or existing idea when there is a good fit, so later normal runs inherit a concrete medium-range direction.
 - Use them for:
   - plotline ideas
   - future character introductions

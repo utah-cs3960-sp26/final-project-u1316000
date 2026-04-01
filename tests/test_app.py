@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import html
 import json
 import os
 import re
@@ -17,7 +18,14 @@ from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
-from app.tools.run_story_worker_local import build_asset_prompt, infer_missing_asset_requests
+from app.tools.run_story_worker_local import (
+    PlanningIdea,
+    build_asset_prompt,
+    get_planning_idea_issues,
+    infer_missing_asset_requests,
+    normalize_generation_candidate_payload,
+    parse_llm_result,
+)
 
 
 def build_client(tmp_path: Path) -> tuple[TestClient, Path]:
@@ -763,10 +771,9 @@ def test_generation_validation_requires_goal_and_intent_notes_for_choices(tmp_pa
         },
     )
 
-    assert validation_response.status_code == 200
-    result = validation_response.json()
-    assert result["valid"] is False
-    assert any("Goal and Intent" in issue for issue in result["issues"])
+    assert validation_response.status_code == 422
+    detail = validation_response.json().get("detail", [])
+    assert any((item.get("loc") or [None])[-1] == "notes" for item in detail if isinstance(item, dict))
 
 
 def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_and_linked(tmp_path: Path) -> None:
@@ -1074,6 +1081,62 @@ def test_apply_generation_inherits_scene_location_and_present_entities_when_omit
     branch_nodes = client.get("/story-nodes").json()
     created_node = next(row for row in branch_nodes if row["id"] == node["id"])
     assert len(created_node["dialogue_lines"]) == 2
+
+
+def test_player_view_prefers_current_scene_location_over_mentioned_locations(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    node_response = client.post(
+        "/story-nodes",
+        json={
+            "branch_key": "default",
+            "title": "Location Priority Check",
+            "scene_text": "A test scene with a mentioned place and a current place.",
+            "summary": "The current scene should win over any merely mentioned location.",
+            "referenced_entities": [
+                {"entity_type": "location", "entity_id": 2, "role": "mentioned"},
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "present_entities": [
+                {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True},
+            ],
+        },
+    )
+
+    assert node_response.status_code == 200
+    node = node_response.json()
+    page = client.get(f"/play?branch_key=default&scene={node['id']}")
+    assert page.status_code == 200
+    match = re.search(r'<script id="player-story-data" type="application/json">(.*?)</script>', page.text, re.S)
+    assert match is not None
+    player_data = json.loads(html.unescape(match.group(1)))
+    scene = player_data["scenes"][str(node["id"])]
+    assert scene["location_entity_id"] == 1
+    assert scene["location"] == "Mushroom Field"
+
+
+def test_story_node_creation_rejects_zero_entity_ids_in_present_entities(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    node_response = client.post(
+        "/story-nodes",
+        json={
+            "branch_key": "default",
+            "title": "Bad Entity Id",
+            "scene_text": "This should be rejected.",
+            "summary": "Invalid staged entity id.",
+            "referenced_entities": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "present_entities": [
+                {"entity_type": "character", "entity_id": 0, "slot": "hero-center", "focus": True},
+            ],
+        },
+    )
+
+    assert node_response.status_code == 422
 
 
 def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> None:
@@ -1496,13 +1559,16 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "continue the worker loop immediately" in packet["message"]
         assert packet["pre_change_url"].startswith("http://127.0.0.1:8001/play?branch_key=default&scene=")
         assert packet["selected_frontier_item"]["choice_id"] is not None
+        assert "active_hooks" not in packet["selected_frontier_item"]
+        assert "available_affordances" not in packet["selected_frontier_item"]
         assert packet["preview_payload"]["branch_key"] == "default"
         assert packet["context_summary"]["branch_key"] == "default"
         assert "focus_canon_slice" in packet
         assert "asset_availability" in packet
         assert any(item["entity_type"] == "location" for item in packet["asset_availability"])
         assert "ideas_file_summary" in packet
-        assert any(idea["title"] == "Clockseed Stampede" for idea in packet["ideas_file_summary"]["open_ideas"])
+        assert packet["ideas_file_summary"]["path"].endswith("IDEAS.md")
+        assert packet["ideas_file_summary"]["open_ideas"]
         assert "validation_checklist" in packet
         assert "candidate_template" in packet
         assert "endpoint_contract" in packet
@@ -1621,6 +1687,7 @@ def test_prepare_story_run_random_plan_respects_cooldown_and_chance(tmp_path: Pa
 def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
+    log_file = tmp_path / "worker_log.ndjson"
 
     response_file = tmp_path / "normal_response.json"
     response_file.write_text(
@@ -1652,6 +1719,8 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
         "--model",
         "mock-model",
         "--dry-run",
+        "--log-file",
+        str(log_file),
     ]
     result = subprocess.run(
         command,
@@ -1681,46 +1750,57 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
     frontier = client.get("/frontier").json()
     target_choice_id = frontier[0]["choice_id"]
     ideas_file = tmp_path / "IDEAS.md"
+    log_file = tmp_path / "worker_log.ndjson"
     ideas_file.write_text("# Ideas Scratchpad\n\n## Open Ideas\n", encoding="utf-8")
 
     response_file = tmp_path / "planning_response.json"
     response_file.write_text(
         json.dumps(
-            {
-                "ideas_to_append": [
-                    {
-                        "category": "object",
-                        "title": "Humming Receipt",
-                        "note_text": "A tram receipt that hums when danger is imminent.",
-                    },
-                    {
-                        "category": "location",
-                        "title": "Needle Marsh Depot",
-                        "note_text": "A reed-thick marsh depot where arrivals are logged on dragonfly wings.",
-                    },
-                    {
-                        "category": "character",
-                        "title": "Duck Inspector",
-                        "note_text": "A duck inspector who only trusts counterfeit maps.",
-                    },
-                ],
-                "choice_note_updates": [
-                    {
-                        "choice_id": target_choice_id,
-                        "notes": "Goal: push the branch toward a reusable tram-side mystery. Intent: set up a later bell-orchard detour or a careful merge back if the beat stays small.",
-                    }
-                ],
-                "story_direction_notes": [
-                    {
-                        "note_type": "plotline",
-                        "title": "Needle Marsh Seed",
-                        "note_text": "One tram branch could later open into Needle Marsh Depot where dragonflies carry route ledgers between platforms.",
-                        "status": "active",
-                        "priority": 2,
-                    }
-                ],
-                "summary": "Planning pass completed.",
-            }
+            [
+                {
+                    "ideas_to_append": [
+                        {
+                            "category": "object",
+                            "title": "Humming Receipt",
+                            "note_text": "A tram receipt that hums when danger is imminent.",
+                        },
+                        {
+                            "category": "location",
+                            "title": "Needle Marsh Depot",
+                            "note_text": "A reed-thick marsh depot where arrivals are logged on dragonfly wings.",
+                        },
+                        {
+                            "category": "event",
+                            "title": "Dragonfly Ledger Spill",
+                            "note_text": "A route audit could go sideways when dragonfly-borne ledgers burst open over a crowded platform.",
+                        },
+                    ]
+                },
+                {
+                    "choice_note_updates": [
+                        {
+                            "choice_id": target_choice_id,
+                            "notes": "Goal: push the branch toward a reusable tram-side mystery. Intent: set up a later reed-marsh detour or a careful merge back if the beat stays small.",
+                            "bound_idea": {
+                                "title": "Needle Marsh Depot",
+                                "category": "location",
+                                "source": "fresh",
+                                "steering_note": "This leaf can plausibly widen into the depot once the current tram-side mystery develops.",
+                            },
+                        }
+                    ],
+                    "story_direction_notes": [
+                        {
+                            "note_type": "plotline",
+                            "title": "Needle Marsh Seed",
+                            "note_text": "One tram branch could later open into Needle Marsh Depot where dragonflies carry route ledgers between platforms.",
+                            "status": "active",
+                            "priority": 2,
+                        }
+                    ],
+                    "summary": "Planning pass completed.",
+                },
+            ]
         ),
         encoding="utf-8",
     )
@@ -1734,6 +1814,8 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
         "--plan",
         "--ideas-file",
         str(ideas_file),
+        "--log-file",
+        str(log_file),
     ]
     result = subprocess.run(
         command,
@@ -1757,11 +1839,13 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
     assert payload["ideas_appended"][0]["category"] == "object"
     assert payload["choice_note_updates"][0]["choice_id"] == target_choice_id
     assert "Goal:" in payload["choice_note_updates"][0]["notes"]
+    assert payload["choice_note_updates"][0]["bound_idea"]["title"] == "Needle Marsh Depot"
     assert payload["story_notes_created"][0]["title"] == "Needle Marsh Seed"
 
     updated_choice = client.get("/choices").json()
     matching = next(choice for choice in updated_choice if choice["id"] == target_choice_id)
     assert "Goal:" in matching["notes"]
+    assert matching["idea_binding"]["title"] == "Needle Marsh Depot"
     ideas_text = ideas_file.read_text(encoding="utf-8")
     assert "[Location] Needle Marsh Depot" in ideas_text
     story_notes = client.get("/story-notes").json()
@@ -1772,6 +1856,7 @@ def test_run_story_worker_local_planning_mode_rejects_duplicate_ideas(tmp_path: 
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
     ideas_file = tmp_path / "IDEAS.md"
+    log_file = tmp_path / "worker_log.ndjson"
     ideas_file.write_text(
         "# Ideas Scratchpad\n\n## Open Ideas\n\n- [Location] Bell Orchard: A branch could later open into a bell orchard where departures grow like fruit.\n",
         encoding="utf-8",
@@ -1780,33 +1865,27 @@ def test_run_story_worker_local_planning_mode_rejects_duplicate_ideas(tmp_path: 
     response_file = tmp_path / "planning_duplicate_response.json"
     response_file.write_text(
         json.dumps(
-            {
-                "ideas_to_append": [
-                    {
-                        "category": "location",
-                        "title": "Bell Orchard",
-                        "note_text": "A branch could later open into a bell orchard where departures grow like fruit.",
-                    },
-                    {
-                        "category": "event",
-                        "title": "Moss Toll",
-                        "note_text": "A living toll gate could demand memories instead of coins.",
-                    },
-                    {
-                        "category": "character",
-                        "title": "Ledger Wren",
-                        "note_text": "A meticulous bird clerk could follow the player across routes with increasingly personal paperwork.",
-                    },
-                ],
-                "choice_note_updates": [
-                    {
-                        "choice_id": client.get("/frontier").json()[0]["choice_id"],
-                        "notes": "Goal: strengthen one frontier lane. Intent: prove duplicate planning ideas are rejected before writeback.",
-                    }
-                ],
-                "story_direction_notes": [],
-                "summary": "Should fail because one idea already exists.",
-            }
+            [
+                {
+                    "ideas_to_append": [
+                        {
+                            "category": "location",
+                            "title": "Bell Orchard",
+                            "note_text": "A branch could later open into a bell orchard where departures grow like fruit.",
+                        },
+                        {
+                            "category": "event",
+                            "title": "Moss Toll",
+                            "note_text": "A living toll gate could demand memories instead of coins.",
+                        },
+                        {
+                            "category": "character",
+                            "title": "Ledger Wren",
+                            "note_text": "A meticulous bird clerk could follow the player across routes with increasingly personal paperwork.",
+                        },
+                    ]
+                }
+            ]
         ),
         encoding="utf-8",
     )
@@ -1820,6 +1899,10 @@ def test_run_story_worker_local_planning_mode_rejects_duplicate_ideas(tmp_path: 
         "--plan",
         "--ideas-file",
         str(ideas_file),
+        "--log-file",
+        str(log_file),
+        "--max-retries",
+        "1",
     ]
     result = subprocess.run(
         command,
@@ -1836,6 +1919,197 @@ def test_run_story_worker_local_planning_mode_rejects_duplicate_ideas(tmp_path: 
 
     assert result.returncode != 0
     assert "reuses a built-in example seed" in result.stderr or "reuses a built-in example seed" in result.stdout
+
+
+def test_planning_idea_validation_rejects_same_motif_reskins() -> None:
+    packet = {
+        "planning_policy": {"ideas_per_run": 3},
+        "ideas_file": {
+            "current_content": "\n".join(
+                [
+                    "- [Location] The Bell Orchard: Bells grow like fruit in a hidden grove.",
+                    "- [Character] Clerk Nettle's Archivist: A meticulous transit archivist.",
+                ]
+            ),
+            "open_ideas": [
+                {"category": "Location", "title": "The Bell Orchard", "note_text": "Bells grow like fruit in a hidden grove."},
+                {"category": "Character", "title": "Clerk Nettle's Archivist", "note_text": "A meticulous transit archivist."},
+            ],
+        },
+    }
+    ideas = [
+        PlanningIdea(
+            category="location",
+            title="The Bell Orchard Keeper",
+            note_text="A hidden orchard keeper tends bells that grow like fruit and hum at anomaly frequencies.",
+        ),
+        PlanningIdea(
+            category="character",
+            title="The Silent Bellkeeper",
+            note_text="A mute bellkeeper tends the orchard bells and listens for identity-frequency shifts.",
+        ),
+        PlanningIdea(
+            category="event",
+            title="Bell Frequency Sync",
+            note_text="When an orchard bell rings at the right frequency, nearby records and memories briefly align.",
+        ),
+    ]
+
+    issues = get_planning_idea_issues(packet, ideas)
+    assert any("too close to existing idea" in issue or "too similar to existing idea" in issue for issue in issues)
+    assert any("clustering around the same motif words" in issue for issue in issues)
+
+
+def test_planning_idea_validation_requires_event() -> None:
+    packet = {
+        "planning_policy": {"ideas_per_run": 3},
+        "ideas_file": {"current_content": "", "open_ideas": []},
+    }
+    ideas = [
+        PlanningIdea(category="character", title="Parade Matron", note_text="A matron who measures routes by confetti weight."),
+        PlanningIdea(category="location", title="Porcelain Switchyard", note_text="A switchyard of teacup rails under cracked chandeliers."),
+        PlanningIdea(category="object", title="Receipt Kite", note_text="A stamped kite that only flies toward disputed arrivals."),
+    ]
+
+    issues = get_planning_idea_issues(packet, ideas)
+    assert any("at least one event idea" in issue for issue in issues)
+
+
+def test_prepare_story_run_surfaces_bound_idea_on_selected_frontier_item(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier = client.get("/frontier").json()
+    choice_id = frontier[0]["choice_id"]
+    update = client.post(
+        f"/choices/{choice_id}",
+        json={
+            "notes": "Goal: inspect the route marker. Intent: widen this branch toward a strange depot encounter.",
+            "idea_binding": {
+                "title": "Porcelain Switchyard",
+                "category": "location",
+                "source": "existing",
+                "steering_note": "This branch should eventually drift toward a fragile rail-yard reveal.",
+            },
+        },
+    )
+    assert update.status_code == 200
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--choice-id",
+        str(choice_id),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path), "CYOA_PLANNING_ROLL": "1.0"},
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert packet["run_mode"] == "normal"
+    assert packet["selected_frontier_item"]["bound_idea"]["title"] == "Porcelain Switchyard"
+    assert "strongest current medium-range steering signal" in packet["next_action"]
+
+
+def test_normalize_generation_candidate_payload_repairs_common_local_model_shape_confusions() -> None:
+    raw_payload = {
+        "branch_key": "default",
+        "scene_summary": "Summary",
+        "scene_text": "Text",
+        "choices": [
+            {
+                "choice_text": "Continue",
+                "notes": "Goal: continue the scene. Intent: keep the branch moving.",
+            }
+        ],
+        "entity_references": [
+            {"entity_type": "character", "entity_id": 1, "role": "hero-center"}
+        ],
+        "scene_present_entities": [
+            {"entity_type": "location", "entity_id": 3, "role": "current_scene"}
+        ],
+        "new_hooks": [
+            {"hook_id": 12, "summary": "A recurring bell seems to know more than it should."}
+        ],
+        "asset_requests": [
+            {
+                "entity_type": "character",
+                "entity_id": 2,
+                "requested_asset_kinds": ["portrait", "cutout"],
+            }
+        ],
+    }
+
+    normalized = normalize_generation_candidate_payload(raw_payload)
+
+    assert normalized["entity_references"] == [
+        {"entity_type": "location", "entity_id": 3, "role": "current_scene"}
+    ]
+    assert normalized["scene_present_entities"] == [
+        {"entity_type": "character", "entity_id": 1, "slot": "hero-center"}
+    ]
+    assert normalized["new_hooks"] == []
+    assert normalized["hook_updates"] == [
+        {"hook_id": 12, "status": "active", "progress_note": "A recurring bell seems to know more than it should."}
+    ]
+    assert normalized["asset_requests"] == [
+        {
+            "job_type": "generate_portrait",
+            "asset_kind": "portrait",
+            "entity_type": "character",
+            "entity_id": 2,
+        }
+    ]
+
+
+def test_parse_llm_result_uses_generation_candidate_normalizer_for_common_shape_errors() -> None:
+    packet = {"run_mode": "normal"}
+    raw_text = json.dumps(
+        {
+            "branch_key": "default",
+            "scene_summary": "Summary",
+            "scene_text": "Text",
+            "choices": [
+                {
+                    "choice_text": "Continue",
+                    "notes": "Goal: continue the scene. Intent: keep the branch moving.",
+                }
+            ],
+            "entity_references": [
+                {"entity_type": "character", "entity_id": 1, "role": "hero-center"}
+            ],
+            "scene_present_entities": [
+                {"entity_type": "location", "entity_id": 3, "role": "current_scene"}
+            ],
+            "new_hooks": [
+                {"hook_id": 12, "summary": "A recurring bell seems to know more than it should."}
+            ],
+            "asset_requests": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 2,
+                    "requested_asset_kinds": ["portrait", "cutout"],
+                }
+            ],
+        }
+    )
+
+    candidate = parse_llm_result(packet, raw_text)
+    assert candidate.entity_references[0].entity_type == "location"
+    assert candidate.entity_references[0].entity_id == 3
+    assert candidate.entity_references[0].role == "current_scene"
+    assert candidate.scene_present_entities[0].entity_type == "character"
+    assert candidate.scene_present_entities[0].slot == "hero-center"
+    assert candidate.hook_updates[0].hook_id == 12
+    assert candidate.hook_updates[0].status == "active"
+    assert candidate.asset_requests[0].job_type == "generate_portrait"
+    assert candidate.asset_requests[0].asset_kind == "portrait"
 
 
 def test_infer_missing_asset_requests_detects_current_scene_background(tmp_path: Path) -> None:

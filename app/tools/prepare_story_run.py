@@ -33,18 +33,62 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
+def _text_mentions_any_name(value: Any, names: set[str]) -> bool:
+    if not names:
+        return False
+    if isinstance(value, str):
+        lowered = value.lower()
+        return any(name in lowered for name in names)
+    if isinstance(value, list):
+        return any(_text_mentions_any_name(item, names) for item in value)
+    if isinstance(value, dict):
+        return any(_text_mentions_any_name(item, names) for item in value.values())
+    return False
+
+
+def _annotate_text_with_character_status(
+    value: Any,
+    status_labels_by_name: dict[str, str],
+) -> Any:
+    if not status_labels_by_name:
+        return value
+    if isinstance(value, str):
+        annotated = value
+        for lowered_name, labeled_name in sorted(
+            status_labels_by_name.items(),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
+            plain_name = labeled_name.split(" [", 1)[0]
+            if labeled_name in annotated:
+                continue
+            annotated = re.sub(
+                rf"(?<![A-Za-z0-9]){re.escape(plain_name)}(?![A-Za-z0-9])",
+                labeled_name,
+                annotated,
+                flags=re.IGNORECASE,
+            )
+        return annotated
+    if isinstance(value, list):
+        return [_annotate_text_with_character_status(item, status_labels_by_name) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _annotate_text_with_character_status(item, status_labels_by_name)
+            for key, item in value.items()
+        }
+    return value
+
+
+def summarize_context(
+    context: dict[str, Any],
+    *,
+    off_path_character_labels: dict[str, str] | None = None,
+) -> dict[str, Any]:
     current_node = context.get("current_node") or {}
-    return {
-        "branch_key": context["branch_key"],
-        "act_phase": context["branch_state"]["act_phase"],
-        "branch_depth": context["branch_state"]["branch_depth"],
-        "current_node": {
-            "id": current_node.get("id"),
-            "title": current_node.get("title"),
-            "summary": current_node.get("summary"),
-        },
-        "active_hooks": [
+    off_path_character_labels = off_path_character_labels or {}
+
+    active_hooks = [
+        _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "importance": hook["importance"],
@@ -52,19 +96,25 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
                 "payoff_concept": hook.get("payoff_concept"),
                 "must_not_imply": hook.get("must_not_imply", []),
                 "remaining_development_distance": (hook.get("readiness") or {}).get("remaining_development_distance"),
-            }
-            for hook in context.get("active_hooks", [])
-        ],
-        "eligible_major_hooks": [
+            },
+            off_path_character_labels,
+        )
+        for hook in context.get("active_hooks", [])
+    ]
+    eligible_major_hooks = [
+        _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
                 "payoff_concept": hook.get("payoff_concept"),
                 "must_not_imply": hook.get("must_not_imply", []),
-            }
-            for hook in context.get("eligible_major_hooks", [])
-        ],
-        "blocked_major_hooks": [
+            },
+            off_path_character_labels,
+        )
+        for hook in context.get("eligible_major_hooks", [])
+    ]
+    blocked_major_hooks = [
+        _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
@@ -74,29 +124,38 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
                 "remaining_development_distance": (hook.get("readiness") or {}).get("remaining_development_distance"),
                 "missing_clue_tags": (hook.get("readiness") or {}).get("missing_clue_tags", []),
                 "missing_state_tags": (hook.get("readiness") or {}).get("missing_state_tags", []),
-            }
-            for hook in context.get("blocked_major_hooks", [])
-        ],
-        "developable_major_hooks": [
+            },
+            off_path_character_labels,
+        )
+        for hook in context.get("blocked_major_hooks", [])
+    ]
+    developable_major_hooks = [
+        _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
                 "payoff_concept": hook.get("payoff_concept"),
                 "must_not_imply": hook.get("must_not_imply", []),
-            }
-            for hook in context.get("developable_major_hooks", [])
-        ],
-        "blocked_major_developments": [
+            },
+            off_path_character_labels,
+        )
+        for hook in context.get("developable_major_hooks", [])
+    ]
+    blocked_major_developments = [
+        _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
                 "payoff_concept": hook.get("payoff_concept"),
                 "must_not_imply": hook.get("must_not_imply", []),
                 "remaining_development_distance": (hook.get("readiness") or {}).get("remaining_development_distance"),
-            }
-            for hook in context.get("blocked_major_developments", [])
-        ],
-        "global_direction_notes": [
+            },
+            off_path_character_labels,
+        )
+        for hook in context.get("blocked_major_developments", [])
+    ]
+    global_direction_notes = [
+        _annotate_text_with_character_status(
             {
                 "id": note["id"],
                 "note_type": note["note_type"],
@@ -104,15 +163,46 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
                 "note_text": note["note_text"],
                 "status": note["status"],
                 "priority": note["priority"],
-            }
-            for note in context.get("global_direction_notes", [])
-        ],
-        "available_affordances": [
+            },
+            off_path_character_labels,
+        )
+        for note in context.get("global_direction_notes", [])
+    ]
+    recent_nodes = [
+        _annotate_text_with_character_status(node, off_path_character_labels)
+        for node in (context.get("branch_shape") or {}).get("recent_nodes", [])[:4]
+    ]
+    merge_candidates = [
+        _annotate_text_with_character_status(
             {
-                "name": affordance["name"],
-                "description": affordance["description"],
-            }
+                "node_id": candidate["node_id"],
+                "title": candidate["title"],
+                "summary": candidate["summary"],
+            },
+            off_path_character_labels,
+        )
+        for candidate in context.get("merge_candidates", [])
+    ]
+
+    return {
+        "branch_key": context["branch_key"],
+        "act_phase": context["branch_state"]["act_phase"],
+        "branch_depth": context["branch_state"]["branch_depth"],
+        "current_node": {
+            "id": current_node.get("id"),
+            "title": current_node.get("title"),
+            "summary": current_node.get("summary"),
+        },
+        "active_hooks": active_hooks,
+        "eligible_major_hooks": eligible_major_hooks,
+        "blocked_major_hooks": blocked_major_hooks,
+        "developable_major_hooks": developable_major_hooks,
+        "blocked_major_developments": blocked_major_developments,
+        "global_direction_notes": global_direction_notes,
+        "available_affordance_names": [
+            affordance["name"]
             for affordance in context.get("available_affordances", [])
+            if affordance.get("name")
         ],
         "branch_tags": [tag["tag"] for tag in context.get("branch_tags", [])],
         "branch_shape": {
@@ -121,21 +211,42 @@ def summarize_context(context: dict[str, Any]) -> dict[str, Any]:
             "merge_only_streak": (context.get("branch_shape") or {}).get("merge_only_streak"),
             "merge_only_count": (context.get("branch_shape") or {}).get("merge_only_count"),
             "reason": (context.get("branch_shape") or {}).get("reason"),
-            "recent_nodes": (context.get("branch_shape") or {}).get("recent_nodes", [])[:4],
+            "recent_nodes": recent_nodes,
         },
-        "merge_candidates": [
-            {
-                "node_id": candidate["node_id"],
-                "title": candidate["title"],
-                "summary": candidate["summary"],
-            }
-            for candidate in context.get("merge_candidates", [])
-        ],
+        "merge_candidates": merge_candidates,
         "requested_choice_count": context.get("requested_choice_count"),
     }
 
 
-def build_focus_canon_slice(context: dict[str, Any], canon: CanonResolver) -> dict[str, Any]:
+def build_compact_selected_frontier_item(
+    selected: dict[str, Any],
+    *,
+    choice: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    compact = {
+        "branch_key": selected.get("branch_key"),
+        "choice_id": selected.get("choice_id"),
+        "choice_text": selected.get("choice_text"),
+        "from_node_id": selected.get("from_node_id"),
+        "depth": selected.get("depth"),
+        "branch_summary": selected.get("branch_summary"),
+        "selection_reason": selected.get("selection_reason"),
+        "selection_score": selected.get("selection_score"),
+    }
+    if choice is not None:
+        notes_data = choice.get("notes_data") if isinstance(choice.get("notes_data"), dict) else None
+        compact["existing_choice_notes"] = notes_data.get("notes") if notes_data else choice.get("notes")
+        compact["existing_choice_planning"] = choice.get("planning")
+        compact["bound_idea"] = choice.get("idea_binding")
+    return compact
+
+
+def build_focus_canon_slice(
+    context: dict[str, Any],
+    canon: CanonResolver,
+    *,
+    allowed_entity_ids_by_type: dict[str, set[int]] | None = None,
+) -> dict[str, Any]:
     current_node = context.get("current_node") or {}
     entity_refs = current_node.get("entities", []) or []
     locations: list[dict[str, Any]] = []
@@ -163,6 +274,9 @@ def build_focus_canon_slice(context: dict[str, Any], canon: CanonResolver) -> di
     for recurring in recurring_entities:
         entity_type = recurring.get("entity_type")
         entity_id = recurring.get("entity_id")
+        allowed_ids = (allowed_entity_ids_by_type or {}).get(entity_type or "")
+        if entity_id is not None and allowed_ids is not None and int(entity_id) not in allowed_ids:
+            continue
         record: dict[str, Any] | None = None
         if entity_type == "location" and entity_id is not None:
             record = canon.get_location(int(entity_id))
@@ -239,6 +353,35 @@ def build_asset_availability_summary(
     return summary
 
 
+def build_path_character_continuity_summary(
+    *,
+    selected: dict[str, Any],
+    story: StoryGraphService,
+    canon: CanonResolver,
+) -> dict[str, Any]:
+    parent_node_id = int(selected["from_node_id"])
+    encountered_ids = story.list_lineage_entity_ids(parent_node_id, "character")
+    encountered_characters: list[dict[str, Any]] = []
+    for character_id in sorted(encountered_ids):
+        character = canon.get_character(character_id)
+        if character is None:
+            continue
+        encountered_characters.append(
+            {
+                "id": int(character["id"]),
+                "name": character.get("name"),
+                "canonical_summary": character.get("canonical_summary"),
+            }
+        )
+    return {
+        "rule": (
+            "Only name canonical characters that have already appeared on this path, "
+            "unless you are explicitly introducing them in-scene now."
+        ),
+        "encountered_characters": encountered_characters,
+    }
+
+
 def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) -> list[str]:
     checklist = [
         "Return valid GenerationCandidate JSON only; do not wrap it in prose.",
@@ -248,6 +391,10 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Every choice must include notes in this exact pattern: `Goal: ... Intent: ...`.",
         "In choice notes, Goal means the immediate purpose of taking the option. Intent means the broader direction, future possibility, branch shape, or likely payoff lane the option is meant to open or reinforce.",
         "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
+        "Do not put existing canon entities into new_locations, new_characters, or new_objects. Existing canon should use entity_references and scene_present_entities.",
+        "entity_references entries should be shaped like {entity_type, entity_id, role}. They do not use slot.",
+        "scene_present_entities entries should be shaped like {entity_type, entity_id, slot, ...}. They use slot, not role.",
+        "Locations usually belong in entity_references with role current_scene, not in scene_present_entities.",
         "If you introduce a new unresolved mystery or unanswered question, create or extend a hook.",
         "Use a mix of lyrical narration and clearer spoken dialogue; the player voice should usually be one of the clearest in the scene.",
         "Prefer clear weird over murky weird. If a line sounds evocative but cannot be paraphrased plainly, rewrite it.",
@@ -262,11 +409,17 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "For blocked major hooks, prefer suggestive clues, provenance hints, or eerie resonance over explicit local-system instructions or ownership claims unless multiple prior clues already support that connection.",
         "Do not resolve any hook before min_distance_to_payoff and required clue/state tags allow it.",
         "Do not reference unavailable affordances in choice.required_affordances.",
+        "Use available_affordance_names as read-only context for what is already unlocked on this branch.",
+        "Leave affordance_changes empty unless you are intentionally changing branch affordances in this scene.",
+        "Do not copy available_affordance_names into affordance_changes. Each affordance_changes item must be a real change with fields like action and name.",
         "Use target_node_id only for valid same-branch merge candidates.",
         "Do not invent new locked facts.",
+        "new_hooks are for brand-new hook proposals. Do not include existing hook ids there; include hook_type and summary instead.",
         "If the scene introduces a new recurring character, new linked location, or reusable visually important object, plan the post-apply asset generation.",
         "Generate art on demand. If a place, character, or object is only future-facing and not yet on-screen or immediately reachable, defer its art until a later scene truly needs it.",
         "If the scene sparks a medium- or long-range idea you want future workers to remember, add a global_direction_note instead of assuming the idea will survive implicitly.",
+        "Only name canonical characters that have already appeared on this path unless you are explicitly introducing them in-scene now.",
+        "If hooks, notes, or merge summaries mention a canonical character marked `[not yet introduced on this path]`, treat that as planning memory only, not as permission to use them in playable narration or choices yet.",
         "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.",
         "If the player has clearly arrived somewhere new, `no new art required` is usually the wrong conclusion.",
         "If a location has not already been visually defined, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.",
@@ -294,11 +447,21 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
         "new_locations": [],
         "new_characters": [],
         "new_objects": [],
-        "entity_references": [],
-        "scene_present_entities": [],
+        "entity_references": [
+            {"entity_type": "location", "entity_id": 1, "role": "current_scene"}
+        ],
+        "scene_present_entities": [
+            {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True}
+        ],
         "fact_updates": [],
         "relation_updates": [],
-        "new_hooks": [],
+        "new_hooks": [
+            {
+                "hook_type": "minor_mystery",
+                "summary": "",
+                "payoff_concept": "",
+            }
+        ],
         "hook_updates": [
             {
                 "hook_id": 0,
@@ -311,7 +474,15 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
         "inventory_changes": [],
         "affordance_changes": [],
         "relationship_changes": [],
-        "asset_requests": [],
+        "asset_requests": [
+            {
+                "job_type": "generate_portrait",
+                "asset_kind": "portrait",
+                "entity_type": "character",
+                "entity_id": 1,
+                "prompt": "",
+            }
+        ],
         "discovered_clue_tags": [],
         "discovered_state_tags": [],
     }
@@ -548,9 +719,14 @@ def build_planning_target_packet(
             f"{args.play_base_url.rstrip('/')}/play?branch_key={frontier_item['branch_key']}"
             f"&scene={frontier_item['from_node_id']}"
         ),
-        "existing_choice_notes": choice.get("notes"),
+        "existing_choice_notes": (
+            choice.get("notes_data", {}).get("notes")
+            if isinstance(choice.get("notes_data"), dict)
+            else choice.get("notes")
+        ),
         "existing_choice_planning": choice.get("planning"),
-        "frontier_item": frontier_item,
+        "existing_choice_idea_binding": choice.get("idea_binding"),
+        "frontier_item": build_compact_selected_frontier_item(frontier_item, choice=choice),
         "context_summary": summarize_context(context),
         "focus_canon_slice": build_focus_canon_slice(context, canon),
     }
@@ -562,9 +738,32 @@ def build_normal_packet(
     selected: dict[str, Any],
     context: dict[str, Any],
     canon: CanonResolver,
+    story: StoryGraphService,
     ideas_file: dict[str, Any],
     asset_availability: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    path_character_continuity = build_path_character_continuity_summary(
+        selected=selected,
+        story=story,
+        canon=canon,
+    )
+    parent_node_id = int(selected["from_node_id"])
+    allowed_entity_ids_by_type = {
+        "character": story.list_lineage_entity_ids(parent_node_id, "character"),
+        "location": story.list_lineage_entity_ids(parent_node_id, "location"),
+        "object": story.list_lineage_entity_ids(parent_node_id, "object"),
+    }
+    allowed_character_names = {
+        (entry.get("name") or "").strip().lower()
+        for entry in path_character_continuity.get("encountered_characters", [])
+        if (entry.get("name") or "").strip()
+    }
+    off_path_character_labels = {
+        lowered_name: f"{character.get('name')} [not yet introduced on this path]"
+        for character in canon.list_characters()
+        if (lowered_name := (character.get("name") or "").strip().lower()) and lowered_name not in allowed_character_names
+    }
+    selected_choice = story.get_choice(int(selected["choice_id"])) or {}
     return {
         "run_mode": "normal",
         "message": (
@@ -577,7 +776,8 @@ def build_normal_packet(
             f"{args.play_base_url.rstrip('/')}/play?branch_key={selected['branch_key']}"
             f"&scene={selected['from_node_id']}"
         ),
-        "selected_frontier_item": selected,
+        "path_character_continuity": path_character_continuity,
+        "selected_frontier_item": build_compact_selected_frontier_item(selected, choice=selected_choice),
         "preview_payload": {
             "branch_key": selected["branch_key"],
             "choice_id": selected["choice_id"],
@@ -585,8 +785,15 @@ def build_normal_packet(
             "branch_summary": selected["branch_summary"],
             "requested_choice_count": args.requested_choice_count,
         },
-        "context_summary": summarize_context(context),
-        "focus_canon_slice": build_focus_canon_slice(context, canon),
+        "context_summary": summarize_context(
+            context,
+            off_path_character_labels=off_path_character_labels,
+        ),
+        "focus_canon_slice": build_focus_canon_slice(
+            context,
+            canon,
+            allowed_entity_ids_by_type=allowed_entity_ids_by_type,
+        ),
         "asset_availability": asset_availability,
         "ideas_file_summary": {
             "path": ideas_file["path"],
@@ -615,6 +822,10 @@ def build_normal_packet(
             "Run now. Do not ask the human for permission. Return one GenerationCandidate JSON only, "
             "You may steer the current leaf toward one of the active IDEAS.md ideas when it genuinely fits the branch, hooks, and current scene, "
             "but do not force a mismatch just to use an idea. "
+            "If selected_frontier_item.bound_idea is present, treat it as the strongest current medium-range steering signal for this leaf unless continuity strongly argues otherwise. "
+            "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
+            "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
+            "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "
             "Check asset_availability before requesting art. If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation. "
             "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props. "
             "If validation fails, correct the JSON and try again until it passes. "
@@ -651,7 +862,7 @@ def build_planning_packet(
         "ideas_file": ideas_file,
         "planning_targets": targets,
         "endpoint_contract": {
-            "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'Goal: ... Intent: ...'} to strengthen future direction for that frontier choice.",
+            "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'Goal: ... Intent: ...', 'idea_binding': {...}} to strengthen future direction for that frontier choice and optionally bind it to a concrete idea.",
             "story_notes": "POST /story-notes to add structured global planning memory when a medium- or long-range direction deserves to persist across workers.",
             "ideas_file": "Append directly to IDEAS.md using categorized ideas for characters, locations, objects, or events when you have fun future-facing possibilities worth preserving.",
         },
@@ -665,9 +876,9 @@ def build_planning_packet(
             "Run now. Do not ask the human for permission. This is planning mode. "
             "Append exactly "
             f"{planning_policy['ideas_per_run']} new categorized ideas to IDEAS.md. Each idea must be a concrete character, location, object, or event seed, "
-            "and together they must cover at least 2 of those categories. Read the current IDEAS.md content first and add only genuinely new ideas, "
+            "and together they must cover at least 2 of those categories with at least one event idea. Read the current IDEAS.md content first and add only genuinely new ideas, "
             "not duplicates and not recycled example seeds from the docs or existing ideas file. Then update the notes on each planning target "
-            "with clearer Goal/Intent direction for future workers. Decide whether any existing hook or global idea is worth steering toward "
+            "with clearer Goal/Intent direction for future workers, and bind at least one planning target to a specific fresh or existing idea so later normal runs have a concrete direction signal. Decide whether any existing hook or global idea is worth steering toward "
             "from those targets, even if it will take several later scenes to matter. If useful, add one or two structured story direction notes. "
             "Do not generate, validate, or apply a new story scene in this run. "
             "At the end, report the exact categorized ideas you appended, the exact choice notes you updated, any story notes you added, and whether you appended IDEAS.md."
@@ -763,6 +974,7 @@ def main() -> None:
                 selected=selected,
                 context=context,
                 canon=canon,
+                story=story,
                 ideas_file=ideas_file,
                 asset_availability=build_asset_availability_summary(
                     context=context,
