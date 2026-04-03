@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+#graph-container {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 140px);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    overflow: hidden;
+    background: #faf5ee;
+}
+#graph-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+}
+#graph-canvas.dragging {
+    cursor: grabbing;
+}
+#node-popup {
+    display: none;
+    position: absolute;
+    z-index: 100;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 1rem 1.2rem;
+    max-width: 320px;
+    min-width: 200px;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--ink);
+}
+#node-popup h3 {
+    margin: 0 0 0.3rem;
+    font-size: 1rem;
+}
+#node-popup .popup-id {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+#node-popup .popup-summary {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.8rem;
+    max-height: 80px;
+    overflow-y: auto;
+}
+#node-popup .popup-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+#node-popup .popup-actions a {
+    display: inline-block;
+    text-decoration: none;
+    padding: 0.4rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+#node-popup .popup-actions .btn-primary {
+    background: linear-gradient(135deg, #a94b2f 0%, #7e3625 100%);
+    color: white;
+}
+#node-popup .popup-actions .btn-secondary {
+    background: var(--panel-strong);
+    border: 1px solid var(--line);
+    color: var(--ink);
+}
+#node-popup .popup-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.7rem;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 0;
+    line-height: 1;
+}
+</style>
+
+<div id="graph-container">
+    <canvas id="graph-canvas"></canvas>
+    <div id="node-popup">
+        <button class="popup-close" onclick="document.getElementById('node-popup').style.display='none'">&times;</button>
+        <h3 class="popup-title"></h3>
+        <div class="popup-id"></div>
+        <div class="popup-summary"></div>
+        <div class="popup-actions">
+            <a class="btn-primary popup-play-link" target="_blank">Open in Player</a>
+            <a class="btn-secondary popup-details-link" target="_blank">View Details</a>
+        </div>
+    </div>
+</div>
+
+<script>window.__GRAPH_DATA__ = {{ graph_json | safe }};</script>
+<script src="/static/graph.js"></script>
+{% endblock %}

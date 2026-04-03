@@ -478,6 +478,58 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/graph", response_class=HTMLResponse)
+    def graph_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+        story = StoryGraphService(db)
+        assets = AssetService(db, project_root)
+        nodes_raw = story.list_story_nodes()
+        choices_raw = story.list_choices()
+
+        graph_nodes = []
+        for node in nodes_raw:
+            location_entity = next(
+                (e for e in node.get("entities", []) if e["entity_type"] == "location"),
+                None,
+            )
+            bg_url = None
+            if location_entity is not None:
+                bg_asset = assets.get_latest_asset(
+                    entity_type="location",
+                    entity_id=int(location_entity["entity_id"]),
+                    asset_kind="background",
+                )
+                if bg_asset is not None:
+                    bg_url = assets.media_url_for_path(bg_asset["file_path"])
+            graph_nodes.append({
+                "id": int(node["id"]),
+                "title": node.get("title") or f"Node {node['id']}",
+                "branch_key": node.get("branch_key", "default"),
+                "summary": node.get("summary") or (node.get("scene_text") or "")[:120],
+                "parent_node_id": node.get("parent_node_id"),
+                "background_url": bg_url,
+                "choice_count": len(node.get("choices", [])),
+            })
+
+        graph_edges = []
+        for choice in choices_raw:
+            if choice.get("to_node_id") is not None:
+                graph_edges.append({
+                    "from_node_id": int(choice["from_node_id"]),
+                    "to_node_id": int(choice["to_node_id"]),
+                    "choice_text": choice["choice_text"],
+                    "status": choice.get("status", "open"),
+                })
+
+        graph_data = {"nodes": graph_nodes, "edges": graph_edges}
+        return templates.TemplateResponse(
+            request,
+            "graph.html",
+            {
+                "request": request,
+                "graph_json": json.dumps(graph_data),
+            },
+        )
+
     @app.get("/ui/story", response_class=HTMLResponse)
     def story_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
         story = StoryGraphService(db)
