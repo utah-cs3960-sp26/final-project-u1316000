@@ -1,4 +1,11 @@
-# CYOA Prototype
+# Proposal
+This project will be a web based choose your own adventure game prototype that uses AI to generate both the story and the images for the game. With a looping python script, I can allow locally run AI models to run for very long periods of time and generate a large amount of content for the game, creating an ever expanding world where the choices and assets are all done autonomously. However unlike a simple AI generated story, this project has a large system of guardrails, world bible, story hooks, lore, and backing database to ensure long lasting continuity and allow for recurring characters, locations, and items. The webapp also has a console view that displays all of the current characters, locations, and more as well as an interactive branching graph view to see the progression of the story. The story itself is very barebones at the moment and has gone through several story quality control changes, but the framework is in place to allow for a large and complex story to be generated. 
+
+The core of this project is the "story worker" loop. It is a python script that will run in a terminal in a "while true" loop and will use a locally run AI model to generate new content for the story. It starts by running a "prepare story run" script that fetches relevant story nodes and choices to give each fresh AI context of recent choices, larger worldbuilding and branch directions, etc. It then runs the LLM with the worker guide and the prepared story run context to generate new story content. This content is then validated by the worker script to ensure it meets the standards of the world bible and story hooks. If it is valid, any requested art is generated through a locally downloaded image generator through comfyui and the choices and new dialogue is then written to the database and the loop repeats. This allows for a continuous stream of new content to be generated for the story. There is also a 15% chance for a "planning run" to occur, in which the AI writes no new content but instead analyzes larger story directions and creates new ideas. In addition to all of the quality control for the agentic loop, the codebase also has a test suite that verifies the SQL tables are initialized correctly and that the story worker can generate valid story content.
+
+
+
+## CYOA Prototype
 
 Local-first prototype for a branching choose-your-own-adventure system backed by SQLite and a FastAPI inspection console.
 
