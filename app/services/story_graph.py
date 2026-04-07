@@ -937,7 +937,10 @@ class StoryGraphService:
         candidate: GenerationCandidate,
     ) -> list[dict[str, Any]]:
         references = [reference.model_dump() for reference in candidate.entity_references]
-        has_current_scene = any(reference.get("role") == "current_scene" for reference in references)
+        has_current_scene = any(
+            reference.get("role") == "current_scene" and reference.get("entity_type") == "location"
+            for reference in references
+        )
         if has_current_scene:
             return references
         parent_current_scene = next(

@@ -25,6 +25,17 @@ SUBJECT_ONLY_SUFFIX = (
     "subject is the only thing visible besides the background. Make sure the full body is in view."
 )
 
+PORTRAIT_FRAME_SUFFIX = (
+    "Single character only. Full-body framing required (head-to-toe fully visible). "
+    "Do not crop off feet, hat, hands, or any body parts. Keep the character centered with generous margins "
+    "on all sides so background removal and normalization work cleanly."
+)
+
+OBJECT_ISOLATION_SUFFIX = (
+    "Single object only on plain white background. No extra props, no hands, no characters, no scenery, "
+    "no text overlays, no labels, no stand-ins, and no framing objects. Keep the entire object fully in frame "
+    "with generous margins on all sides so cutout extraction is clean."
+)
 DETAIL_GUIDANCE_SUFFIX = (
     "Describe the subject or scene richly with mood, lighting, physical details, scale, materials, "
     "environment storytelling, and any important hooks. Do not specify art style directions beyond the "
@@ -364,8 +375,10 @@ class AssetService:
 
     def compose_generation_prompt(self, *, asset_kind: str, user_prompt: str) -> str:
         sections = [GLOBAL_STYLE_PREFIX, "", user_prompt.strip(), "", DETAIL_GUIDANCE_SUFFIX]
-        if asset_kind in {"portrait", "object_render"}:
-            sections.extend(["", SUBJECT_ONLY_SUFFIX])
+        if asset_kind == "portrait":
+            sections.extend(["", SUBJECT_ONLY_SUFFIX, "", PORTRAIT_FRAME_SUFFIX])
+        elif asset_kind == "object_render":
+            sections.extend(["", SUBJECT_ONLY_SUFFIX, "", OBJECT_ISOLATION_SUFFIX])
         return "\n".join(part for part in sections if part is not None)
 
     def load_workflow_template(self, workflow_path: str | Path) -> dict[str, Any]:

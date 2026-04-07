@@ -25,6 +25,7 @@ from app.tools.run_story_worker_local import (
     infer_missing_asset_requests,
     normalize_generation_candidate_payload,
     parse_llm_result,
+    collect_scene_anchor_art_issues,
 )
 
 
@@ -2363,3 +2364,105 @@ def test_story_notes_endpoints_and_ui(tmp_path: Path) -> None:
     assert death_page.status_code == 200
     assert "You Died" in death_page.text
     assert "Restart Adventure" in death_page.text
+
+
+def test_collect_scene_anchor_art_issues_flags_object_art_for_travel_scene() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "A portal opens toward Lantern Siding.",
+                "scene_text": "The mirror spills light like a doorway into somewhere else.",
+                "choices": [
+                    {
+                        "choice_text": "Keep going",
+                        "notes": "Goal: continue through the portal. Intent: reach the next place cleanly.",
+                    }
+                ],
+                "asset_requests": [
+                    {
+                        "job_type": "generate_object",
+                        "asset_kind": "object_render",
+                        "entity_type": "object",
+                        "entity_id": 1,
+                        "prompt": "A mirror portal object.",
+                    }
+                ],
+            }
+        ),
+    )
+
+    issues = collect_scene_anchor_art_issues(
+        packet={
+            "selected_frontier_item": {
+                "choice_text": "Step through the mirror portal into Lantern Siding"
+            }
+        },
+        candidate=candidate,
+    )
+
+    assert any("Do not use object_render as a stand-in for a scene background" in issue for issue in issues)
+
+def test_generation_validation_rejects_non_location_current_scene(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "An object is incorrectly used as the scene anchor.",
+            "scene_text": "The teacup tram is treated like the whole backdrop instead of a staged object.",
+            "entity_references": [
+                {"entity_type": "object", "entity_id": 1, "role": "current_scene"},
+            ],
+            "choices": [
+                {
+                    "choice_text": "Step around the tram",
+                    "notes": "Goal: inspect the mistaken scene anchor. Intent: prove object assets must not drive the background layer.",
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("current_scene must always reference a location" in issue for issue in result["issues"])
+
+
+def test_apply_generation_rejects_non_location_current_scene(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    apply_response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": 1,
+            "choice_id": 1,
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Bad Scene Anchor Fallback",
+                "scene_summary": "A malformed current_scene reference should not suppress parent location inheritance.",
+                "scene_text": "The tram looms large, but the mushroom field is still the actual place around it.",
+                "entity_references": [
+                    {"entity_type": "object", "entity_id": 1, "role": "current_scene"}
+                ],
+                "choices": [
+                    {
+                        "choice_text": "Keep walking",
+                        "notes": "Goal: continue through the malformed scene. Intent: confirm parent location inheritance stays safe.",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert apply_response.status_code == 400
+    detail = apply_response.json().get("detail", {})
+    validation = detail.get("validation", {}) if isinstance(detail, dict) else {}
+    issues = validation.get("issues", []) if isinstance(validation, dict) else []
+    assert any("current_scene must always reference a location" in issue for issue in issues)
+

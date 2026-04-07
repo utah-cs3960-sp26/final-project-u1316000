@@ -138,6 +138,13 @@ VALID_PRESENT_ENTITY_SLOTS = {
 }
 
 
+SCENE_TRANSITION_CUE_PATTERNS = [
+    re.compile(r"\b(board|boarding|ride|travel|arrive|arrival|depart|departure|enter|entered|reach|reached)\b", re.IGNORECASE),
+    re.compile(r"\bstep\s+(into|through)\b", re.IGNORECASE),
+    re.compile(r"\b(head|go|went)\s+to\b", re.IGNORECASE),
+    re.compile(r"\bportal\b", re.IGNORECASE),
+]
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one local story-worker loop against LM Studio."
@@ -741,6 +748,44 @@ def collect_character_continuity_issues(
         return issues
     finally:
         connection.close()
+
+
+def collect_scene_anchor_art_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    texts = [
+        (packet.get("selected_frontier_item") or {}).get("choice_text") or "",
+        candidate.scene_summary or "",
+        candidate.scene_text or "",
+    ]
+    scene_transition_expected = any(
+        pattern.search(text)
+        for pattern in SCENE_TRANSITION_CUE_PATTERNS
+        for text in texts
+        if text
+    )
+    if not scene_transition_expected:
+        return []
+
+    has_location_current_scene = any(
+        reference.role == "current_scene" and reference.entity_type == "location"
+        for reference in candidate.entity_references
+    )
+    if has_location_current_scene:
+        return []
+
+    object_render_requests = [
+        request for request in candidate.asset_requests
+        if request.asset_kind == "object_render"
+    ]
+    if not object_render_requests:
+        return []
+
+    return [
+        "This draft looks like a travel/arrival scene, but it does not anchor the scene to a location current_scene and instead requests object art. Do not use object_render as a stand-in for a scene background; create or reference the location and request or reuse its background instead."
+    ]
 
 
 def append_ideas(ideas_path: Path, ideas: list[PlanningIdea]) -> None:
@@ -1459,9 +1504,14 @@ def main() -> None:
                             packet=packet,
                             candidate=parsed,
                         )
-                        if continuity_issues:
+                        scene_anchor_issues = collect_scene_anchor_art_issues(
+                            packet=packet,
+                            candidate=parsed,
+                        )
+                        combined_extra_issues = continuity_issues + scene_anchor_issues
+                        if combined_extra_issues:
                             validated_payload["valid"] = False
-                            validated_payload["issues"] = list(validated_payload.get("issues", [])) + continuity_issues
+                            validated_payload["issues"] = list(validated_payload.get("issues", [])) + combined_extra_issues
                         if validated_payload["valid"]:
                             break
                         last_error = RuntimeError(

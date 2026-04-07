@@ -212,6 +212,16 @@ class LLMGenerationService:
         if len(candidate.choices) == 0:
             issues.append("Generation candidate must include at least one choice.")
 
+        current_scene_references = [
+            reference for reference in candidate.entity_references
+            if reference.role == "current_scene"
+        ]
+        if len(current_scene_references) > 1:
+            issues.append("Generation candidate must declare at most one current_scene location.")
+        for reference in current_scene_references:
+            if reference.entity_type != "location":
+                issues.append("current_scene must always reference a location, never a character or object.")
+
         entity_proposals = {
             "location": {proposal.name.strip().lower(): proposal for proposal in candidate.new_locations},
             "character": {proposal.name.strip().lower(): proposal for proposal in candidate.new_characters},
