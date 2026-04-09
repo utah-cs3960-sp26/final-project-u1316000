@@ -5,10 +5,13 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.models import GenerationCandidate
 from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
+from app.services.story_notes import StoryDirectionService
+from app.services.worldbuilding import WorldbuildingService
 
 
 class StorySetupService:
@@ -28,6 +31,8 @@ class StorySetupService:
         self.assets = AssetService(connection, project_root)
         self.branch_state = BranchStateService(connection, story_bible["acts"])
         self.story_graph = StoryGraphService(connection)
+        self.story_notes = StoryDirectionService(connection)
+        self.worldbuilding = WorldbuildingService(connection)
 
     def soft_reset_opening_canon(self) -> dict[str, Any]:
         protagonist = self.story_bible["protagonist"]
@@ -296,6 +301,522 @@ class StorySetupService:
             "portrait_asset": portrait_asset,
             "cutout_asset": cutout_asset,
         }
+
+    def hard_reset_story(
+        self,
+        *,
+        branch_key: str = "default",
+        ideas_path: Path | None = None,
+        story_specific_idea_terms: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._clear_story_database()
+        reset = self.soft_reset_opening_canon()
+        protagonist_id = int(reset["protagonist"]["id"])
+        location_id = int(reset["opening_location"]["id"])
+
+        self._retune_opening_canon_for_reboot(
+            protagonist_id=protagonist_id,
+            location_id=location_id,
+        )
+
+        opening_candidate = self._build_reboot_opening_candidate(
+            branch_key=branch_key,
+            protagonist_id=protagonist_id,
+            location_id=location_id,
+        )
+        opening_node = self.story_graph.create_story_node(
+            branch_key=branch_key,
+            title=opening_candidate.scene_title,
+            scene_text=opening_candidate.scene_text,
+            summary=opening_candidate.scene_summary,
+            dialogue_lines=[line.model_dump() for line in opening_candidate.dialogue_lines],
+            referenced_entities=[reference.model_dump() for reference in opening_candidate.entity_references],
+            present_entities=[entity.model_dump(exclude={"use_player_fallback"}) for entity in opening_candidate.scene_present_entities],
+        )
+
+        created_choices: list[dict[str, Any]] = []
+        for choice in opening_candidate.choices:
+            notes_payload = {
+                "notes": choice.notes,
+                "choice_class": choice.choice_class,
+            }
+            if choice.ending_category is not None:
+                notes_payload["ending_category"] = choice.ending_category
+            created_choice = self.story_graph.create_choice(
+                from_node_id=int(opening_node["id"]),
+                choice_text=choice.choice_text,
+                to_node_id=choice.target_node_id,
+                status="open" if choice.target_node_id is None else "fulfilled",
+                notes=json.dumps(notes_payload),
+            )
+            created_choices.append(self.story_graph.get_choice(int(created_choice["id"])) or created_choice)
+
+        self.branch_state.add_branch_tag(
+            branch_key=branch_key,
+            tag="enumerators-closing-in",
+            tag_type="state",
+            source="story_reset",
+            notes="The opening scene begins under imminent survey pressure from the king's brass enumerators.",
+        )
+
+        created_hooks = self._create_reboot_hooks(
+            branch_key=branch_key,
+            protagonist_id=protagonist_id,
+        )
+        self._create_reboot_story_notes(
+            branch_key=branch_key,
+            protagonist_id=protagonist_id,
+            hooks_by_key=created_hooks,
+        )
+        self._create_reboot_worldbuilding(branch_key=branch_key)
+        restored_assets = self._restore_reboot_assets(
+            protagonist_id=protagonist_id,
+            location_id=location_id,
+        )
+
+        self.branch_state.sync_branch_progress(branch_key, latest_story_node_id=int(opening_node["id"]))
+
+        pruned_ideas = None
+        if ideas_path is not None:
+            pruned_ideas = self.prune_story_specific_ideas(
+                ideas_path=ideas_path,
+                story_specific_terms=story_specific_idea_terms or [],
+            )
+
+        return {
+            "branch_key": branch_key,
+            "start_node_id": int(opening_node["id"]),
+            "opening_choice_ids": [int(choice["id"]) for choice in created_choices],
+            "opening_title": opening_candidate.scene_title,
+            "opening_summary": opening_candidate.scene_summary,
+            "worldbuilding_note_count": len(self.worldbuilding.list_notes()),
+            "story_direction_note_count": len(self.story_notes.list_notes()),
+            "hook_count": len(self.branch_state.list_hooks(branch_key)),
+            "asset_count": len(self.assets.list_assets()),
+            "restored_assets": restored_assets,
+            "pruned_ideas": pruned_ideas,
+            "counts": self.story_graph.counts(),
+        }
+
+    def prune_story_specific_ideas(
+        self,
+        *,
+        ideas_path: Path,
+        story_specific_terms: list[str],
+    ) -> dict[str, Any]:
+        resolved_path = ideas_path.expanduser().resolve()
+        if not resolved_path.exists():
+            return {
+                "path": str(resolved_path),
+                "removed_count": 0,
+                "removed_entries": [],
+            }
+
+        banned_terms = sorted(
+            {
+                term.strip().lower()
+                for term in story_specific_terms
+                if term and term.strip()
+            },
+            key=len,
+            reverse=True,
+        )
+        if not banned_terms:
+            return {
+                "path": str(resolved_path),
+                "removed_count": 0,
+                "removed_entries": [],
+            }
+
+        kept_lines: list[str] = []
+        removed_entries: list[str] = []
+        in_open_ideas = False
+        for raw_line in resolved_path.read_text(encoding="utf-8").splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("## "):
+                in_open_ideas = stripped == "## Open Ideas"
+                kept_lines.append(raw_line)
+                continue
+            if in_open_ideas and stripped.startswith("- ["):
+                lowered = stripped.lower()
+                if any(term in lowered for term in banned_terms):
+                    removed_entries.append(stripped)
+                    continue
+            kept_lines.append(raw_line)
+
+        normalized_lines: list[str] = []
+        blank_streak = 0
+        for line in kept_lines:
+            if line.strip():
+                blank_streak = 0
+                normalized_lines.append(line)
+                continue
+            blank_streak += 1
+            if blank_streak <= 1:
+                normalized_lines.append("")
+
+        resolved_path.write_text("\n".join(normalized_lines).rstrip() + "\n", encoding="utf-8")
+        return {
+            "path": str(resolved_path),
+            "removed_count": len(removed_entries),
+            "removed_entries": removed_entries,
+        }
+
+    def _clear_story_database(self) -> None:
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        tables = [
+            "generation_jobs",
+            "assets",
+            "story_node_present_entities",
+            "node_entities",
+            "choices",
+            "story_nodes",
+            "inventory_entries",
+            "unlocked_affordances",
+            "relationship_states",
+            "branch_tags",
+            "story_hooks",
+            "story_direction_notes",
+            "worldbuilding_notes",
+            "relations",
+            "facts",
+            "objects",
+            "characters",
+            "locations",
+            "branch_state",
+            "loop_runtime_state",
+        ]
+        for table_name in tables:
+            self.connection.execute(f"DELETE FROM {table_name}")
+        self.connection.execute("DELETE FROM sqlite_sequence")
+        self.connection.execute(
+            """
+            INSERT INTO loop_runtime_state (id, normal_runs_since_plan, last_run_mode)
+            VALUES (1, 0, 'normal')
+            """
+        )
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = ON")
+
+    def _retune_opening_canon_for_reboot(self, *, protagonist_id: int, location_id: int) -> None:
+        self.connection.execute(
+            """
+            UPDATE locations
+            SET description = ?, canonical_summary = ?
+            WHERE id = ?
+            """,
+            (
+                "A dew-cold meadow of towering mushrooms above buried green glass, freshly strung with counting wires while brass enumerators sweep the field at dawn.",
+                "The opening field: beautiful, damp, and quietly under survey by forces that count bodies, routes, and names.",
+                location_id,
+            ),
+        )
+        self.connection.execute(
+            """
+            UPDATE characters
+            SET home_location_id = ?, canonical_summary = ?
+            WHERE id = ?
+            """,
+            (
+                location_id,
+                "An abnormally tall gnome with five thumbs on the left hand, a striped bucket hat of unknown origin, and the unnerving sense that somebody altered them for a purpose.",
+                protagonist_id,
+            ),
+        )
+        self.connection.commit()
+
+    def _build_reboot_opening_candidate(
+        self,
+        *,
+        branch_key: str,
+        protagonist_id: int,
+        location_id: int,
+    ) -> GenerationCandidate:
+        return GenerationCandidate.model_validate(
+            {
+                "branch_key": branch_key,
+                "scene_title": "Before the Counting Bell",
+                "scene_summary": (
+                    "The Tall Gnome wakes in the Mushroom Field just before a brass survey patrol crosses it, "
+                    "with counting wires underfoot, a bucket hat that seems to remember routes, and a green "
+                    "glass seam in the soil that reacts to the altered hand."
+                ),
+                "scene_text": (
+                    "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages. "
+                    "Between the stalks, thin black counting wires have been strung sometime in the night, and "
+                    "every quiet hum through them makes your five left thumbs twitch in sequence.\n\n"
+                    "Your striped bucket hat is cold with dew and warm at the brim. Tiny route marks have been "
+                    "stitched inside it, then half-burned through where a proper name ought to be. Each time the "
+                    "wires sing, the hat gives a faint, stubborn tug toward the deeper parts of the field.\n\n"
+                    "Far away, a brass bell rings seven clipped notes. You do not know why that sound fills you "
+                    "with the certainty that something is coming to count you, misname you, and carry you off in "
+                    "paperwork. Between two mushroom roots, a green line of buried glass has surfaced through the "
+                    "mud like a window trying to breathe.\n\n"
+                    "If the field is being surveyed at dawn, you have very little time to decide whether to climb, "
+                    "descend, or listen to the clothing that should not know more than you do."
+                ),
+                "dialogue_lines": [
+                    {
+                        "speaker": "Narrator",
+                        "text": "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages, while thin black counting wires hum low between the stalks.",
+                    },
+                    {
+                        "speaker": "Narrator",
+                        "text": "Every pulse through the wires makes your five left thumbs twitch in sequence, as though your hand already knows the pattern being counted.",
+                    },
+                    {
+                        "speaker": "Narrator",
+                        "text": "Inside the striped bucket hat, somebody has stitched route marks and burned through the place where a proper name ought to be.",
+                    },
+                    {
+                        "speaker": "You",
+                        "text": "I do not know who dressed me for this, but they expected me to move before sunrise.",
+                    },
+                    {
+                        "speaker": "Narrator",
+                        "text": "A brass bell rings seven clipped notes somewhere beyond the mist, and a green seam of buried glass pushes up through the mud between two mushroom roots like a hidden window beginning to open.",
+                    },
+                ],
+                "choices": [
+                    {
+                        "choice_text": "Trace the counting-wires to the green glass seam under the roots",
+                        "notes": "Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass registry storyline and test whether the altered hand belongs to hidden machinery.",
+                        "choice_class": "progress",
+                    },
+                    {
+                        "choice_text": "Raise the striped hat into the wind and listen for the route it remembers",
+                        "notes": "Goal: learn whether the hat responds to the same system watching the field. Intent: develop the hat as a courier token tied to wider stolen-name routes instead of treating it as a local curiosity.",
+                        "choice_class": "inspection",
+                    },
+                    {
+                        "choice_text": "Climb the tallest mushroom and watch for the brass enumerators",
+                        "notes": "Goal: confirm what immediate danger is moving through the field. Intent: bring active world pressure onstage early so the story gains pursuit, timing, and harder branch stakes.",
+                        "choice_class": "progress",
+                    },
+                ],
+                "entity_references": [
+                    {"entity_type": "location", "entity_id": location_id, "role": "current_scene"},
+                    {"entity_type": "character", "entity_id": protagonist_id, "role": "player"},
+                ],
+                "scene_present_entities": [
+                    {
+                        "entity_type": "character",
+                        "entity_id": protagonist_id,
+                        "slot": "hero-center",
+                        "focus": True,
+                    }
+                ],
+            }
+        )
+
+    def _create_reboot_hooks(self, *, branch_key: str, protagonist_id: int) -> dict[str, dict[str, Any]]:
+        hook_specs = {
+            "hat": {
+                "hook_type": "identity_mystery",
+                "importance": "major",
+                "summary": (
+                    "The striped bucket hat behaves less like clothing than a routed token from a hidden network "
+                    "that moves names, routes, and identities through the world."
+                ),
+                "payoff_concept": (
+                    "The hat is tied to a clandestine route-and-name smuggling system that intersects with the "
+                    "protagonist's missing past; later payoffs should connect it to wider political and registry "
+                    "pressures, not just the nearest local scene."
+                ),
+                "must_not_imply": [
+                    "Do not reduce the hat to a one-scene clue or a simple local magical object.",
+                    "Do not let the first nearby NPC fully explain where the hat came from or who sent it.",
+                ],
+                "linked_entity_type": "character",
+                "linked_entity_id": protagonist_id,
+                "introduced_at_depth": 0,
+                "min_distance_to_payoff": 20,
+                "min_distance_to_next_development": 4,
+                "required_clue_tags": [],
+                "required_state_tags": [],
+                "status": "active",
+                "notes": (
+                    "Long-range major hook. Early developments should reveal route fragments, delivery rules, "
+                    "or recognition pressure without collapsing the mystery into the nearest scene."
+                ),
+            },
+            "hand": {
+                "hook_type": "body_mystery",
+                "importance": "major",
+                "summary": (
+                    "The five-thumbed hand and stretched gnome body match measuring schemes used by buried "
+                    "registry machinery and royal enumerators, suggesting deliberate alteration."
+                ),
+                "payoff_concept": (
+                    "The protagonist was physically reconfigured for access, counting, or passage through systems "
+                    "that ordinary bodies cannot satisfy; later payoffs should tie this to broader civic or royal "
+                    "machinery rather than a single local device."
+                ),
+                "must_not_imply": [
+                    "Do not explain the body alteration as a random mutation or harmless fantasy oddity.",
+                    "Do not solve the hand mystery with a single lock, plate, or one-scene mechanism.",
+                ],
+                "linked_entity_type": "character",
+                "linked_entity_id": protagonist_id,
+                "introduced_at_depth": 0,
+                "min_distance_to_payoff": 20,
+                "min_distance_to_next_development": 4,
+                "required_clue_tags": [],
+                "required_state_tags": [],
+                "status": "active",
+                "notes": (
+                    "Long-range major hook. Early scenes may find evidence that the body fits systems of measurement, "
+                    "survey, or transit, but should not yet reveal who changed it or why."
+                ),
+            },
+        }
+
+        created_hooks: dict[str, dict[str, Any]] = {}
+        for key, hook in hook_specs.items():
+            created_hooks[key] = self.branch_state.create_hook(branch_key=branch_key, **hook)
+        return created_hooks
+
+    def _create_reboot_story_notes(
+        self,
+        *,
+        branch_key: str,
+        protagonist_id: int,
+        hooks_by_key: dict[str, dict[str, Any]],
+    ) -> None:
+        notes = [
+            {
+                "note_type": "plotline",
+                "title": "Hat as Contraband Route Token",
+                "note_text": (
+                    "Treat the bucket hat as a surviving piece of a larger route-and-name traffic system. "
+                    "Future scenes should let it attract attention from couriers, auditors, smugglers, or machines "
+                    "that recognize delivery marks without paying off its exact origin too early."
+                ),
+                "priority": 5,
+                "related_entity_type": "character",
+                "related_entity_id": protagonist_id,
+                "related_hook_id": hooks_by_key["hat"]["id"],
+            },
+            {
+                "note_type": "plotline",
+                "title": "Body Fits Systems It Should Not",
+                "note_text": (
+                    "Keep connecting the altered hand and stretched body to broader systems of counting, access, "
+                    "measurement, and civic control. The useful pattern is recognition by institutions and devices, "
+                    "not a parade of isolated hand-shaped gimmicks."
+                ),
+                "priority": 5,
+                "related_entity_type": "character",
+                "related_entity_id": protagonist_id,
+                "related_hook_id": hooks_by_key["hand"]["id"],
+            },
+        ]
+        for note in notes:
+            self.story_notes.create_note(
+                **note,
+                status="active",
+                source_branch_key=branch_key,
+                created_by="story_reset",
+            )
+
+    def _create_reboot_worldbuilding(self, *, branch_key: str) -> None:
+        notes = [
+            {
+                "note_type": "regime_pressure",
+                "title": "The King's Brass Enumerators",
+                "note_text": (
+                    "The crown has deployed brass enumerators and survey engines to recatalog outlying districts at dawn. "
+                    "Anything miscounted, unnamed, or physically irregular risks being claimed as an administrative error."
+                ),
+                "priority": 5,
+                "pressure": 5,
+            },
+            {
+                "note_type": "hidden_infrastructure",
+                "title": "Glass Villages Beneath the Field",
+                "note_text": (
+                    "Old green-glass settlements and sealed registry passages still run beneath certain mushroom fields. "
+                    "Their windows, lifts, and listening seams only surface when specific routes or bodies are recognized."
+                ),
+                "priority": 4,
+                "pressure": 4,
+            },
+            {
+                "note_type": "smuggling_network",
+                "title": "Names Travel Better Than Bodies",
+                "note_text": (
+                    "There are covert routes for moving names, permits, and identities separately from the people who own them. "
+                    "Courier marks, hats, ribbons, and route tokens can outlast the memories of their carriers."
+                ),
+                "priority": 4,
+                "pressure": 4,
+            },
+            {
+                "note_type": "ambient_danger",
+                "title": "Survey Weather Makes Bad Choices Permanent",
+                "note_text": (
+                    "When the counting bells ring under bad weather, routes close hard and official mistakes become difficult to reverse. "
+                    "A branch can die from delay, capture, or bad timing just as easily as from violence."
+                ),
+                "priority": 3,
+                "pressure": 3,
+            },
+        ]
+        for note in notes:
+            self.worldbuilding.create_note(
+                **note,
+                status="active",
+                source_branch_key=branch_key,
+                created_by="story_reset",
+            )
+
+    def _restore_reboot_assets(self, *, protagonist_id: int, location_id: int) -> list[dict[str, Any]]:
+        asset_specs = [
+            {
+                "entity_type": "location",
+                "entity_id": location_id,
+                "asset_kind": "background",
+                "file_path": self.project_root / "data" / "assets" / "generated" / "background" / "location_1_mushroom-field-opening.png",
+                "display_class": "background-scene",
+            },
+            {
+                "entity_type": "character",
+                "entity_id": protagonist_id,
+                "asset_kind": "portrait",
+                "file_path": self.project_root / "data" / "assets" / "comfy_output" / "portrait" / "main-character-no-cutout.png",
+                "display_class": "character-fullbody",
+            },
+            {
+                "entity_type": "character",
+                "entity_id": protagonist_id,
+                "asset_kind": "cutout",
+                "file_path": self.project_root / "data" / "assets" / "cutouts" / "main-character-bucket-hat-normalized-cutout.png",
+                "display_class": "character-fullbody",
+            },
+        ]
+        restored_assets: list[dict[str, Any]] = []
+        for asset in asset_specs:
+            resolved_path = Path(asset["file_path"]).expanduser().resolve()
+            if not resolved_path.exists():
+                continue
+            restored_assets.append(
+                self.assets.add_asset(
+                    entity_type=asset["entity_type"],
+                    entity_id=asset["entity_id"],
+                    asset_kind=asset["asset_kind"],
+                    file_path=str(resolved_path),
+                    display_class=asset["display_class"],
+                    normalization={},
+                    prompt_text=json.dumps(
+                        {
+                            "source": "hard_reset_story",
+                            "notes": "Re-registered opening asset after wiping the live continuity database.",
+                        }
+                    ),
+                )
+            )
+        return restored_assets
 
     def _create_open_frontier_choices(self, from_node_id: int, labels: list[str]) -> None:
         for label in labels:

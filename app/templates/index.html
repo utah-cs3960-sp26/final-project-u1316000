@@ -1,10 +1,17 @@
 {% extends "base.html" %}
+{% macro card_start(title) -%}
+<article class="card">
+    <h3>{{ title }}</h3>
+{%- endmacro %}
+{% macro card_end() -%}
+</article>
+{%- endmacro %}
 {% block content %}
 <section class="hero">
     <div>
         <p class="eyebrow">Status</p>
         <h2>Prototype bootstrap is live.</h2>
-        <p class="lede">This console tracks canonical world data, story graph structure, and future LLM generation jobs without starting a story automatically.</p>
+        <p class="lede">This console now surfaces recent rows from the live canon, graph, branch-state, planning, and job tables so you can sanity-check the world without opening SQLite by hand.</p>
         <p class="meta">Database: {{ db_path }}</p>
     </div>
 </section>
@@ -21,106 +28,292 @@
     <article class="card">
         <h3>What This Build Supports</h3>
         <ul>
-            <li>Canonical locations, characters, facts, and spatial relations.</li>
-            <li>Story nodes and choice edges stored as a graph in SQLite.</li>
-            <li>Manual world seeding plus JSON APIs for later LLM-driven automation.</li>
-            <li>Reusable asset/job records without image generation turned on yet.</li>
+            <li>Canonical locations, characters, facts, relations, and recent continuity state from the homepage.</li>
+            <li>Story nodes, staged entities, and recent choices with worker-planning notes intact.</li>
+            <li>Branch-specific hooks, tags, inventory, affordances, and relationship state.</li>
+            <li>Structured story notes, worldbuilding pressure, assets, and generation jobs.</li>
             <li>A separate browser-based player demo at <a href="/play">/play</a>.</li>
-            <li>Asset request schema plus local Hugging Face background-removal tooling.</li>
         </ul>
     </article>
 </section>
 
 <section class="grid three-up">
-    <article class="card">
-        <h3>Recent Locations</h3>
-        {% if locations %}
-            <ul>
-            {% for location in locations %}
-                <li>
-                    <strong>{{ location.name }}</strong>
-                    {% if location.description or location.canonical_summary %}
-                        - {{ location.description or location.canonical_summary }}
-                    {% endif %}
-                </li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">No canonical locations yet.</p>
-        {% endif %}
-    </article>
-    <article class="card">
-        <h3>Recent Characters</h3>
-        {% if characters %}
-            <ul>
-            {% for character in characters %}
-                <li>
-                    <strong>{{ character.name }}</strong>
-                    {% if character.description or character.canonical_summary %}
-                        - {{ character.description or character.canonical_summary }}
-                    {% endif %}
-                    {% if character.home_location_name %}
-                        <span class="meta">(lives at {{ character.home_location_name }})</span>
-                    {% endif %}
-                </li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">No canonical characters yet.</p>
-        {% endif %}
-    </article>
-    <article class="card">
-        <h3>Recent Objects</h3>
-        {% if objects %}
-            <ul>
-            {% for object in objects %}
-                <li>
-                    <strong>{{ object.name }}</strong>
-                    {% if object.description or object.canonical_summary %}
-                        - {{ object.description or object.canonical_summary }}
-                    {% endif %}
-                    {% if object.default_location_name %}
-                        <span class="meta">(usually found at {{ object.default_location_name }})</span>
-                    {% endif %}
-                </li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">No canonical objects yet.</p>
-        {% endif %}
-    </article>
-    <article class="card">
-        <h3>Story Graph</h3>
-        {% if nodes %}
-            <ul>
-            {% for node in nodes %}
-                <li><strong>#{{ node.id }}</strong>{% if node.title %} - {{ node.title }}{% endif %} ({{ node.choices | length }} choices)</li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">No story nodes yet.</p>
-        {% endif %}
-    </article>
-    <article class="card">
-        <h3>Hook Inspector</h3>
-        <p class="meta">Inspect active, blocked, and payoff-ready hooks at <a href="/ui/hooks">/ui/hooks</a>.</p>
-        <p class="meta">This is the fastest way to see min payoff distance, linked entities, and missing readiness tags.</p>
-    </article>
-    <article class="card">
-        <h3>Story Notes</h3>
-        <p class="meta">Use <a href="/ui/story-notes">/ui/story-notes</a> for global planning memory: future plotlines, offscreen payoffs, character ideas, and longer-range story direction that should survive across worker runs.</p>
-    </article>
-    <article class="card">
-        <h3>Recent Assets</h3>
-        {% if assets %}
-            <ul>
-            {% for asset in assets %}
-                <li><strong>{{ asset.asset_kind }}</strong> - {{ asset.file_path }}</li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="empty">No generated or imported assets yet.</p>
-        {% endif %}
-    </article>
+    {{ card_start("Recent Locations") }}
+    {% if locations %}
+        <ul>
+        {% for location in locations %}
+            <li>
+                <strong>{{ location.name }}</strong>
+                {% if location.description or location.canonical_summary %}
+                    - {{ location.description or location.canonical_summary }}
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No canonical locations yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Characters") }}
+    {% if characters %}
+        <ul>
+        {% for character in characters %}
+            <li>
+                <strong>{{ character.name }}</strong>
+                {% if character.description or character.canonical_summary %}
+                    - {{ character.description or character.canonical_summary }}
+                {% endif %}
+                {% if character.home_location_name %}
+                    <span class="meta">(lives at {{ character.home_location_name }})</span>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No canonical characters yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Objects") }}
+    {% if objects %}
+        <ul>
+        {% for object in objects %}
+            <li>
+                <strong>{{ object.name }}</strong>
+                {% if object.description or object.canonical_summary %}
+                    - {{ object.description or object.canonical_summary }}
+                {% endif %}
+                {% if object.default_location_name %}
+                    <span class="meta">(usually found at {{ object.default_location_name }})</span>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No canonical objects yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Facts") }}
+    {% if facts %}
+        <ul>
+        {% for fact in facts %}
+            <li>
+                <strong>{{ fact.entity_type }}:{{ fact.entity_id }}</strong> - {{ fact.fact_text }}
+                {% if fact.is_locked %}
+                    <span class="meta">(locked)</span>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No facts yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Relations") }}
+    {% if relations %}
+        <ul>
+        {% for relation in relations %}
+            <li>
+                <strong>{{ relation.subject_type }}:{{ relation.subject_id }}</strong>
+                {{ relation.relation_type }}
+                {{ relation.object_type }}:{{ relation.object_id }}
+                {% if relation.notes %}
+                    - {{ relation.notes }}
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No relations yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Story Graph") }}
+    {% if nodes %}
+        <ul>
+        {% for node in nodes %}
+            <li>
+                <strong>#{{ node.id }}</strong>
+                {% if node.title %} - {{ node.title }}{% endif %}
+                <span class="meta">({{ node.choices | length }} choices)</span>
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No story nodes yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Entity Links") }}
+    {% if node_entities %}
+        <ul>
+        {% for row in node_entities %}
+            <li><strong>node #{{ row.story_node_id }}</strong> - {{ row.entity_type }}:{{ row.entity_id }} as {{ row.role }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No node entity links yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Staged Entities") }}
+    {% if present_entities %}
+        <ul>
+        {% for row in present_entities %}
+            <li><strong>node #{{ row.story_node_id }}</strong> - {{ row.entity_type }}:{{ row.entity_id }} in {{ row.slot }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No staged entities yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Choices") }}
+    {% if choices %}
+        <ul>
+        {% for choice in choices %}
+            <li>
+                <strong>#{{ choice.id }}</strong> - {{ choice.choice_text }}
+                {% if choice.choice_class %}
+                    <span class="meta">[{{ choice.choice_class }}]</span>
+                {% endif %}
+                {% if choice.planning %}
+                    <span class="meta">(Goal/Intent ready)</span>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No choices yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Assets") }}
+    {% if assets %}
+        <ul>
+        {% for asset in assets %}
+            <li><strong>{{ asset.asset_kind }}</strong> - {{ asset.entity_type }}:{{ asset.entity_id }} <span class="meta">{{ asset.file_path }}</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No generated or imported assets yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Jobs") }}
+    {% if jobs %}
+        <ul>
+        {% for job in jobs %}
+            <li><strong>#{{ job.id }}</strong> - {{ job.job_type }} <span class="meta">({{ job.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No generation jobs have been queued yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Branch State") }}
+    {% if branch_states %}
+        <ul>
+        {% for branch in branch_states %}
+            <li>
+                <strong>{{ branch.branch_key }}</strong> - phase {{ branch.act_phase }}, depth {{ branch.branch_depth }}
+                {% if branch.latest_story_node_id %}
+                    <span class="meta">(latest node #{{ branch.latest_story_node_id }})</span>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No branch state yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Inventory Entries") }}
+    {% if inventory_entries %}
+        <ul>
+        {% for entry in inventory_entries %}
+            <li><strong>{{ entry.object_name }}</strong> - qty {{ entry.quantity }} <span class="meta">({{ entry.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No inventory entries yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Unlocked Affordances") }}
+    {% if affordances %}
+        <ul>
+        {% for affordance in affordances %}
+            <li><strong>{{ affordance.name }}</strong> - {{ affordance.description }} <span class="meta">({{ affordance.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No affordances yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Relationship States") }}
+    {% if relationships %}
+        <ul>
+        {% for relationship in relationships %}
+            <li><strong>{{ relationship.character_name }}</strong> - {{ relationship.stance }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No relationship state yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Branch Tags") }}
+    {% if branch_tags %}
+        <ul>
+        {% for tag in branch_tags %}
+            <li><strong>{{ tag.tag }}</strong> <span class="meta">({{ tag.tag_type }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No branch tags yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Recent Hooks") }}
+    {% if hooks %}
+        <ul>
+        {% for hook in hooks %}
+            <li><strong>#{{ hook.id }}</strong> - {{ hook.summary }} <span class="meta">({{ hook.importance }}, {{ hook.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No hooks yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Story Notes") }}
+    {% if story_direction_notes %}
+        <ul>
+        {% for note in story_direction_notes %}
+            <li><strong>{{ note.title }}</strong> - {{ note.note_text }} <span class="meta">({{ note.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No story notes yet.</p>
+    {% endif %}
+    {{ card_end() }}
+
+    {{ card_start("Worldbuilding Notes") }}
+    {% if worldbuilding_notes %}
+        <ul>
+        {% for note in worldbuilding_notes %}
+            <li><strong>{{ note.title }}</strong> - {{ note.note_text }} <span class="meta">(pressure {{ note.pressure }}, {{ note.status }})</span></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No worldbuilding notes yet.</p>
+    {% endif %}
+    {{ card_end() }}
 </section>
 {% endblock %}

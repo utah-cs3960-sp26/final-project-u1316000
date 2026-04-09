@@ -17,7 +17,9 @@ from app.main import create_app
 from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
+from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
+from app.services.story_setup import StorySetupService
 from app.tools.run_story_worker_local import (
     PlanningIdea,
     build_asset_prompt,
@@ -641,6 +643,136 @@ def test_seed_opening_story_backfills_existing_major_hook_direction(tmp_path: Pa
     )
     assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
     assert any("tram uniform gear" in guardrail.lower() for guardrail in hat_hook["must_not_imply"])
+
+
+def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "hard_reset.db"
+    bootstrap_database(db_path)
+    llm_generation = LLMGenerationService(project_root)
+
+    with connect(db_path) as connection:
+        canon = CanonResolver(connection)
+        story = StoryGraphService(connection)
+        branch_state = BranchStateService(connection, llm_generation.story_bible["acts"])
+
+        old_location = canon.create_or_get_location(name="Bell Orchard", description="Old continuity.")
+        old_character = canon.create_or_get_character(name="Clerk Nettle", description="Old continuity.")
+        old_object = canon.create_or_get_object(name="Counterfoil Parchment", description="Old continuity.")
+        opening = story.create_story_node(
+            branch_key="default",
+            title="Old Opening",
+            scene_text="The previous story starts here.",
+            summary="Old continuity.",
+            referenced_entities=[{"entity_type": "location", "entity_id": int(old_location["id"]), "role": "current_scene"}],
+            present_entities=[{"entity_type": "character", "entity_id": int(old_character["id"]), "slot": "hero-center", "focus": True}],
+        )
+        story.create_choice(
+            from_node_id=int(opening["id"]),
+            choice_text="Walk into the old story",
+            status="open",
+        )
+        branch_state.create_hook(
+            branch_key="default",
+            hook_type="minor_mystery",
+            importance="minor",
+            summary="An obsolete branch hook.",
+            linked_entity_type="object",
+            linked_entity_id=int(old_object["id"]),
+        )
+
+        ideas_path = tmp_path / "IDEAS.md"
+        ideas_path.write_text(
+            "\n".join(
+                [
+                    "## Open Ideas",
+                    "- [Character] Clerk Nettle's Rival: Old story specific.",
+                    "- [Location] Bell Orchard: Old story specific.",
+                    "- [Event] Transit Robbery: Still generic.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        setup = StorySetupService(
+            connection,
+            project_root=project_root,
+            story_bible=llm_generation.story_bible,
+        )
+        result = setup.hard_reset_story(
+            branch_key="default",
+            ideas_path=ideas_path,
+            story_specific_idea_terms=["Clerk Nettle", "Bell Orchard", "Counterfoil Parchment"],
+        )
+
+        assert result["start_node_id"] == 1
+        assert result["hook_count"] == 2
+        assert result["worldbuilding_note_count"] == 4
+        assert result["story_direction_note_count"] == 2
+
+        locations = canon.list_locations()
+        characters = canon.list_characters()
+        objects = canon.list_objects()
+        nodes = story.list_story_nodes()
+        choices = story.list_choices()
+        hooks = branch_state.list_hooks("default")
+
+    assert [location["name"] for location in locations] == ["Mushroom Field"]
+    assert [character["name"] for character in characters] == ["The Tall Gnome"]
+    assert objects == []
+    assert len(nodes) == 1
+    assert nodes[0]["title"] == "Before the Counting Bell"
+    assert len(choices) == 3
+    assert all(choice["status"] == "open" for choice in choices)
+    assert {choice["choice_class"] for choice in choices} == {"inspection", "progress"}
+    assert all(choice["planning"] is not None for choice in choices)
+    assert any("hidden network" in hook["summary"].lower() for hook in hooks)
+    assert any("deliberate alteration" in hook["summary"].lower() for hook in hooks)
+
+    ideas_text = ideas_path.read_text(encoding="utf-8")
+    assert "Clerk Nettle" not in ideas_text
+    assert "Bell Orchard" not in ideas_text
+    assert "Transit Robbery" in ideas_text
+
+
+def test_prune_story_specific_ideas_only_removes_matching_open_idea_entries(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "prune_ideas.db"
+    bootstrap_database(db_path)
+    llm_generation = LLMGenerationService(project_root)
+    ideas_path = tmp_path / "IDEAS.md"
+    ideas_path.write_text(
+        "\n".join(
+            [
+                "# Ideas Scratchpad",
+                "",
+                "## Open Ideas",
+                "- [Character] Madam Bei's Rival: Remove this one.",
+                "- [Event] Tram Strike: Keep this one.",
+                "- [Location] Velvet Platform Annex: Remove this one too.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with connect(db_path) as connection:
+        setup = StorySetupService(
+            connection,
+            project_root=project_root,
+            story_bible=llm_generation.story_bible,
+        )
+        result = setup.prune_story_specific_ideas(
+            ideas_path=ideas_path,
+            story_specific_terms=["Madam Bei", "Velvet Platform"],
+        )
+
+    rewritten = ideas_path.read_text(encoding="utf-8")
+    assert result["removed_count"] == 2
+    assert "Madam Bei's Rival" not in rewritten
+    assert "Velvet Platform Annex" not in rewritten
+    assert "Tram Strike" in rewritten
 
 
 def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) -> None:

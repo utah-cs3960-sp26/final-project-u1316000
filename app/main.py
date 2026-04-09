@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings
-from app.database import bootstrap_database, connect
+from app.database import bootstrap_database, connect, fetch_all
 from app.models import (
     AffordanceCreate,
     ApplyGenerationRequest,
@@ -225,15 +225,47 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         canon = CanonResolver(db)
         story = StoryGraphService(db)
         assets = AssetService(db, project_root)
+        branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
+        story_notes = StoryDirectionService(db)
+        worldbuilding = WorldbuildingService(db)
         context = {
             "request": request,
             "counts": story.counts(),
             "locations": canon.list_locations()[:5],
             "characters": canon.list_characters()[:5],
             "objects": canon.list_objects()[:5],
+            "facts": canon.list_facts()[:5],
+            "relations": canon.list_relations()[:5],
             "assets": assets.list_assets()[:5],
             "nodes": story.list_story_nodes()[:5],
+            "node_entities": fetch_all(
+                db,
+                """
+                SELECT *
+                FROM node_entities
+                ORDER BY id DESC
+                LIMIT 5
+                """,
+            ),
+            "present_entities": fetch_all(
+                db,
+                """
+                SELECT *
+                FROM story_node_present_entities
+                ORDER BY id DESC
+                LIMIT 5
+                """,
+            ),
+            "choices": story.list_choices()[:5],
             "jobs": story.list_jobs()[:5],
+            "branch_states": [branch_state.get_branch_state("default")],
+            "inventory_entries": branch_state.list_inventory("default")[:5],
+            "affordances": branch_state.list_affordances("default")[:5],
+            "relationships": branch_state.list_relationships("default")[:5],
+            "branch_tags": branch_state.list_branch_tags("default")[:5],
+            "hooks": branch_state.list_hooks_with_readiness("default")[:5],
+            "story_direction_notes": story_notes.list_notes(limit=5),
+            "worldbuilding_notes": worldbuilding.list_notes(limit=5),
             "db_path": str(settings.database_path),
         }
         return templates.TemplateResponse(request, "index.html", context)

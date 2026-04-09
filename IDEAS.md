@@ -68,13 +68,10 @@ Suggested format:
 
 ## Open Ideas
 
-- [Character] Clerk Nettle's Rival: A rival correction clerk could eventually challenge Clerk Nettle's careful local authority, introducing a procedural antagonist who questions the rules.
-- [Location] Bell Orchard: A branch could later open into a bell orchard where departures grow like fruit and time is measured by chimes rather than clocks.
 - [Event] Transit Robbery: A later tram ride could erupt into a robbery that introduces new characters and turns the network from eerie logistics into an active action plotline.
 
 - [Character] The Clockwork Gnome's Apprentice: A small gnome apprentice who repairs the clockwork trams but speaks only in riddles about lost time, hinting at a deeper temporal anomaly tied to the protagonist's missing past.
 - [Location] The Echoing Orchard: A hidden orchard where fallen apples replay the sounds of tram departures, serving as a memory archive that only reveals one clue per season.
-- [Object] The Fifth-Notch Compass: A brass compass that spins when the protagonist's altered hand is near, pointing toward places where identity corrections are being made.
 
 - [Character] The Chrono-Swallower of Forgotten Lullabies: A frog with translucent skin that absorbs the weight of memories and releases them as glowing lullaby notes when it leaps. It cannot forget, only transform.
 - [Location] The Library of Unwritten Apologies: A subterranean vault where glass shelves hold books that have never been written—each page glows faintly with the emotional residue of unsaid words. The air hums with the sound of futures being mourned.
@@ -97,7 +94,6 @@ Suggested format:
 - [Event] The Day the Moon Forgot How to Reflect: A celestial event where the moon emits its own dreams instead of light, and those who gaze into it hear fragments of conversations between people they will never meet. The dreams are so vivid they cause temporary empathy with strangers.
 
 - [Character] The Chrono-Spider Who Forgot Her Name: A frog who operates a tram made of frozen moonlight, but only when the moon is upside down. She remembers every passenger's secret dream, yet cannot recall her own.
-- [Location] The Library That Grows Teeth: An underground glass village where books sprout tiny fangs and chew on forgotten stories. The walls are made of polished obsidian that hums lullabies in reverse.
 - [Event] The Day the Rain Sang Backward: Rain falls upward, but each drop carries a reversed sentence from someone's last thought. When it lands on a tram, the frog conductor must recite it backward to keep the vehicle moving.
 
 - [Character] The Gutter-Singer of Unwritten Melodies: A frog who sings songs that haven't been composed yet, and when heard by others, those melodies become real in the air for a moment before dissolving into static.
@@ -123,7 +119,6 @@ Suggested format:
 
 - [Character] The Gloom-Singer: A frog who communicates solely through subsonic vibrations that cause nearby glass structures to hum in reverse, creating temporary symphonies of disorientation. Their voice is felt more than heard, and only those with porous skin can resonate with it.
 - [Location] The Luminous Tunnels of Melted Mirrors: An underground network where every reflection is a living memory. Step into one, and the glass remembers your face as you were at age seven, but it also shows what you might become if you stepped through. The tunnels shift when no one is looking.
-- [Event] The Day the Rain Fell Upward: For exactly 17 minutes, gravity reverses in a single district of glass villages. People walk on ceilings, water drips from the sky, and tram frogs ride upward currents like commuters on an inverted bus. No one knows why it happens—only that it always ends with a chorus sung by the frogs' bellies.
 
 - [Character] The Librarian Who Breathes Ink from Unwritten Stories: A being composed of shifting parchment and ink that exists only when a story is born, absorbing the narrative weight of every sentence spoken aloud.
 - [Location] The Library of Forgotten Echoes: A tower where books are written in languages that dissolve into sound the moment they are read, and the walls remember every unheard whisper.

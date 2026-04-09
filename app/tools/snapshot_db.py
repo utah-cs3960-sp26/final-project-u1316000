@@ -28,29 +28,50 @@ def sanitize_label(label: str) -> str:
     return cleaned or "snapshot"
 
 
+def create_snapshot(
+    database_path: str | Path,
+    *,
+    name: str | None = None,
+    output_dir: str | Path | None = None,
+) -> Path:
+    resolved_database_path = Path(database_path).expanduser().resolve()
+    if not resolved_database_path.exists():
+        raise FileNotFoundError(f"Database does not exist: {resolved_database_path}")
+
+    resolved_output_dir = (
+        Path(output_dir).expanduser().resolve()
+        if output_dir is not None
+        else resolved_database_path.parent / "db_snapshots"
+    )
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    label = sanitize_label(name) if name else timestamp
+    snapshot_name = f"{resolved_database_path.stem}-{label}.db"
+    snapshot_path = resolved_output_dir / snapshot_name
+
+    if snapshot_path.exists():
+        snapshot_name = f"{resolved_database_path.stem}-{label}-{timestamp}.db"
+        snapshot_path = resolved_output_dir / snapshot_name
+
+    shutil.copy2(resolved_database_path, snapshot_path)
+    return snapshot_path
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
     settings = Settings.from_env()
-    database_path = settings.database_path.resolve()
-    if not database_path.exists():
-        print(f"Database does not exist: {database_path}", file=sys.stderr)
-        raise SystemExit(1)
-
-    output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else database_path.parent / "db_snapshots"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    label = sanitize_label(args.name) if args.name else timestamp
-    snapshot_name = f"{database_path.stem}-{label}.db"
-    snapshot_path = output_dir / snapshot_name
-
-    if snapshot_path.exists():
-        snapshot_name = f"{database_path.stem}-{label}-{timestamp}.db"
-        snapshot_path = output_dir / snapshot_name
-
-    shutil.copy2(database_path, snapshot_path)
+    try:
+        snapshot_path = create_snapshot(
+            settings.database_path,
+            name=args.name,
+            output_dir=args.output_dir,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
     print(snapshot_path)
 
 
