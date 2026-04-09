@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import re
 import sqlite3
 from typing import Any
 
 from app.database import fetch_all, fetch_one
-from app.models import GenerationCandidate
+from app.models import ChoiceReplace, GenerationCandidate
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 
@@ -54,6 +55,64 @@ class StoryGraphService:
         choices = fetch_all(self.connection, "SELECT * FROM choices ORDER BY id")
         self._decode_choice_rows(choices)
         return choices
+
+    def count_open_choices(self, *, branch_key: str | None = None) -> int:
+        query = """
+            SELECT COUNT(*) AS count
+            FROM choices c
+            JOIN story_nodes sn ON sn.id = c.from_node_id
+            WHERE c.to_node_id IS NULL AND c.status = 'open'
+        """
+        params: list[Any] = []
+        if branch_key is not None:
+            query += " AND sn.branch_key = ?"
+            params.append(branch_key)
+        row = fetch_one(self.connection, query, tuple(params))
+        return int(row["count"]) if row else 0
+
+    def count_total_choices_for_node(self, node_id: int) -> int:
+        row = fetch_one(
+            self.connection,
+            "SELECT COUNT(*) AS count FROM choices WHERE from_node_id = ?",
+            (node_id,),
+        )
+        return int(row["count"]) if row else 0
+
+    def count_open_choices_for_node(self, node_id: int) -> int:
+        row = fetch_one(
+            self.connection,
+            "SELECT COUNT(*) AS count FROM choices WHERE from_node_id = ? AND to_node_id IS NULL AND status = 'open'",
+            (node_id,),
+        )
+        return int(row["count"]) if row else 0
+
+    def build_frontier_budget_state(
+        self,
+        *,
+        branch_key: str | None = None,
+        branching_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        budget = (branching_policy or {}).get("frontier_budget") or {}
+        soft_limit = int(budget.get("soft_open_choice_limit", 48))
+        hard_limit = int(budget.get("hard_open_choice_limit", 72))
+        open_choice_count = self.count_open_choices(branch_key=branch_key)
+        if open_choice_count >= hard_limit:
+            pressure = "hard"
+            reason = "Open frontier is above the hard limit. Fresh branching should be exceptional."
+        elif open_choice_count >= soft_limit:
+            pressure = "soft"
+            reason = "Open frontier is above the soft limit. Prefer merges, closures, and narrow continuation."
+        else:
+            pressure = "normal"
+            reason = "Open frontier is within budget."
+        return {
+            "open_choice_count": open_choice_count,
+            "soft_open_choice_limit": soft_limit,
+            "hard_open_choice_limit": hard_limit,
+            "pressure_level": pressure,
+            "within_budget": pressure == "normal",
+            "reason": reason,
+        }
 
     def get_branch_start_node(self, branch_key: str) -> dict[str, Any] | None:
         return fetch_one(
@@ -106,6 +165,8 @@ class StoryGraphService:
                 (node_id,),
             ):
                 self._decode_choice(choice)
+                if choice["status"] in {"parked", "closed"}:
+                    continue
                 scene_choices.append(
                     {
                         "id": int(choice["id"]),
@@ -372,6 +433,92 @@ class StoryGraphService:
         self._decode_choice(choice)
         return choice
 
+    def replace_choice(self, choice_id: int, payload: ChoiceReplace) -> dict[str, Any]:
+        existing = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if existing is None:
+            raise ValueError(f"Unknown choice id: {choice_id}")
+        self.connection.execute(
+            """
+            UPDATE choices
+            SET choice_text = ?,
+                to_node_id = ?,
+                status = ?,
+                notes = ?,
+                created_at = created_at
+            WHERE id = ?
+            """,
+            (
+                payload.choice_text.strip(),
+                payload.to_node_id,
+                payload.status,
+                payload.notes,
+                choice_id,
+            ),
+        )
+        self.connection.commit()
+        choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if choice is None:
+            return {}
+        self._decode_choice(choice)
+        return choice
+
+    def park_choices(self, choice_ids: list[int]) -> int:
+        unique_ids = sorted({int(choice_id) for choice_id in choice_ids})
+        if not unique_ids:
+            return 0
+        placeholders = ",".join("?" for _ in unique_ids)
+        cursor = self.connection.execute(
+            f"UPDATE choices SET status = 'parked' WHERE id IN ({placeholders}) AND status = 'open'",
+            tuple(unique_ids),
+        )
+        self.connection.commit()
+        return int(cursor.rowcount or 0)
+
+    def set_choice_status(self, choice_id: int, status: str) -> dict[str, Any]:
+        self.connection.execute(
+            "UPDATE choices SET status = ? WHERE id = ?",
+            (status, choice_id),
+        )
+        self.connection.commit()
+        choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if choice is None:
+            return {}
+        self._decode_choice(choice)
+        return choice
+
+    def list_closed_leaf_candidates(
+        self,
+        *,
+        branch_key: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT
+                leaf.id AS leaf_node_id,
+                leaf.parent_node_id,
+                leaf.title AS leaf_title,
+                parent.title AS parent_title,
+                traversed.id AS traversed_choice_id,
+                traversed.choice_text AS traversed_choice_text
+            FROM story_nodes leaf
+            JOIN story_nodes parent ON parent.id = leaf.parent_node_id
+            JOIN choices traversed ON traversed.to_node_id = leaf.id
+            LEFT JOIN choices child ON child.from_node_id = leaf.id
+            WHERE leaf.parent_node_id IS NOT NULL
+        """
+        params: list[Any] = []
+        if branch_key is not None:
+            query += " AND leaf.branch_key = ?"
+            params.append(branch_key)
+        query += """
+            GROUP BY leaf.id, leaf.parent_node_id, leaf.title, parent.title, traversed.id, traversed.choice_text
+            HAVING SUM(CASE WHEN child.to_node_id IS NULL AND child.status = 'open' THEN 1 ELSE 0 END) = 0
+            ORDER BY leaf.id DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        return fetch_all(self.connection, query, tuple(params))
+
     def get_choice(self, choice_id: int) -> dict[str, Any] | None:
         choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
         if choice is None:
@@ -538,10 +685,18 @@ class StoryGraphService:
         query += " ORDER BY c.created_at ASC, c.id ASC"
         rows = fetch_all(self.connection, query, tuple(params))
         items: list[dict[str, Any]] = []
+        global_budget = self.build_frontier_budget_state(branch_key=branch_key, branching_policy=branching_policy)
         for row in rows:
             branch = branch_state_service.get_branch_state(row["branch_key"])
             branch_shape = self.describe_branch_shape(row["branch_key"], branching_policy=branching_policy)
-            score, reason = self._score_frontier_item(row=row, branch=branch, branch_shape=branch_shape)
+            choice = self.get_choice(int(row["id"])) or {}
+            score, reason = self._score_frontier_item(
+                row=row,
+                branch=branch,
+                branch_shape=branch_shape,
+                global_budget=global_budget,
+                choice=choice,
+            )
             item = {
                 "branch_key": row["branch_key"],
                 "from_node_id": row["from_node_id"],
@@ -556,6 +711,10 @@ class StoryGraphService:
                 "available_affordances": branch_state_service.list_available_affordances(row["branch_key"]),
                 "recurring_entities": branch["recurring_entities"],
                 "branch_shape": branch_shape,
+                "frontier_budget_state": global_budget,
+                "from_node_total_choice_count": self.count_total_choices_for_node(int(row["from_node_id"])),
+                "from_node_open_choice_count": self.count_open_choices_for_node(int(row["from_node_id"])),
+                "bound_idea": choice.get("idea_binding"),
                 "selection_score": score,
                 "selection_reason": reason,
                 "created_at": row["created_at"],
@@ -600,15 +759,44 @@ class StoryGraphService:
             parent_node=parent_node,
             candidate=candidate,
         )
+        floating_intro_reference_ids = {
+            int(intro.character_id)
+            for intro in candidate.floating_character_introductions
+        }
+        existing_reference_keys = {
+            (item["entity_type"], int(item["entity_id"]))
+            for item in inherited_referenced_entities
+            if item.get("entity_id") is not None
+        }
+        for character_id in sorted(floating_intro_reference_ids):
+            key = ("character", character_id)
+            if key in existing_reference_keys:
+                continue
+            inherited_referenced_entities.append(
+                {
+                    "entity_type": "character",
+                    "entity_id": character_id,
+                    "role": "introduced",
+                }
+            )
+            existing_reference_keys.add(key)
         inherited_present_entities = self._inherit_present_entities(
             parent_node=parent_node,
             candidate=candidate,
         )
+        floating_intro_text = "\n\n".join(
+            intro.intro_text.strip()
+            for intro in candidate.floating_character_introductions
+            if intro.intro_text.strip()
+        )
+        scene_text = candidate.scene_text.strip()
+        if floating_intro_text:
+            scene_text = f"{floating_intro_text}\n\n{scene_text}" if scene_text else floating_intro_text
         with self.connection:
             node = self.create_story_node(
                 branch_key=request_branch_key,
                 title=candidate.scene_title,
-                scene_text=candidate.scene_text,
+                scene_text=scene_text,
                 summary=candidate.scene_summary,
                 parent_node_id=parent_node_id,
                 dialogue_lines=[line.model_dump() for line in candidate.dialogue_lines],
@@ -642,17 +830,25 @@ class StoryGraphService:
                         from_node_id=new_node_id,
                         choice_text=choice.choice_text,
                         to_node_id=target_node_id,
-                        status="fulfilled" if target_node_id is not None else "open",
+                        status=(
+                            "closed"
+                            if choice.choice_class == "ending" and target_node_id is None
+                            else "fulfilled" if target_node_id is not None else "open"
+                        ),
                         notes=(
                             json.dumps(
                                 {
                                     "required_affordances": choice.required_affordances,
                                     "notes": choice.notes,
+                                    "choice_class": choice.choice_class,
+                                    "ending_category": choice.ending_category,
                                     "target_node_id": target_node_id,
                                 }
                             )
                             if choice.required_affordances or choice.notes
                             or target_node_id is not None
+                            or choice.choice_class is not None
+                            or choice.ending_category is not None
                             else None
                         ),
                         commit=False,
@@ -891,6 +1087,7 @@ class StoryGraphService:
             "branch_tags",
             "story_hooks",
             "story_direction_notes",
+            "worldbuilding_notes",
         ]
         counts: dict[str, int] = {}
         for table_name in table_names:
@@ -989,6 +1186,8 @@ class StoryGraphService:
             choice["notes_data"] = None
             choice["planning"] = None
             choice["idea_binding"] = None
+            choice["choice_class"] = None
+            choice["ending_category"] = None
             return
         try:
             decoded = json.loads(raw_notes)
@@ -998,10 +1197,14 @@ class StoryGraphService:
             choice["notes_data"] = decoded
             planning_source = decoded.get("notes")
             choice["idea_binding"] = decoded.get("idea_binding")
+            choice["choice_class"] = decoded.get("choice_class")
+            choice["ending_category"] = decoded.get("ending_category")
         else:
             choice["notes_data"] = None
             planning_source = raw_notes
             choice["idea_binding"] = None
+            choice["choice_class"] = None
+            choice["ending_category"] = None
         choice["planning"] = self._parse_choice_planning(planning_source)
 
     def _parse_choice_planning(self, raw_notes: str | None) -> dict[str, str] | None:
@@ -1021,6 +1224,8 @@ class StoryGraphService:
         row: dict[str, Any],
         branch: dict[str, Any],
         branch_shape: dict[str, Any],
+        global_budget: dict[str, Any],
+        choice: dict[str, Any] | None = None,
     ) -> tuple[float, str]:
         active_hooks = len(branch["active_hooks"])
         eligible_major = len(branch["eligible_major_hooks"])
@@ -1028,6 +1233,11 @@ class StoryGraphService:
         affordances = len(branch["affordances"])
         recurring_entities = len(branch["recurring_entities"])
         depth = int(branch["branch_depth"])
+        sibling_open_choices = self.count_open_choices_for_node(int(row["from_node_id"]))
+        total_choices = self.count_total_choices_for_node(int(row["from_node_id"]))
+        choice = choice or {}
+        choice_class = choice.get("choice_class")
+        has_bound_idea = choice.get("idea_binding") is not None
 
         score = 50.0
         score += min(active_hooks, 5) * 4.0
@@ -1036,13 +1246,40 @@ class StoryGraphService:
         score += min(recurring_entities, 5) * 1.5
         score -= min(blocked_major, 3) * 2.0
         score -= depth * 1.25
+        score -= max(sibling_open_choices - 1, 0) * 2.5
+        score -= max(total_choices - 2, 0) * 1.25
+        if has_bound_idea:
+            score += 6.0
+        if choice_class == "inspection":
+            score -= 4.0
+        elif choice_class in {"progress", "commitment"}:
+            score += 2.0
+        elif choice_class == "ending":
+            score += 1.0
         if branch_shape.get("should_prefer_divergence"):
             score += 8.0
         elif branch_shape.get("merge_pressure_level") == "medium":
             score += 3.0
+        if global_budget.get("pressure_level") == "soft":
+            score += 2.0
+        elif global_budget.get("pressure_level") == "hard":
+            score += 5.0
 
-        if branch_shape.get("should_prefer_divergence"):
+        created_at = row.get("created_at")
+        if created_at:
+            try:
+                created_dt = datetime.strptime(str(created_at), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                age_hours = max((datetime.now(timezone.utc) - created_dt).total_seconds() / 3600.0, 0.0)
+                score += min(age_hours / 6.0, 8.0)
+            except ValueError:
+                pass
+
+        if has_bound_idea:
+            reason = "High-priority continuity target: this leaf carries a bound medium-range idea and should be revisited."
+        elif branch_shape.get("should_prefer_divergence"):
             reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."
+        elif global_budget.get("pressure_level") in {"soft", "hard"} and sibling_open_choices > 1:
+            reason = "Frontier-control target: this parent already has several active siblings, so a merge or closure here would reduce branch sprawl."
         elif eligible_major > 0:
             reason = "Strong candidate: the branch has eligible long-running hooks ready for careful advancement."
         elif affordances > 0:

@@ -21,6 +21,7 @@ from app.models import (
     BackgroundRemovalRequest,
     BranchTagCreate,
     ChoiceCreate,
+    ChoiceReplace,
     ChoiceUpdate,
     GenerationPayload,
     GenerationCandidate,
@@ -30,6 +31,8 @@ from app.models import (
     StoryDirectionNoteUpdate,
     StoryHookCreate,
     StoryNodeCreate,
+    WorldbuildingNoteCreate,
+    WorldbuildingNoteUpdate,
     WorldSeed,
 )
 from app.services.assets import AssetService
@@ -39,6 +42,7 @@ from app.services.generation import LLMGenerationService
 from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 from app.services.story_setup import StorySetupService
+from app.services.worldbuilding import WorldbuildingService
 
 
 PLAYER_DEMO_STORY: dict[str, Any] = {
@@ -1026,6 +1030,37 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown choice id: {choice_id}")
         return choice
 
+    @app.post("/choices/{choice_id}/replace")
+    def replace_choice(choice_id: int, payload: ChoiceReplace, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
+        story = StoryGraphService(db)
+        try:
+            choice = story.replace_choice(choice_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return choice
+
+    @app.get("/worldbuilding")
+    def get_worldbuilding_notes(db: sqlite3.Connection = Depends(get_db)) -> list[dict[str, Any]]:
+        return WorldbuildingService(db).list_notes()
+
+    @app.post("/worldbuilding")
+    def create_worldbuilding_note(
+        payload: WorldbuildingNoteCreate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        return WorldbuildingService(db).create_note(**payload.model_dump())
+
+    @app.post("/worldbuilding/{note_id}")
+    def update_worldbuilding_note(
+        note_id: int,
+        payload: WorldbuildingNoteUpdate,
+        db: sqlite3.Connection = Depends(get_db),
+    ) -> dict[str, Any]:
+        try:
+            return WorldbuildingService(db).update_note(note_id, **payload.model_dump(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/jobs/generation-stub")
     @app.post("/jobs/generation-preview")
     def create_generation_preview(payload: GenerationPayload, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
@@ -1033,6 +1068,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         story = StoryGraphService(db)
         branch_state = BranchStateService(db, app.state.llm_generation.story_bible["acts"])
         story_notes = StoryDirectionService(db)
+        worldbuilding = WorldbuildingService(db)
         current_node_id = payload.current_node_id
         if current_node_id is None and payload.choice_id is not None:
             choice = next((choice for choice in story.list_choices() if int(choice["id"]) == payload.choice_id), None)
@@ -1043,6 +1079,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             canon=canon,
             branch_state=branch_state,
             story_notes=story_notes,
+            worldbuilding=worldbuilding,
             story_graph=story,
             focus_entity_ids=payload.focus_entity_ids,
             current_node_id=current_node_id,

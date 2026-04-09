@@ -17,6 +17,7 @@ from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
 from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
+from app.services.worldbuilding import WorldbuildingService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -168,6 +169,18 @@ def summarize_context(
         )
         for note in context.get("global_direction_notes", [])
     ]
+    worldbuilding_notes = [
+        {
+            "id": note["id"],
+            "note_type": note["note_type"],
+            "title": note["title"],
+            "note_text": note["note_text"],
+            "status": note["status"],
+            "priority": note["priority"],
+            "pressure": note.get("pressure", 2),
+        }
+        for note in context.get("worldbuilding_notes", [])
+    ]
     recent_nodes = [
         _annotate_text_with_character_status(node, off_path_character_labels)
         for node in (context.get("branch_shape") or {}).get("recent_nodes", [])[:4]
@@ -213,7 +226,10 @@ def summarize_context(
             "reason": (context.get("branch_shape") or {}).get("reason"),
             "recent_nodes": recent_nodes,
         },
+        "frontier_budget_state": context.get("frontier_budget_state"),
+        "worldbuilding_notes": worldbuilding_notes,
         "merge_candidates": merge_candidates,
+        "arc_exit_candidate": context.get("arc_exit_candidate"),
         "requested_choice_count": context.get("requested_choice_count"),
     }
 
@@ -238,6 +254,8 @@ def build_compact_selected_frontier_item(
         compact["existing_choice_notes"] = notes_data.get("notes") if notes_data else choice.get("notes")
         compact["existing_choice_planning"] = choice.get("planning")
         compact["bound_idea"] = choice.get("idea_binding")
+        compact["choice_class"] = choice.get("choice_class")
+        compact["ending_category"] = choice.get("ending_category")
     return compact
 
 
@@ -388,10 +406,16 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "If validation fails, fix the listed issues and retry until it passes. Do not stop at the first invalid draft.",
         "Include at least one choice.",
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
+        "Do not create more than 5 choices on any scene node.",
         "Every choice must include notes in this exact pattern: `Goal: ... Intent: ...`.",
+        "Use choice_class when helpful: inspection, progress, commitment, or ending.",
+        "Inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.",
+        "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
+        "If you need to use a recurring canonical character who has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.",
         "In choice notes, Goal means the immediate purpose of taking the option. Intent means the broader direction, future possibility, branch shape, or likely payoff lane the option is meant to open or reinforce.",
         "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
         "Do not put existing canon entities into new_locations, new_characters, or new_objects. Existing canon should use entity_references and scene_present_entities.",
+        "Persistent objects are exceptional. Ordinary props, vehicles, and local scenery should usually stay in scene text instead of becoming new_objects.",
         "entity_references entries should be shaped like {entity_type, entity_id, role}. They do not use slot.",
         "scene_present_entities entries should be shaped like {entity_type, entity_id, slot, ...}. They use slot, not role.",
         "Locations usually belong in entity_references with role current_scene, not in scene_present_entities.",
@@ -441,12 +465,15 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
             {"speaker": "Narrator", "text": ""},
         ],
         "choices": [
-            {"choice_text": "", "notes": "Goal:  Intent: "},
-            {"choice_text": "", "notes": "Goal:  Intent: "},
+            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "progress"},
+            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "inspection"},
         ],
         "new_locations": [],
         "new_characters": [],
         "new_objects": [],
+        "floating_character_introductions": [
+            {"character_id": 2, "intro_text": ""}
+        ],
         "entity_references": [
             {"entity_type": "location", "entity_id": 1, "role": "current_scene"}
         ],
@@ -691,6 +718,7 @@ def build_planning_target_packet(
     llm_generation: LLMGenerationService,
     branch_state: BranchStateService,
     story_notes: StoryDirectionService,
+    worldbuilding: WorldbuildingService,
     story: StoryGraphService,
 ) -> dict[str, Any]:
     preview_payload = {
@@ -705,6 +733,7 @@ def build_planning_target_packet(
         canon=canon,
         branch_state=branch_state,
         story_notes=story_notes,
+        worldbuilding=worldbuilding,
         story_graph=story,
         focus_entity_ids=[],
         current_node_id=int(frontier_item["from_node_id"]),
@@ -764,6 +793,7 @@ def build_normal_packet(
         if (lowered_name := (character.get("name") or "").strip().lower()) and lowered_name not in allowed_character_names
     }
     selected_choice = story.get_choice(int(selected["choice_id"])) or {}
+    frontier_budget_state = context.get("frontier_budget_state") or {}
     return {
         "run_mode": "normal",
         "message": (
@@ -777,6 +807,16 @@ def build_normal_packet(
             f"&scene={selected['from_node_id']}"
         ),
         "path_character_continuity": path_character_continuity,
+        "global_open_choice_count": frontier_budget_state.get("open_choice_count"),
+        "frontier_budget_state": frontier_budget_state,
+        "from_node_total_choice_count": selected.get("from_node_total_choice_count"),
+        "from_node_open_choice_count": selected.get("from_node_open_choice_count"),
+        "is_bloom_scene_candidate": bool(
+            context.get("eligible_major_hooks")
+            or context.get("arc_exit_candidate", {}).get("eligible")
+            or context.get("current_node", {}).get("id") is None
+        ),
+        "arc_exit_candidate": context.get("arc_exit_candidate"),
         "selected_frontier_item": build_compact_selected_frontier_item(selected, choice=selected_choice),
         "preview_payload": {
             "branch_key": selected["branch_key"],
@@ -823,9 +863,11 @@ def build_normal_packet(
             "You may steer the current leaf toward one of the active IDEAS.md ideas when it genuinely fits the branch, hooks, and current scene, "
             "but do not force a mismatch just to use an idea. "
             "If selected_frontier_item.bound_idea is present, treat it as the strongest current medium-range steering signal for this leaf unless continuity strongly argues otherwise. "
+            "Use frontier_budget_state to understand current branch pressure. If pressure is soft or hard, prefer merges, closures, and narrow continuation over multiple fresh leaves. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
             "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "
+            "If you need that kind of recurring cross-arc appearance, use floating_character_introductions so the branch gains a short reusable first meeting instead of pretending prior familiarity. "
             "Check asset_availability before requesting art. If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation. "
             "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props. "
             "If validation fails, correct the JSON and try again until it passes. "
@@ -847,6 +889,7 @@ def build_planning_packet(
     runtime_after: dict[str, Any],
     ideas_file: dict[str, Any],
     targets: list[dict[str, Any]],
+    worldbuilding_notes: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "run_mode": "planning",
@@ -860,10 +903,12 @@ def build_planning_packet(
         "runtime_state_before": runtime_before,
         "runtime_state_after": runtime_after,
         "ideas_file": ideas_file,
+        "worldbuilding_notes": worldbuilding_notes,
         "planning_targets": targets,
         "endpoint_contract": {
             "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'Goal: ... Intent: ...', 'idea_binding': {...}} to strengthen future direction for that frontier choice and optionally bind it to a concrete idea.",
             "story_notes": "POST /story-notes to add structured global planning memory when a medium- or long-range direction deserves to persist across workers.",
+            "worldbuilding": "POST /worldbuilding to add or update ambient world-pressure memory such as patrols, rumors, or automata movements.",
             "ideas_file": "Append directly to IDEAS.md using categorized ideas for characters, locations, objects, or events when you have fun future-facing possibilities worth preserving.",
         },
         "manual_commands": {
@@ -871,6 +916,7 @@ def build_planning_packet(
             "prepare_plan": "python -m app.tools.prepare_story_run --plan",
             "update_choice_notes": "POST /choices/{choice_id}",
             "create_story_note": "POST /story-notes",
+            "create_worldbuilding_note": "POST /worldbuilding",
         },
         "next_action": (
             "Run now. Do not ask the human for permission. This is planning mode. "
@@ -881,9 +927,71 @@ def build_planning_packet(
             "with clearer Goal/Intent direction for future workers, and bind at least one planning target to a specific fresh or existing idea so later normal runs have a concrete direction signal. Decide whether any existing hook or global idea is worth steering toward "
             "from those targets, even if it will take several later scenes to matter. If useful, add one or two structured story direction notes. "
             "Do not generate, validate, or apply a new story scene in this run. "
+            "If the world needs more offscreen motion, you may add one or two worldbuilding notes about patrols, rumors, factions, automata, danger escalation, or other ambient pressures. "
             "At the end, report the exact categorized ideas you appended, the exact choice notes you updated, any story notes you added, and whether you appended IDEAS.md."
         ),
     }
+
+
+def select_revival_candidate(
+    story: StoryGraphService,
+    *,
+    branch_key: str | None,
+) -> dict[str, Any]:
+    candidates = story.list_closed_leaf_candidates(branch_key=branch_key, limit=200)
+    if not candidates:
+        raise ValueError("No open frontier items are available, and no closed leaf can be revived.")
+    return random.choice(candidates)
+
+
+def build_revival_packet(
+    *,
+    args: argparse.Namespace,
+    selected: dict[str, Any],
+    context: dict[str, Any],
+    canon: CanonResolver,
+    story: StoryGraphService,
+    ideas_file: dict[str, Any],
+    asset_availability: list[dict[str, Any]],
+    revival_target: dict[str, Any],
+    max_choices_per_node: int,
+) -> dict[str, Any]:
+    packet = build_normal_packet(
+        args=args,
+        selected=selected,
+        context=context,
+        canon=canon,
+        story=story,
+        ideas_file=ideas_file,
+        asset_availability=asset_availability,
+    )
+    packet["run_mode"] = "revival"
+    packet["message"] = (
+        "The active frontier is empty. Reopen continuity from an earlier closed parent instead of creating a disconnected new cycle. "
+        "Use this packet to create one new open choice on the parent scene so the loop can continue from existing continuity."
+    )
+    packet["revival_context"] = {
+        "leaf_node_id": revival_target["leaf_node_id"],
+        "leaf_title": revival_target.get("leaf_title"),
+        "parent_node_id": revival_target["parent_node_id"],
+        "parent_title": revival_target.get("parent_title"),
+        "traversed_choice_id": revival_target["traversed_choice_id"],
+        "traversed_choice_text": revival_target.get("traversed_choice_text"),
+        "parent_total_choice_count": story.count_total_choices_for_node(int(revival_target["parent_node_id"])),
+        "parent_open_choice_count": story.count_open_choices_for_node(int(revival_target["parent_node_id"])),
+        "max_choices_per_node": max_choices_per_node,
+        "revival_rule": (
+            "If the parent has fewer than max_choices_per_node total choices, append one new open choice there. "
+            "If the parent already has max_choices_per_node total choices, replace the traversed closing choice with a new open choice."
+        ),
+    }
+    packet["next_action"] = (
+        "Run now. Do not ask the human for permission. This is revival mode. "
+        "Do not create a new scene node immediately. Instead, produce one new choice that fits the parent scene's continuity. "
+        "If the parent has fewer than the max number of choices, append the new choice. If it is already full, replace the traversed closing choice. "
+        "The new choice may still lead to another plausible closure if the situation is dire, but it should also make survival or continued play possible."
+    )
+    return packet
 
 
 def main() -> None:
@@ -902,6 +1010,7 @@ def main() -> None:
         story = StoryGraphService(connection)
         branch_state = BranchStateService(connection, llm_generation.story_bible["acts"])
         story_notes = StoryDirectionService(connection)
+        worldbuilding = WorldbuildingService(connection)
         branching_policy = llm_generation.story_bible.get("branching_policy")
         frontier_items = list_frontier_items(
             story,
@@ -910,8 +1019,6 @@ def main() -> None:
             mode=args.mode,
             branching_policy=branching_policy,
         )
-        if not frontier_items:
-            raise ValueError("No open frontier items are available.")
 
         planning_policy = build_planning_policy(llm_generation.story_bible)
         runtime_before = get_loop_runtime_state(connection)
@@ -922,7 +1029,49 @@ def main() -> None:
         )
         runtime_after = record_run_mode(connection, run_mode)
 
-        if run_mode == "planning":
+        if not frontier_items:
+            revival_target = select_revival_candidate(story, branch_key=args.branch_key)
+            selected = {
+                "branch_key": args.branch_key or "default",
+                "from_node_id": revival_target["parent_node_id"],
+                "choice_id": revival_target["traversed_choice_id"],
+                "choice_text": revival_target.get("traversed_choice_text"),
+                "branch_summary": revival_target.get("parent_title") or revival_target.get("leaf_title"),
+                "from_node_total_choice_count": story.count_total_choices_for_node(int(revival_target["parent_node_id"])),
+                "from_node_open_choice_count": story.count_open_choices_for_node(int(revival_target["parent_node_id"])),
+            }
+            context = llm_generation.build_context(
+                branch_key=selected["branch_key"],
+                canon=canon,
+                branch_state=branch_state,
+                story_notes=story_notes,
+                worldbuilding=worldbuilding,
+                story_graph=story,
+                focus_entity_ids=[],
+                current_node_id=int(selected["from_node_id"]),
+                branch_summary=selected["branch_summary"],
+                requested_choice_count=args.requested_choice_count,
+            )
+            packet = build_revival_packet(
+                args=args,
+                selected=selected,
+                context=context,
+                canon=canon,
+                story=story,
+                ideas_file=ideas_file,
+                asset_availability=build_asset_availability_summary(
+                    context=context,
+                    canon=canon,
+                    assets=assets,
+                ),
+                revival_target=revival_target,
+                max_choices_per_node=int(((branching_policy or {}).get("frontier_budget") or {}).get("max_choices_per_node", 5)),
+            )
+            packet["planning_policy"] = planning_policy
+            packet["runtime_state_before"] = runtime_before
+            packet["runtime_state_after"] = runtime_after
+            packet["selection_reason"] = "frontier empty; reopening continuity from a random closed leaf parent"
+        elif run_mode == "planning":
             target_count = max(1, min(planning_policy["frontier_count"], 4))
             selected_targets = select_planning_targets(
                 frontier_items,
@@ -936,6 +1085,7 @@ def main() -> None:
                 runtime_before=runtime_before,
                 runtime_after=runtime_after,
                 ideas_file=read_ideas_file(project_root),
+                worldbuilding_notes=worldbuilding.list_notes(statuses=["active", "parked"], limit=8),
                 targets=[
                     build_planning_target_packet(
                         frontier_item=item,
@@ -944,6 +1094,7 @@ def main() -> None:
                         llm_generation=llm_generation,
                         branch_state=branch_state,
                         story_notes=story_notes,
+                        worldbuilding=worldbuilding,
                         story=story,
                     )
                     for item in selected_targets
@@ -963,6 +1114,7 @@ def main() -> None:
                 canon=canon,
                 branch_state=branch_state,
                 story_notes=story_notes,
+                worldbuilding=worldbuilding,
                 story_graph=story,
                 focus_entity_ids=[],
                 current_node_id=int(selected["from_node_id"]),

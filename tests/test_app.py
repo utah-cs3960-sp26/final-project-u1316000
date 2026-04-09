@@ -21,6 +21,7 @@ from app.services.story_graph import StoryGraphService
 from app.tools.run_story_worker_local import (
     PlanningIdea,
     build_asset_prompt,
+    collect_character_continuity_issues,
     get_planning_idea_issues,
     infer_missing_asset_requests,
     normalize_generation_candidate_payload,
@@ -67,6 +68,7 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "branch_tags",
         "story_hooks",
         "story_direction_notes",
+        "worldbuilding_notes",
     }.issubset(tables)
 
 
@@ -1683,6 +1685,340 @@ def test_prepare_story_run_random_plan_respects_cooldown_and_chance(tmp_path: Pa
     assert json.loads(first.stdout)["run_mode"] == "normal"
     assert json.loads(second.stdout)["run_mode"] == "normal"
     assert json.loads(third.stdout)["run_mode"] == "planning"
+
+
+def test_prepare_story_run_outputs_revival_packet_when_frontier_empty(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        opening_choice = connection.execute(
+            "SELECT id, from_node_id FROM choices WHERE to_node_id IS NULL AND status = 'open' ORDER BY id LIMIT 1"
+        ).fetchone()
+        assert opening_choice is not None
+        opening_choice_id = int(opening_choice["id"])
+        parent_node_id = int(opening_choice["from_node_id"])
+
+    apply_response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": parent_node_id,
+            "choice_id": opening_choice_id,
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Short Dead End",
+                "scene_summary": "A tiny branch closes immediately.",
+                "scene_text": "The path narrows into a polite dead end with nowhere else to go.",
+                "entity_references": [
+                    {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+                ],
+                "choices": [
+                    {
+                        "choice_text": "Accept the dead end",
+                        "notes": "Goal: finish this doomed side path cleanly. Intent: close the branch so revival logic has something to reopen later.",
+                        "choice_class": "ending",
+                        "ending_category": "dead_end",
+                    }
+                ],
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+
+    with connect(db_path) as connection:
+        open_rows = connection.execute(
+            "SELECT id FROM choices WHERE status = 'open'"
+        ).fetchall()
+        for row in open_rows:
+            StoryGraphService(connection).set_choice_status(int(row["id"]), "closed")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.tools.prepare_story_run",
+            "--play-base-url",
+            "http://127.0.0.1:8001",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_PLANNING_ROLL": "1.0",
+        },
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert packet["run_mode"] == "revival"
+    assert packet["selection_reason"].startswith("frontier empty; reopening continuity")
+    assert packet["revival_context"]["max_choices_per_node"] == 5
+    with connect(db_path) as connection:
+        candidate_pairs = {
+            (int(row["parent_node_id"]), int(row["traversed_choice_id"]))
+            for row in StoryGraphService(connection).list_closed_leaf_candidates(branch_key="default", limit=50)
+        }
+    assert (
+        packet["revival_context"]["parent_node_id"],
+        packet["revival_context"]["traversed_choice_id"],
+    ) in candidate_pairs
+
+
+def test_prepare_story_run_surfaces_worldbuilding_notes_in_normal_packet(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    create_response = client.post(
+        "/worldbuilding",
+        json={
+            "note_type": "patrol_pressure",
+            "title": "Clockwork Patrols",
+            "note_text": "Clockwork patrols have begun pacing the outer tram loops at dusk.",
+            "priority": 4,
+            "pressure": 5,
+        },
+    )
+    assert create_response.status_code == 200
+    note = create_response.json()
+
+    update_response = client.post(
+        f"/worldbuilding/{note['id']}",
+        json={"status": "active", "pressure": 6},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["pressure"] == 6
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.tools.prepare_story_run",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_PLANNING_ROLL": "1.0",
+        },
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    worldbuilding_notes = packet["context_summary"]["worldbuilding_notes"]
+    assert any(note["title"] == "Clockwork Patrols" for note in worldbuilding_notes)
+
+
+def test_rebalance_frontier_parks_excess_choices_and_can_unpark(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    for index in range(3):
+        create_response = client.post(
+            "/choices",
+            json={
+                "from_node_id": 1,
+                "choice_text": f"Extra backlog choice {index + 1}",
+                "status": "open",
+                "notes": json.dumps({"notes": "Goal: create backlog. Intent: stress the frontier rebalance tool."}),
+            },
+        )
+        assert create_response.status_code == 200
+
+    apply_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.tools.rebalance_frontier",
+            "--soft-limit",
+            "1",
+            "--keep-recent-parents",
+            "1",
+            "--apply",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert apply_result.returncode == 0
+    payload = json.loads(apply_result.stdout)
+    assert payload["dry_run"] is False
+    assert payload["parked_count"] >= 1
+    assert payload["park_choice_ids"]
+
+    with connect(db_path) as connection:
+        parked_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM choices WHERE status = 'parked'"
+        ).fetchone()["count"]
+        open_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM choices WHERE status = 'open'"
+        ).fetchone()["count"]
+
+    assert parked_count >= 1
+    assert open_count >= 1
+
+    unpark_choice_id = int(payload["park_choice_ids"][0])
+    unpark_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.tools.rebalance_frontier",
+            "--unpark-choice-id",
+            str(unpark_choice_id),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+    assert unpark_result.returncode == 0
+    unpark_payload = json.loads(unpark_result.stdout)
+    assert unpark_payload["choice"]["status"] == "open"
+
+
+def test_generation_validation_rejects_inspection_fresh_branching_under_frontier_pressure(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        for index in range(50):
+            story.create_choice(
+                from_node_id=1,
+                choice_text=f"Pressure seed {index + 1}",
+                status="open",
+                notes=json.dumps({"notes": "Goal: widen the frontier. Intent: trigger soft frontier pressure."}),
+            )
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "Two inspection options try to widen the frontier again.",
+            "scene_text": "The platform offers small sensory checks instead of a meaningful commitment.",
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "choices": [
+                {
+                    "choice_text": "Inspect the placard lettering",
+                    "notes": "Goal: inspect a tiny local detail for flavor. Intent: open a minor side look that should not become a durable branch under pressure.",
+                    "choice_class": "inspection",
+                },
+                {
+                    "choice_text": "Listen at the bell housing",
+                    "notes": "Goal: inspect another tiny local detail for flavor. Intent: open a second minor side look that should reconverge quickly instead of widening the frontier.",
+                    "choice_class": "inspection",
+                },
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    payload = validation_response.json()
+    assert payload["valid"] is False
+    assert any("Frontier pressure is high" in issue for issue in payload["issues"])
+    assert any("Inspection choices should reconverge quickly" in issue for issue in payload["issues"])
+
+
+def test_floating_character_introduction_allows_recurring_character_and_marks_path(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        opening_choice = connection.execute(
+            "SELECT id, from_node_id FROM choices WHERE to_node_id IS NULL AND status = 'open' ORDER BY id LIMIT 1"
+        ).fetchone()
+        assert opening_choice is not None
+        opening_choice_id = int(opening_choice["id"])
+        parent_node_id = int(opening_choice["from_node_id"])
+
+    seed_response = client.post(
+        "/seed-world",
+        json={
+            "characters": [
+                {
+                    "name": "Madam Bei",
+                    "description": "A poised frog conductor with a patient stare.",
+                }
+            ]
+        },
+    )
+    assert seed_response.status_code == 200
+    madam_bei = next(
+        character for character in client.get("/characters").json()
+        if character["name"] == "Madam Bei"
+    )
+
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "A recurring character appears through a floating first meeting.",
+                "scene_text": "Madam Bei lifts one hand toward the witness bell and waits for your answer.",
+                "choices": [
+                    {
+                        "choice_text": "Ask Madam Bei what she heard",
+                        "notes": "Goal: respond to the new arrival directly. Intent: unlock a reusable recurring character on this branch without pretending an earlier meeting happened.",
+                    }
+                ],
+                "floating_character_introductions": [
+                    {
+                        "character_id": madam_bei["id"],
+                        "intro_text": "A frog conductor steps from the side window, straightens her vest, and introduces herself as Madam Bei.",
+                    }
+                ],
+                "entity_references": [
+                    {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+                    {"entity_type": "character", "entity_id": madam_bei["id"], "role": "introduced"},
+                ],
+                "scene_present_entities": [
+                    {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True},
+                    {"entity_type": "character", "entity_id": madam_bei["id"], "slot": "left-support"},
+                ],
+            }
+        ),
+    )
+
+    continuity_issues = collect_character_continuity_issues(
+        packet={"selected_frontier_item": {"from_node_id": parent_node_id}},
+        candidate=candidate,
+    )
+    assert continuity_issues == []
+
+    apply_response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": parent_node_id,
+            "choice_id": opening_choice_id,
+            "candidate": candidate.model_dump(mode="json"),
+        },
+    )
+    assert apply_response.status_code == 200
+    applied = apply_response.json()
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        lineage_ids = story.list_lineage_entity_ids(int(applied["node"]["id"]), "character")
+        node = story.get_story_node(int(applied["node"]["id"]))
+
+    assert madam_bei["id"] in lineage_ids
+    assert node is not None
+    assert node["scene_text"].startswith(
+        "A frog conductor steps from the side window, straightens her vest, and introduces herself as Madam Bei."
+    )
 
 
 def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path) -> None:

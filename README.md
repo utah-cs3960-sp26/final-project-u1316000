@@ -18,17 +18,20 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 ## Current Capabilities
 - SQLite schema for locations, characters, objects, relations, facts, story nodes, choices, assets, and generation jobs.
 - Story bible plus per-branch state for inventory, affordances, relationship shifts, branch tags, and delayed-payoff hooks.
+- Worldbuilding memory lane for ambient pressure such as rumors, patrols, automata, and broader offscreen motion.
 - FastAPI JSON endpoints for seeding and inspecting world/story data.
 - Browser-based console for manual world setup and story graph inspection.
-- Structured LLM generation preview and validation workflow with hook pacing guardrails.
-- One-scene story expansion loop support with a frontier endpoint and apply-generation writeback.
+- Structured LLM generation preview and validation workflow with hook pacing, frontier-budget, merge, and closure guardrails.
+- Local autonomous story-worker loop support through LM Studio-backed CLI tooling.
+- Frontier budget enforcement, inspection-choice reconvergence pressure, larger arc-exit merge support, and branch-ending support.
+- Empty-frontier revival flow that reopens continuity from an earlier closed parent instead of starting a disconnected cycle.
+- Parked-choice maintenance tooling for reversible frontier cleanup.
 - ComfyUI-backed image generation plus a local Hugging Face background-removal path.
 
 ## What Is Not Built Yet
-- No SQLite-backed player progression or scene rendering pipeline yet.
-- No autonomous story expansion loop.
-- No dialogue playback UI beyond raw story node text inspection.
-- No full SQLite-backed story playback loop or authored scene-layout system beyond the opening demo.
+- No fully polished player-facing game loop yet; `/play` is still a prototype on top of the evolving story graph.
+- No sophisticated authored scene-layout editor beyond the current console and presentation metadata.
+- No fully automatic branch cleanup strategy beyond parking/revival; larger long-range merge behavior still depends on the generation loop and validators rather than a dedicated planner daemon.
 
 ## Quick Start
 1. Create a virtual environment:
@@ -69,6 +72,7 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/services/branch_state.py` per-branch inventory, affordances, tags, relationships, and hooks
 - `app/services/generation.py` story bible loading, context building, and generation validation
 - `app/services/story_graph.py` now also handles frontier listing, scene presentation metadata, and apply-generation writeback
+- `app/services/worldbuilding.py` ambient world-pressure memory and update helpers
 - `app/services/assets.py` asset metadata, job queueing, Hugging Face model download, and background removal
 - `app/services/story_setup.py` soft-reset opening canon and protagonist asset refresh helpers
 - `workflows/comfyui/` ComfyUI workflow templates for editor use and API submission
@@ -79,16 +83,19 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - `app/tools/snapshot_db.py` CLI tool for taking a manual SQLite snapshot before a story session
 - `app/tools/prepare_story_run.py` CLI tool for preparing one compact story-worker packet for the next scene expansion
 - `app/tools/run_story_worker_local.py` CLI tool for running one local LM Studio-backed worker loop
+- `app/tools/rebalance_frontier.py` CLI tool for parking low-priority frontier choices or unparking them later
 - `app/tools/remove_background.py` CLI tool for local background removal
 - `app/tools/download_hf_model.py` CLI tool for downloading model repos into the local cache
 - `tests/test_app.py` integration tests
 
 ## Mental Model
 - The **world graph** stores reusable canon such as locations, characters, relations, and facts.
-- Objects are first-class canon so persistent items can be reused across branches and asset generation.
+- Objects still exist as canon, but persistent objects are now treated as exceptional rather than the default answer for every notable prop.
 - The **choice graph** stores scenes and the choices that connect them.
 - A story node should reference canonical entity IDs rather than duplicating world data in prose.
 - Continuity comes from reusing canonical entities instead of recreating them in each branch.
+- Not every choice deserves a permanent frontier leaf. Inspection beats should usually reconverge, winding-down arcs should deliberately merge, and some branches should truly end.
+- When a recurring character needs to appear on a path where they have not been met yet, the system can use a floating character introduction instead of pretending prior familiarity.
 
 ## Working Conventions
 - Use SQLite as the source of truth.
@@ -97,6 +104,34 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
 - Track player consequences per branch, not in global canon prose.
 - Treat major mysteries as delayed-payoff hooks with both minimum distance and readiness conditions.
 - Keep operator-facing tools separate from any eventual player-facing UI.
+
+## Branch Control and Continuity
+- Branch growth is now actively constrained in code, not just suggested in prompts.
+- `branching_policy.frontier_budget` controls the default branch budget:
+  - `soft_open_choice_limit: 48`
+  - `hard_open_choice_limit: 72`
+  - `max_choices_per_node: 5`
+  - `keep_recent_parent_count: 12`
+  - `default_max_fresh_choices_per_scene: 1`
+  - `allow_second_fresh_choice_only_for_bloom_scenes: true`
+- When frontier pressure is `soft` or `hard`, workers should prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.
+- Choice classes are supported:
+  - `inspection`
+  - `progress`
+  - `commitment`
+  - `ending`
+- Ending choices are allowed and validated. Supported ending categories include:
+  - `death`
+  - `dead_end`
+  - `capture`
+  - `transformation`
+  - `hub_return`
+- Inspection choices are expected to reconverge quickly, especially under frontier pressure.
+- Arc-exit merges are allowed when a local storyline is winding down and the branch state is compatible with a larger reconvergence target.
+- If the active frontier becomes empty, the worker does not just stop. `prepare_story_run` now selects a random closed leaf, walks back to its parent, and enters `revival` mode:
+  - if that parent has fewer than 5 total choices, a new choice is appended
+  - if it already has 5 choices, the traversed closing choice is replaced
+- Choice statuses now include `parked` and `closed` in addition to the earlier open/fulfilled flow. Parked choices stay in history but are hidden from normal frontier selection until unparked.
 
 ## Story Workflow Notes
 - Global canon stays in `locations`, `characters`, `objects`, `relations`, `facts`, and reusable `assets`.
@@ -107,8 +142,8 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - `relationship_states`
   - `branch_tags`
   - `story_hooks`
-- Use `POST /jobs/generation-preview` to build a structured LLM prompt context from the story bible, canon, and branch state.
-- Use `POST /jobs/validate-generation` to check a candidate scene against hook pacing and affordance continuity rules before writing it into the graph.
+- Use `POST /jobs/generation-preview` to build a structured LLM prompt context from the story bible, canon, branch state, frontier pressure, and worldbuilding notes.
+- Use `POST /jobs/validate-generation` to check a candidate scene against hook pacing, affordance continuity, frontier-budget, merge, closure, and object-demotion rules before writing it into the graph.
 - Use `GET /frontier` to pick the next unresolved branch end.
 - Use `POST /jobs/apply-generation` to atomically write a validated scene into the story graph.
 - Use `story_direction_notes` for global planning memory:
@@ -116,14 +151,22 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - future character introductions
   - escalation plans
   - reminders about where a currently small system could lead later
+- Use `worldbuilding_notes` for ambient offscreen pressure:
+  - patrols
+  - rumors
+  - automata activity
+  - faction motion
+  - danger escalation
+  - political pressure
 - Use [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) as the loose shared scratchpad for fun future ideas that you or a worker want to jot down quickly.
-- Hooks are branch-local in-world unresolved threads. Story direction notes are out-of-world planning memory.
+- Hooks are branch-local in-world unresolved threads. Story direction notes are out-of-world planning memory. Worldbuilding notes are world-level ambient pressure memory.
 - Default worker behavior should be `2` or `3` choices per scene, not a rigid `3` forever.
-- Cycles are fine. Merges should be used carefully when branch-local state still lines up.
+- Cycles are fine. Quick merges are one of the main branch-count control tools, and larger merges should be used when branch-local state still lines up.
+- Persistent objects are exceptional. Ordinary props, vehicles, scenery details, and one-off devices should usually stay in scene text, hooks, or worldbuilding rather than becoming reusable canon objects.
+- Stakes, danger, failure, and death are allowed in story generation and are part of the supported closure toolkit.
 - Use `POST /story/reset-opening-canon` to seed the updated bucket-hat protagonist and opening canon.
 - Use `POST /story/seed-opening-story` to seed the SQLite-backed opening branch.
 - Use `POST /story/refresh-protagonist-assets` to register a fresh protagonist portrait and cutout after a design update.
-- Stakes, danger, failure, and death are allowed in story generation, but they should be used deliberately rather than as a default.
 - If you want one rollback point before a session, create it manually with:
   - `python -m app.tools.snapshot_db --name before-session`
 - If you want to hand a fresh thread one compact story-run packet instead of making it inspect the repo first, use:
@@ -132,12 +175,17 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - `python -m app.tools.run_story_worker_local --model <loaded-model-id>`
   - add `--plan` to force planning mode
   - add `--dry-run` to validate or plan without writing changes
+- If you want to reduce frontier sprawl without deleting history, use:
+  - `python -m app.tools.rebalance_frontier`
+  - add `--apply` to actually park choices instead of previewing
+  - add `--unpark-choice-id <id>` to restore a parked choice
 
 ## Asset Pipeline Notes
 - `POST /assets/generate` runs a local ComfyUI workflow and registers the finished file as an asset record.
 - Generation prompts are policy-enforced in code:
   - all assets get the same fixed cinematic fantasy style prefix
-  - `portrait` and `object_render` assets always add a plain white background plus centered full-body subject rules
+  - `portrait` assets always add plain-white-background, single-character, full-body-with-margins rules
+  - `object_render` assets always add plain-white-background, single-object-only, no-extra-props rules
   - `portrait` and `object_render` assets also automatically run through background removal and store a `cutout` asset record
   - LLMs should describe content, mood, lighting, physical details, and hooks, not art style
 - `POST /assets/request` stores an image-job payload in `generation_jobs`.
@@ -160,6 +208,32 @@ Local-first prototype for a branching choose-your-own-adventure system backed by
   - `python -m app.tools.download_hf_model --repo briaai/RMBG-2.0`
   - `hf auth login`
   - `python -m app.tools.remove_background --input path\to\image.png`
+
+## Worker Loop Notes
+- `prepare_story_run` now emits three kinds of packets:
+  - `normal`
+  - `planning`
+  - `revival`
+- Normal packets include:
+  - frontier budget state
+  - current branch pressure
+  - compact worldbuilding notes
+  - path character continuity
+  - arc-exit eligibility hints
+  - bound-idea steering when planning has attached a concrete idea to a frontier choice
+- Planning packets:
+  - do not apply a new story scene
+  - generate fresh ideas
+  - update frontier choice notes
+  - can bind a choice to a specific idea
+  - can create worldbuilding notes for offscreen pressure
+- Revival packets:
+  - happen only when no open frontier items remain
+  - reopen continuity from an earlier closed parent
+  - ask the model for one new choice rather than a full new scene
+- The local runner logs started/succeeded/failed runs to:
+  - `data/worker_logs/local_worker_runs.ndjson`
+- The runner now validates and retries not only for schema problems, but also for branch continuity, art-anchor mistakes, and other guardrail failures surfaced by the validator.
 
 ## Docs
 - Primary onboarding guide: [docs/llm_operations.md](docs/llm_operations.md)

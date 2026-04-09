@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.config import Settings
 from app.database import connect
 from app.main import create_app
-from app.models import DirectionNoteProposal, GenerationCandidate
+from app.models import DirectionNoteProposal, GenerationCandidate, WorldbuildingNoteProposal
 from app.services.assets import AssetService
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
@@ -59,7 +59,18 @@ class PlanningIdeasResult(BaseModel):
 class PlanningFollowthroughResult(BaseModel):
     choice_note_updates: list[PlanningChoiceUpdate] = Field(default_factory=list)
     story_direction_notes: list[DirectionNoteProposal] = Field(default_factory=list)
+    worldbuilding_notes: list[WorldbuildingNoteProposal] = Field(default_factory=list)
     summary: str | None = None
+
+
+class RevivalChoiceResult(BaseModel):
+    choice_text: str
+    notes: str = Field(
+        min_length=20,
+        pattern=r"^Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*$",
+    )
+    choice_class: Literal["inspection", "progress", "commitment", "ending"] | None = None
+    ending_category: Literal["death", "dead_end", "capture", "transformation", "hub_return"] | None = None
 
 
 DISALLOWED_PLANNING_IDEA_SEEDS = {
@@ -238,6 +249,17 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
             "Packet:\n"
             f"{json.dumps(packet, indent=2)}"
         )
+    if packet["run_mode"] == "revival":
+        return (
+            "This is a frontier-revival packet.\n"
+            "Do not generate a new scene node yet.\n"
+            "Return one new choice only for the parent scene so continuity can reopen from an earlier closed branch point.\n"
+            "Use the packet's revival_context exactly.\n"
+            "If the parent scene is already at max choice capacity, the system will replace the traversed closing choice with your new one.\n"
+            "Return only JSON with the revival choice fields.\n\n"
+            "Packet:\n"
+            f"{json.dumps(packet, indent=2)}"
+        )
 
     return (
         "This is a normal story-worker packet.\n"
@@ -265,6 +287,15 @@ def build_response_format(packet: dict[str, Any]) -> dict[str, Any]:
             "type": "json_schema",
             "json_schema": {
                 "name": "planning_followthrough_result",
+                "schema": schema,
+            },
+        }
+    if packet["run_mode"] == "revival":
+        schema = RevivalChoiceResult.model_json_schema()
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "revival_choice_result",
                 "schema": schema,
             },
         }
@@ -328,6 +359,7 @@ def build_planning_followthrough_user_prompt(
         "Use the already-generated fresh ideas in fresh_ideas_for_this_run exactly as the ideas to append for this planning pass.\n"
         "Do not replace them with different ideas and do not return ideas_to_append in this step.\n"
         "Use the planning targets and shared notes in the packet to update choice notes and add any useful structured story notes.\n"
+        "If the setting needs more ambient motion or conflict pressure, you may also add worldbuilding_notes about patrols, rumors, factions, automata, or danger escalation.\n"
         "Bind at least one planning target to a specific idea using bound_idea so later normal runs have a concrete direction signal.\n"
         "If a target fits one of the fresh ideas, prefer binding it. If an existing IDEAS.md idea fits better, you may bind that instead.\n"
         "Return only JSON.\n\n"
@@ -539,10 +571,12 @@ def normalize_generation_candidate_payload(raw_payload: dict[str, Any]) -> dict[
     return payload
 
 
-def parse_llm_result(packet: dict[str, Any], raw_text: str) -> GenerationCandidate | PlanningResult:
+def parse_llm_result(packet: dict[str, Any], raw_text: str) -> GenerationCandidate | PlanningResult | RevivalChoiceResult:
     json_text = extract_json_text(raw_text)
     if packet["run_mode"] == "planning":
         return PlanningFollowthroughResult.model_validate_json(json_text)
+    if packet["run_mode"] == "revival":
+        return RevivalChoiceResult.model_validate_json(json_text)
     raw_payload = json.loads(json_text)
     normalized_payload = normalize_generation_candidate_payload(raw_payload)
     return GenerationCandidate.model_validate(normalized_payload)
@@ -551,6 +585,17 @@ def parse_llm_result(packet: dict[str, Any], raw_text: str) -> GenerationCandida
 def parse_planning_ideas_result(raw_text: str) -> PlanningIdeasResult:
     json_text = extract_json_text(raw_text)
     return PlanningIdeasResult.model_validate_json(json_text)
+
+
+def get_revival_validation_issues(packet: dict[str, Any], result: RevivalChoiceResult) -> list[str]:
+    issues: list[str] = []
+    if result.choice_class == "ending" and result.ending_category is None:
+        issues.append("Revival ending choices must include ending_category.")
+    parent_total = int(((packet.get("revival_context") or {}).get("parent_total_choice_count")) or 0)
+    max_choices = int(((packet.get("revival_context") or {}).get("max_choices_per_node")) or 5)
+    if parent_total > max_choices:
+        issues.append("Revival target parent already exceeds max choice count; clean that parent before reviving it.")
+    return issues
 
 
 def build_validation_retry_user_prompt(
@@ -572,6 +617,7 @@ def build_validation_retry_user_prompt(
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
         "- new_locations/new_characters/new_objects are only for brand-new canon entities and should not carry existing ids.\n"
         "- Existing canon like Madam Bei belongs in entity_references and scene_present_entities, not new_characters.\n"
+        "- If an existing recurring character has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.\n"
         "- entity_references entries must use existing canon ids and should only contain entity_type, entity_id, and role.\n"
         "- scene_present_entities entries are for visible on-screen staging and must use slot, not role.\n"
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
@@ -594,6 +640,22 @@ def build_schema_retry_user_prompt(
     raw_text: str,
     issues: list[str],
 ) -> str:
+    if packet.get("run_mode") == "revival":
+        return (
+            "Your previous revival-choice response did not match the required JSON/schema.\n"
+            "Fix the listed schema issues and return one corrected revival-choice JSON object only.\n"
+            "Do not explain the changes. Do not stop. Keep trying until the JSON parses and validates.\n\n"
+            "Important reminders:\n"
+            "- choice_text is required.\n"
+            "- notes must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+            "- If choice_class is 'ending', include ending_category.\n"
+            "- Return JSON only, with no markdown fences or commentary.\n\n"
+            f"Schema issues:\n{json.dumps(issues, indent=2)}\n\n"
+            "Previous invalid response:\n"
+            f"{raw_text.strip()}\n\n"
+            "Original packet:\n"
+            f"{json.dumps(packet, indent=2)}"
+        )
     return (
         "Your previous response did not match the required JSON/schema.\n"
         "Fix the listed schema issues and return a corrected JSON object only.\n"
@@ -607,6 +669,7 @@ def build_schema_retry_user_prompt(
         "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
         "- new_locations/new_characters/new_objects are only for brand-new canon entities. Existing canon belongs in entity_references or scene_present_entities instead.\n"
+        "- If an existing recurring character has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.\n"
         "- entity_references entries should only contain entity_type, entity_id, and role.\n"
         "- scene_present_entities entries should contain entity_type, entity_id, slot, and optional staging fields; they do not use role.\n"
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
@@ -637,7 +700,8 @@ def build_planning_retry_user_prompt(
         "Do not explain the changes. Do not stop. Keep trying until the planning result passes validation.\n\n"
         "Important reminders:\n"
         "- Update at least one frontier choice note.\n"
-        "- Bind at least one updated choice to a specific idea using bound_idea.\n\n"
+        "- Bind at least one updated choice to a specific idea using bound_idea.\n"
+        "- worldbuilding_notes are optional but allowed when the world needs more ambient pressure or conflict.\n\n"
         f"Planning issues:\n{json.dumps(issues, indent=2)}\n\n"
         "Previous invalid planning result:\n"
         f"{json.dumps(previous_result.model_dump(mode='json'), indent=2)}\n\n"
@@ -701,6 +765,10 @@ def collect_character_continuity_issues(
             for character in candidate.new_characters
             if (character.name or "").strip()
         }
+        floating_intro_character_ids = {
+            int(intro.character_id)
+            for intro in candidate.floating_character_introductions
+        }
         explicitly_introduced_existing_ids = {
             int(reference.entity_id)
             for reference in candidate.entity_references
@@ -709,7 +777,7 @@ def collect_character_continuity_issues(
             int(present.entity_id)
             for present in candidate.scene_present_entities
             if present.entity_type == "character"
-        }
+        } | floating_intro_character_ids
         allowed_names = {
             (character.get("name") or "").strip().lower()
             for character_id in encountered_ids
@@ -742,7 +810,7 @@ def collect_character_continuity_issues(
             if any(pattern.search(text or "") for text in texts):
                 issues.append(
                     f"Character '{name}' is named in the new scene/choices but has not appeared on this path yet. "
-                    "Either introduce them explicitly in-scene first or remove the reference."
+                    "Either introduce them explicitly in-scene first, use floating_character_introductions, or remove the reference."
                 )
                 seen_names.add(lowered)
         return issues
@@ -988,6 +1056,7 @@ def apply_planning_result(
     validate_planning_result(packet, ideas, result)
     choice_updates: list[int] = []
     note_records: list[dict[str, Any]] = []
+    worldbuilding_records: list[dict[str, Any]] = []
     if not dry_run:
         append_ideas(ideas_path, ideas)
         for update in result.choice_note_updates:
@@ -1001,6 +1070,10 @@ def apply_planning_result(
             response = client.post("/story-notes", json=note.model_dump())
             response.raise_for_status()
             note_records.append(response.json())
+        for note in result.worldbuilding_notes:
+            response = client.post("/worldbuilding", json=note.model_dump())
+            response.raise_for_status()
+            worldbuilding_records.append(response.json())
     else:
         choice_updates = [update.choice_id for update in result.choice_note_updates]
 
@@ -1027,6 +1100,10 @@ def apply_planning_result(
         "ideas_appended": [idea.model_dump() for idea in ideas],
         "story_notes_added": len(note_records) if not dry_run else len(result.story_direction_notes),
         "story_notes_created": note_records if not dry_run else [note.model_dump() for note in result.story_direction_notes],
+        "worldbuilding_notes_added": len(worldbuilding_records) if not dry_run else len(result.worldbuilding_notes),
+        "worldbuilding_notes_created": (
+            worldbuilding_records if not dry_run else [note.model_dump() for note in result.worldbuilding_notes]
+        ),
         "summary": result.summary,
     }
 
@@ -1140,6 +1217,74 @@ def apply_normal_result(
         "generated_assets": asset_outputs,
         "hooks_added": len(candidate.new_hooks),
         "global_direction_notes_added": len(candidate.global_direction_notes),
+    }
+
+
+def apply_revival_result(
+    *,
+    packet: dict[str, Any],
+    result: RevivalChoiceResult,
+    client: TestClient,
+    dry_run: bool,
+) -> dict[str, Any]:
+    revival_context = packet.get("revival_context") or {}
+    parent_node_id = int(revival_context["parent_node_id"])
+    traversed_choice_id = int(revival_context["traversed_choice_id"])
+    parent_total_choice_count = int(revival_context.get("parent_total_choice_count") or 0)
+    max_choices_per_node = int(revival_context.get("max_choices_per_node") or 5)
+    notes_payload = {
+        "notes": result.notes,
+        "choice_class": result.choice_class,
+        "ending_category": result.ending_category,
+    }
+    stored_notes = json.dumps({key: value for key, value in notes_payload.items() if value is not None})
+
+    if dry_run:
+        action = "append" if parent_total_choice_count < max_choices_per_node else "replace"
+        return {
+            "run_mode": "revival",
+            "dry_run": True,
+            "parent_node_id": parent_node_id,
+            "traversed_choice_id": traversed_choice_id,
+            "revival_action": action,
+            "new_choice_text": result.choice_text,
+        }
+
+    if parent_total_choice_count < max_choices_per_node:
+        response = client.post(
+            "/choices",
+            json={
+                "from_node_id": parent_node_id,
+                "choice_text": result.choice_text,
+                "status": "open",
+                "notes": stored_notes,
+            },
+        )
+        response.raise_for_status()
+        created_choice = response.json()
+        action = "append"
+    else:
+        response = client.post(
+            f"/choices/{traversed_choice_id}/replace",
+            json={
+                "choice_text": result.choice_text,
+                "status": "open",
+                "notes": stored_notes,
+                "to_node_id": None,
+            },
+        )
+        response.raise_for_status()
+        created_choice = response.json()
+        action = "replace"
+
+    return {
+        "run_mode": "revival",
+        "dry_run": False,
+        "parent_node_id": parent_node_id,
+        "traversed_choice_id": traversed_choice_id,
+        "revival_action": action,
+        "revived_choice_id": created_choice["id"],
+        "new_choice_text": created_choice["choice_text"],
     }
 
 
@@ -1365,7 +1510,7 @@ def main() -> None:
         worker_guide = load_worker_guide(project_root)
         system_prompt = build_system_prompt(worker_guide)
         last_error: Exception | None = None
-        parsed: GenerationCandidate | PlanningFollowthroughResult | None = None
+        parsed: GenerationCandidate | PlanningFollowthroughResult | RevivalChoiceResult | None = None
         planning_ideas: list[PlanningIdea] = []
         validated_payload: dict[str, Any] | None = None
 
@@ -1481,6 +1626,56 @@ def main() -> None:
                             )
                     except (httpx.HTTPError, RuntimeError) as exc:
                         last_error = exc
+            elif packet["run_mode"] == "revival":
+                user_prompt = build_user_prompt(packet)
+                response_format = build_response_format(packet)
+                for _ in range(max(args.max_retries, 1)):
+                    raw = ""
+                    try:
+                        raw = call_lm_studio(
+                            api_base=args.api_base,
+                            model=args.model,
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            response_format=response_format,
+                            temperature=args.temperature,
+                            max_tokens=args.max_tokens,
+                            request_timeout=args.request_timeout,
+                        )
+                        parsed = parse_llm_result(packet, raw)
+                        assert isinstance(parsed, RevivalChoiceResult)
+                        revival_issues = get_revival_validation_issues(packet, parsed)
+                        if not revival_issues:
+                            break
+                        last_error = RuntimeError("Revival validation failed: " + json.dumps(revival_issues, indent=2))
+                        user_prompt = (
+                            "Your previous revival choice failed validation.\n"
+                            "Fix the listed issues and return one corrected revival-choice JSON object only.\n\n"
+                            f"Issues:\n{json.dumps(revival_issues, indent=2)}\n\n"
+                            f"Previous invalid result:\n{parsed.model_dump_json(indent=2)}"
+                        )
+                    except ValidationError as exc:
+                        last_error = exc
+                        issue_lines = [
+                            " -> ".join(str(part) for part in error.get("loc", [])) + f": {error.get('msg')}"
+                            for error in exc.errors()
+                        ] or [str(exc)]
+                        if raw.strip():
+                            user_prompt = build_schema_retry_user_prompt(
+                                packet=packet,
+                                raw_text=raw,
+                                issues=issue_lines,
+                            )
+                    except json.JSONDecodeError as exc:
+                        last_error = exc
+                        if raw.strip():
+                            user_prompt = build_schema_retry_user_prompt(
+                                packet=packet,
+                                raw_text=raw,
+                                issues=[str(exc)],
+                            )
+                    except (httpx.HTTPError, RuntimeError) as exc:
+                        last_error = exc
             else:
                 user_prompt = build_user_prompt(packet)
                 response_format = build_response_format(packet)
@@ -1555,6 +1750,14 @@ def main() -> None:
                     result=parsed,
                     client=client,
                     ideas_path=ideas_path,
+                    dry_run=args.dry_run,
+                )
+            elif packet["run_mode"] == "revival":
+                assert isinstance(parsed, RevivalChoiceResult)
+                result = apply_revival_result(
+                    packet=packet,
+                    result=parsed,
+                    client=client,
                     dry_run=args.dry_run,
                 )
             else:

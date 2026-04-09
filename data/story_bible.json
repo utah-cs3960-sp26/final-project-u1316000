@@ -135,9 +135,32 @@
     "default_choice_range": [2, 3],
     "allow_single_choice_for_forced_beats": true,
     "allow_more_than_three_choices_rarely": true,
+    "max_choices_per_node": 5,
     "cycles_are_good": true,
     "merges_require_branch_state_compatibility": true,
     "quick_merges_are_good": true,
+    "frontier_budget": {
+      "soft_open_choice_limit": 48,
+      "hard_open_choice_limit": 72,
+      "max_choices_per_node": 5,
+      "keep_recent_parent_count": 12,
+      "default_max_fresh_choices_per_scene": 1,
+      "allow_second_fresh_choice_only_for_bloom_scenes": true
+    },
+    "inspection_reconvergence": {
+      "enabled": true,
+      "rule": "Inspection choices should usually reconverge quickly instead of remaining durable open leaves."
+    },
+    "arc_exit_merge_policy": {
+      "enabled": true,
+      "max_transition_scenes": 2,
+      "rule": "Winding-down local arcs may use short transition scenes before merging into another compatible storyline."
+    },
+    "frontier_empty_revival_policy": {
+      "enabled": true,
+      "strategy": "revive_closed_parent",
+      "max_choices_per_node": 5
+    },
     "anti_overmerge": {
       "recent_window": 6,
       "merge_only_streak_limit": 2,
@@ -153,6 +176,7 @@
       "Every generated choice should carry internal planning notes in the form 'Goal: ... Intent: ...' so future workers can understand why the option exists and what larger direction it is meant to support.",
       "Let some scenes narrow, some widen, and some loop back into existing problems or places.",
       "Use quick merges for minor inspection choices, small lore reveals, or brief character beats before a larger event that would happen either way.",
+      "Inspection choices should usually reconverge immediately or after one brief detour scene.",
       "Quick merges are a relief valve, not the default branch shape.",
       "If a branch has quick-merged repeatedly in recent scenes, the next expansion should usually open at least one fresh path instead of reconverging again.",
       "Do not quick-merge branches when the detour creates meaningful branch-local consequences such as new inventory, new allies, new injuries, new affordances, or materially different knowledge.",

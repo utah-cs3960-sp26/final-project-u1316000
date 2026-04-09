@@ -11,6 +11,7 @@ from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
+from app.services.worldbuilding import WorldbuildingService
 
 
 class LLMGenerationService:
@@ -36,6 +37,15 @@ class LLMGenerationService:
     )
     MIN_ENTITY_DESCRIPTION_LENGTH = 12
     PROMPT_ENTITY_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+    INSPECTION_CHOICE_PATTERNS = [
+        re.compile(r"\b(look|listen|inspect|examine|touch|read|ask|knock|press|study|feel)\b", re.IGNORECASE),
+    ]
+    COMMITMENT_CHOICE_PATTERNS = [
+        re.compile(r"\b(board|ride|follow|enter|accept|choose|commit|jump|descend|climb|go with)\b", re.IGNORECASE),
+    ]
+    ENDING_CHOICE_PATTERNS = [
+        re.compile(r"\b(die|death|surrender|give up|stay behind|accept capture|let it take you)\b", re.IGNORECASE),
+    ]
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
@@ -49,6 +59,7 @@ class LLMGenerationService:
         canon: CanonResolver,
         branch_state: BranchStateService,
         story_notes: StoryDirectionService,
+        worldbuilding: WorldbuildingService,
         story_graph: StoryGraphService,
         focus_entity_ids: list[int],
         current_node_id: int | None,
@@ -94,6 +105,12 @@ class LLMGenerationService:
             exclude_node_ids=[current_node_id] if current_node_id is not None else None,
         )
         global_direction_notes = story_notes.list_notes(statuses=["active", "parked"], limit=12)
+        worldbuilding_notes = worldbuilding.list_notes(statuses=["active", "parked"], limit=10)
+        frontier_budget_state = story_graph.build_frontier_budget_state(
+            branch_key=branch_key,
+            branching_policy=self.story_bible.get("branching_policy"),
+        )
+        arc_exit_candidate = self._compute_arc_exit_candidate(branch=branch, merge_candidates=merge_candidates)
 
         relevant_locations = [location for location in canon.list_locations() if location["id"] in focus_entity_ids]
         relevant_characters = [character for character in canon.list_characters() if character["id"] in focus_entity_ids]
@@ -128,14 +145,17 @@ class LLMGenerationService:
             "relationship_states": branch["relationships"],
             "branch_tags": branch["tags"],
             "branch_shape": branch_shape,
+            "frontier_budget_state": frontier_budget_state,
             "active_hooks": active_hooks,
             "eligible_major_hooks": eligible_major_hooks,
             "blocked_major_hooks": blocked_major_hooks,
             "developable_major_hooks": developable_major_hooks,
             "blocked_major_developments": blocked_major_developments,
             "global_direction_notes": global_direction_notes,
+            "worldbuilding_notes": worldbuilding_notes,
             "recurring_entities": recurring_entities,
             "merge_candidates": merge_candidates,
+            "arc_exit_candidate": arc_exit_candidate,
             "requested_choice_count": requested_choice_count,
         }
 
@@ -170,7 +190,13 @@ class LLMGenerationService:
             "Treat requested_choice_count as a target, not a rigid quota. Usually return 2 or 3 choices, sometimes 1 for a forced beat, and only occasionally 4 or more when the scene genuinely blooms.\n"
             "Cycles are allowed. Careful merges are allowed when branch-local consequences still make sense; do not collapse branches that now depend on different local state.\n"
             "Quick merges are a relief valve, not the default branch shape. If branch_shape.should_prefer_divergence is true, open at least one fresh path instead of only merging into existing scenes.\n"
+            "Minor inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.\n"
+            "If frontier_budget_state.pressure_level is soft or hard, prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.\n"
+            "When a local beat feels like it is winding down and arc_exit_candidate says a larger merge is plausible, you may use 1-2 transition scenes to close the local arc and route into another compatible storyline.\n"
             "Every choice must include internal planning notes in this form: 'Goal: ... Intent: ...'. Goal is the immediate purpose of taking the option. Intent is what broader direction, branch shape, or future possibility the option is meant to open, reinforce, or revisit.\n"
+            "Choices may optionally include choice_class values inspection, progress, commitment, or ending.\n"
+            "Ending choices are allowed. Death, capture, transformation, dead ends, and hub-return closures are all valid if they fit the scene.\n"
+            "If you need to use a recurring canonical character who has not been met on this specific path yet, add a floating_character_introduction with that existing character_id and a short reusable first-meeting beat. Floating introductions are for recurring characters only, not locations or objects.\n"
             "If a quick merge is appropriate, a generated choice may include target_node_id pointing at one of the provided merge_candidates.\n"
             "Use scene_present_entities and hidden_on_lines when actors or objects should appear, disappear, or swap focus during the same scene.\n"
             "If a scene introduces a new recurring character, a new visually distinct linked location, or a reusable visually important object, make the need for art obvious so the post-apply asset pass can generate it once real IDs exist.\n"
@@ -179,9 +205,11 @@ class LLMGenerationService:
             "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props.\n"
             "If a choice clearly means travel, arrival, boarding, departure, or being sent somewhere else, strongly prefer a new linked location unless it is truly the same place from nearly the same visual framing.\n"
             "If the player has clearly arrived somewhere new, reusing the old background just to avoid art generation is usually the wrong choice.\n"
+            "Persistent objects are exceptional. Do not create new persistent objects for ordinary props, vehicles, or local scenery unless they are truly gameplay-critical, reusable, or inventory-relevant.\n"
+            "Worldbuilding notes describe offscreen pressures like patrols, factions, rumors, automata, or danger escalation. You may use them as a grounded source of surprise and conflict.\n"
             "If a location does not yet have art, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.\n"
             "Return structured JSON only with these top-level keys:\n"
-            "scene_summary, scene_text, dialogue_lines, choices, new_locations, new_characters, new_objects, entity_references, scene_present_entities, fact_updates, relation_updates, "
+            "scene_summary, scene_text, dialogue_lines, choices, new_locations, new_characters, new_objects, floating_character_introductions, entity_references, scene_present_entities, fact_updates, relation_updates, "
             "new_hooks, hook_updates, global_direction_notes, inventory_changes, affordance_changes, relationship_changes, "
             "asset_requests, discovered_clue_tags, discovered_state_tags.\n"
             f"Context:\n{json.dumps(context, indent=2)}"
@@ -200,6 +228,11 @@ class LLMGenerationService:
             candidate.branch_key,
             branching_policy=self.story_bible.get("branching_policy"),
         )
+        frontier_budget = story_graph.build_frontier_budget_state(
+            branch_key=candidate.branch_key,
+            branching_policy=self.story_bible.get("branching_policy"),
+        )
+        budget_config = ((self.story_bible.get("branching_policy") or {}).get("frontier_budget") or {})
         current_depth = int(branch["branch_depth"])
         projected_depth = current_depth + 1
         state_tags = {row["tag"] for row in branch_state_service.list_branch_tags(candidate.branch_key, tag_type="state")}
@@ -241,12 +274,32 @@ class LLMGenerationService:
                     f"New {entity_type} '{entity_name}' must be declared in new_{entity_type}s with a short description."
                 )
 
+        new_character_names = {proposal.name.strip().lower() for proposal in candidate.new_characters}
+        for intro in candidate.floating_character_introductions:
+            character = canon.get_character(int(intro.character_id))
+            if character is None:
+                issues.append(
+                    f"Floating character introduction references unknown character id {intro.character_id}."
+                )
+                continue
+            character_name = (character.get("name") or "").strip().lower()
+            if character_name and character_name in new_character_names:
+                issues.append(
+                    f"Floating character introduction for '{character.get('name')}' conflicts with new_characters. Use one or the other."
+                )
+
         merge_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is not None)
         fresh_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is None)
+        closure_choice_count = 0
+        inspection_fresh_count = 0
+        inferred_choice_classes: list[str] = []
         if branch_shape["should_prefer_divergence"] and merge_choice_count > 0 and fresh_choice_count == 0:
             issues.append(
                 "This branch has quick-merged too often recently. Open at least one fresh path instead of only merging into existing scenes."
             )
+        max_choices_per_node = int(budget_config.get("max_choices_per_node", 5))
+        if len(candidate.choices) > max_choices_per_node:
+            issues.append(f"Candidate creates {len(candidate.choices)} choices, which exceeds the max of {max_choices_per_node}.")
         for choice in candidate.choices:
             notes = (choice.notes or "").strip()
             if not notes:
@@ -259,6 +312,37 @@ class LLMGenerationService:
                 issues.append(
                     f"Choice '{choice.choice_text}' must use notes in the form 'Goal: ... Intent: ...' with meaningful content."
                 )
+            choice_class = self._resolve_choice_class(choice)
+            inferred_choice_classes.append(choice_class)
+            if choice_class == "ending":
+                closure_choice_count += 1
+                if choice.ending_category is None:
+                    issues.append(
+                        f"Ending choice '{choice.choice_text}' must include ending_category."
+                    )
+            if choice_class == "inspection" and choice.target_node_id is None:
+                inspection_fresh_count += 1
+
+        pressure_level = frontier_budget.get("pressure_level")
+        allow_second_fresh = bool(budget_config.get("allow_second_fresh_choice_only_for_bloom_scenes", True))
+        default_max_fresh = int(budget_config.get("default_max_fresh_choices_per_scene", 1))
+        bloom_scene_candidate = self._is_bloom_scene_candidate(
+            branch=branch,
+            candidate=candidate,
+            merge_choice_count=merge_choice_count,
+        )
+        if pressure_level in {"soft", "hard"} and merge_choice_count + closure_choice_count == 0:
+            issues.append("Frontier pressure is high; include at least one merge or closure path in this scene.")
+        if pressure_level in {"soft", "hard"} and fresh_choice_count > default_max_fresh and not (
+            allow_second_fresh and bloom_scene_candidate and fresh_choice_count == default_max_fresh + 1
+        ):
+            issues.append(
+                f"Fresh branching exceeds the configured limit of {default_max_fresh} for this scene under frontier pressure."
+            )
+        if pressure_level == "hard" and fresh_choice_count > 0 and not bloom_scene_candidate:
+            issues.append("Hard frontier pressure only allows fresh branching for bloom scenes with strong justification.")
+        if pressure_level in {"soft", "hard"} and inspection_fresh_count > 0:
+            issues.append("Inspection choices should reconverge quickly under frontier pressure instead of opening new durable leaves.")
 
         beat_budget = self.story_bible["beat_budget"]
         major_hook_updates = 0
@@ -299,6 +383,24 @@ class LLMGenerationService:
         proposed_minor_hooks = sum(1 for hook in candidate.new_hooks if hook.importance in {"minor", "local"})
         if proposed_minor_hooks > int(beat_budget["max_minor_hooks_per_scene"]):
                 issues.append("Candidate introduces too many minor/local hooks in one scene.")
+
+        if candidate.new_objects:
+            inventory_object_names = {
+                (change.object_name or "").strip().lower()
+                for change in candidate.inventory_changes
+                if change.object_name
+            }
+            relation_object_names = {
+                relation.object_name.strip().lower()
+                for relation in candidate.relation_updates
+                if relation.object_type == "object" and relation.object_name
+            }
+            for obj in candidate.new_objects:
+                object_name = obj.name.strip().lower()
+                if object_name not in inventory_object_names and object_name not in relation_object_names:
+                    issues.append(
+                        f"Persistent object '{obj.name}' needs stronger justification. Keep ordinary props in scene text unless they are inventory-relevant, reusable, or mechanically important."
+                    )
 
         prompt_blocked_names = self._collect_prompt_blocked_entity_names(candidate=candidate, canon=canon)
         for asset_request in candidate.asset_requests:
@@ -405,6 +507,58 @@ class LLMGenerationService:
             "current_depth": current_depth,
             "projected_depth": projected_depth,
             "act_phase": branch["act_phase"],
+            "frontier_budget_state": frontier_budget,
+            "arc_exit_candidate": self._compute_arc_exit_candidate(branch=branch, merge_candidates=story_graph.list_merge_candidates(candidate.branch_key)),
+            "inferred_choice_classes": inferred_choice_classes,
+        }
+
+    def _resolve_choice_class(self, choice: Any) -> str:
+        if choice.choice_class is not None:
+            return choice.choice_class
+        text = " ".join(filter(None, [choice.choice_text, choice.notes])).lower()
+        if any(pattern.search(text) for pattern in self.ENDING_CHOICE_PATTERNS):
+            return "ending"
+        if any(pattern.search(text) for pattern in self.COMMITMENT_CHOICE_PATTERNS):
+            return "commitment"
+        if any(pattern.search(text) for pattern in self.INSPECTION_CHOICE_PATTERNS):
+            return "inspection"
+        return "progress"
+
+    def _is_bloom_scene_candidate(
+        self,
+        *,
+        branch: dict[str, Any],
+        candidate: GenerationCandidate,
+        merge_choice_count: int,
+    ) -> bool:
+        if branch.get("eligible_major_hooks"):
+            return True
+        if candidate.new_locations:
+            return True
+        if any(choice.target_node_id is not None for choice in candidate.choices) and merge_choice_count > 0:
+            return False
+        if candidate.new_hooks:
+            return True
+        return False
+
+    def _compute_arc_exit_candidate(
+        self,
+        *,
+        branch: dict[str, Any],
+        merge_candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        low_local_pressure = (
+            len(branch.get("active_hooks", [])) <= 2
+            and len(branch.get("affordances", [])) <= 1
+            and len(branch.get("inventory", [])) <= 1
+        )
+        return {
+            "eligible": bool(low_local_pressure and merge_candidates),
+            "reason": (
+                "Local branch pressure is low enough that a transition merge is plausible."
+                if low_local_pressure and merge_candidates
+                else "Keep developing local consequences before attempting a larger arc-exit merge."
+            ),
         }
 
     def _collect_prompt_blocked_entity_names(

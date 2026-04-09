@@ -266,6 +266,22 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS worldbuilding_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_type TEXT NOT NULL DEFAULT 'world_pressure',
+        title TEXT NOT NULL,
+        note_text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        priority INTEGER NOT NULL DEFAULT 2,
+        pressure INTEGER NOT NULL DEFAULT 2,
+        source_branch_key TEXT,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'manual',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS loop_runtime_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         normal_runs_since_plan INTEGER NOT NULL DEFAULT 0,
@@ -298,6 +314,7 @@ def bootstrap_database(database_path: str | Path) -> None:
         _ensure_column(connection, "story_hooks", "must_not_imply_json", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(connection, "story_hooks", "min_distance_to_next_development", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "story_hooks", "last_development_depth", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "worldbuilding_notes", "pressure", "INTEGER NOT NULL DEFAULT 2")
         connection.execute(
             """
             INSERT INTO loop_runtime_state (id, normal_runs_since_plan, last_run_mode)

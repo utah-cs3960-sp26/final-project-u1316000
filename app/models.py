@@ -18,6 +18,10 @@ AffordanceStatus = Literal["unlocked", "suspended", "retired"]
 InventoryStatus = Literal["owned", "stored", "spent", "lost"]
 ActPhase = Literal["early", "middle", "late"]
 DirectionNoteStatus = Literal["active", "parked", "resolved"]
+ChoiceStatus = Literal["open", "fulfilled", "parked", "closed"]
+ChoiceClass = Literal["inspection", "progress", "commitment", "ending"]
+EndingCategory = Literal["death", "dead_end", "capture", "transformation", "hub_return"]
+WorldbuildingStatus = Literal["active", "parked", "resolved"]
 
 
 class LocationSeed(BaseModel):
@@ -113,7 +117,7 @@ class ChoiceCreate(BaseModel):
     from_node_id: int
     choice_text: str
     to_node_id: int | None = None
-    status: str = "open"
+    status: ChoiceStatus = "open"
     notes: str | None = None
 
 
@@ -127,6 +131,13 @@ class ChoiceIdeaBinding(BaseModel):
 class ChoiceUpdate(BaseModel):
     notes: str
     idea_binding: ChoiceIdeaBinding | None = None
+
+
+class ChoiceReplace(BaseModel):
+    choice_text: str
+    notes: str | None = None
+    status: ChoiceStatus = "open"
+    to_node_id: int | None = None
 
 
 class BranchTagCreate(BaseModel):
@@ -226,6 +237,8 @@ class GeneratedChoice(BaseModel):
         min_length=20,
         pattern=r"^Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*$",
     )
+    choice_class: ChoiceClass | None = None
+    ending_category: EndingCategory | None = None
     required_affordances: list[str] = Field(default_factory=list)
     target_node_id: int | None = None
 
@@ -268,6 +281,40 @@ class DirectionNoteProposal(BaseModel):
     notes: str | None = None
 
 
+class WorldbuildingNoteCreate(BaseModel):
+    note_type: str = "world_pressure"
+    title: str
+    note_text: str
+    status: WorldbuildingStatus = "active"
+    priority: int = 2
+    pressure: int = 2
+    source_branch_key: str | None = None
+    notes: str | None = None
+    created_by: str = "manual"
+
+
+class WorldbuildingNoteUpdate(BaseModel):
+    note_type: str | None = None
+    title: str | None = None
+    note_text: str | None = None
+    status: WorldbuildingStatus | None = None
+    priority: int | None = None
+    pressure: int | None = None
+    source_branch_key: str | None = None
+    notes: str | None = None
+
+
+class WorldbuildingNoteProposal(BaseModel):
+    note_type: str = "world_pressure"
+    title: str
+    note_text: str
+    status: WorldbuildingStatus = "active"
+    priority: int = 2
+    pressure: int = 2
+    source_branch_key: str | None = None
+    notes: str | None = None
+
+
 class InventoryChange(BaseModel):
     action: Literal["add", "remove"]
     object_id: int | None = None
@@ -294,6 +341,11 @@ class RelationshipUpdate(BaseModel):
     state_tags: list[str] = Field(default_factory=list)
 
 
+class FloatingCharacterIntroduction(BaseModel):
+    character_id: int
+    intro_text: str = Field(min_length=12)
+
+
 class GenerationCandidate(BaseModel):
     branch_key: str = "default"
     scene_title: str | None = None
@@ -304,6 +356,7 @@ class GenerationCandidate(BaseModel):
     new_locations: list[LocationSeed] = Field(default_factory=list)
     new_characters: list[CharacterSeed] = Field(default_factory=list)
     new_objects: list[ObjectSeed] = Field(default_factory=list)
+    floating_character_introductions: list[FloatingCharacterIntroduction] = Field(default_factory=list)
     entity_references: list[EntityReference] = Field(default_factory=list)
     scene_present_entities: list[ScenePresentEntity] = Field(default_factory=list)
     fact_updates: list[FactSeed] = Field(default_factory=list)
