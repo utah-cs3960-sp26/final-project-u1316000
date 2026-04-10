@@ -223,6 +223,10 @@ def summarize_context(
             "should_prefer_divergence": (context.get("branch_shape") or {}).get("should_prefer_divergence"),
             "merge_only_streak": (context.get("branch_shape") or {}).get("merge_only_streak"),
             "merge_only_count": (context.get("branch_shape") or {}).get("merge_only_count"),
+            "same_location_streak": (context.get("branch_shape") or {}).get("same_location_streak"),
+            "single_actor_scene_streak": (context.get("branch_shape") or {}).get("single_actor_scene_streak"),
+            "recent_action_family_counts": (context.get("branch_shape") or {}).get("recent_action_family_counts", {}),
+            "repeated_action_family": (context.get("branch_shape") or {}).get("repeated_action_family"),
             "reason": (context.get("branch_shape") or {}).get("reason"),
             "recent_nodes": recent_nodes,
         },
@@ -421,8 +425,15 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Locations usually belong in entity_references with role current_scene, not in scene_present_entities.",
         "If you introduce a new unresolved mystery or unanswered question, create or extend a hook.",
         "Use a mix of lyrical narration and clearer spoken dialogue; the player voice should usually be one of the clearest in the scene.",
+        "Feel free to act creatively. Make bold choices as long as they fit in the story.",
+        "Introduce or reintroduce characters frequently. Characters make a story.",
+        "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.",
         "Prefer clear weird over murky weird. If a line sounds evocative but cannot be paraphrased plainly, rewrite it.",
         "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.",
+        "Do not simply restate the just-taken choice as another option in the next scene. Advance the situation first.",
+        "Do not repeat the parent scene summary with only cosmetic wording changes.",
+        "If an inspection choice names a local prop, marker, knot, placard, seam, or similar focal object, establish it clearly in the scene text first instead of inventing it only in the menu.",
+        "Most multi-choice scenes should include at least one consequential option that is not pure inspection.",
         "For major hooks, include a payoff_concept describing the intended direction of the later payoff.",
         "If a hook is still on development cooldown, do not explore it, advance it, or even strongly hint at it yet.",
         "A good payoff_concept should describe the general shape of the later answer, not just tie the mystery to the nearest currently available local system.",
@@ -452,6 +463,18 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         checklist.append(
             "This branch is currently over-merged. Open at least one fresh path this run instead of only reconverging into existing scenes."
         )
+    if branch_shape and (branch_shape.get("single_actor_scene_streak") or 0) >= 2:
+        checklist.append(
+            "This branch has gone several scenes without enough character pressure. Reintroduce or introduce a character, or put an external faction/patrol/courier pressure onstage."
+        )
+    if branch_shape and (branch_shape.get("same_location_streak") or 0) >= 3:
+        checklist.append(
+            "This branch has lingered in one place too long. Move to a new location or route back to an existing one soon."
+        )
+    if branch_shape and branch_shape.get("repeated_action_family") in {"inspect", "follow", "touch", "step_back"}:
+        checklist.append(
+            f"This branch has been repeating the '{branch_shape.get('repeated_action_family')}' action family. Break the pattern with a social turn, location shift, merge, closure, or immediate external pressure."
+        )
     return checklist
 
 
@@ -466,7 +489,7 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
         ],
         "choices": [
             {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "progress"},
-            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "inspection"},
+            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "commitment"},
         ],
         "new_locations": [],
         "new_characters": [],
@@ -794,6 +817,41 @@ def build_normal_packet(
     }
     selected_choice = story.get_choice(int(selected["choice_id"])) or {}
     frontier_budget_state = context.get("frontier_budget_state") or {}
+    branch_shape = context.get("branch_shape") or {}
+    required_scene_delta = {
+        "rule": "The next accepted scene must materially change something important instead of merely inspecting the same object again.",
+        "allowed_axes": [
+            "danger or time pressure",
+            "social/cast situation",
+            "location motion or access",
+            "hook pressure",
+            "merge or closure state",
+            "worldbuilding pressure becoming immediate",
+        ],
+    }
+    actor_pressure = {
+        "streak": branch_shape.get("single_actor_scene_streak", 0),
+        "needs_more_people": bool((branch_shape.get("single_actor_scene_streak") or 0) >= 2),
+        "guidance": (
+            "Bring in another actor soon: introduce or reintroduce a character, or put faction/patrol/courier pressure onstage."
+            if (branch_shape.get("single_actor_scene_streak") or 0) >= 2
+            else "Character pressure is healthy enough for now, but additional people are still welcome."
+        ),
+    }
+    location_motion_pressure = {
+        "streak": branch_shape.get("same_location_streak", 0),
+        "should_move": bool((branch_shape.get("same_location_streak") or 0) >= 3),
+        "guidance": (
+            "Move the branch to a new location or route back to an old one soon."
+            if (branch_shape.get("same_location_streak") or 0) >= 3
+            else "Location motion is optional right now, but new places or meaningful returns are welcome."
+        ),
+    }
+    recent_action_family_summary = {
+        "repeated_action_family": branch_shape.get("repeated_action_family"),
+        "recent_action_family_counts": branch_shape.get("recent_action_family_counts", {}),
+        "guidance": "If one action family dominates recent scenes, break the pattern with a social turn, location shift, merge, closure, or immediate external pressure.",
+    }
     return {
         "run_mode": "normal",
         "message": (
@@ -809,6 +867,10 @@ def build_normal_packet(
         "path_character_continuity": path_character_continuity,
         "global_open_choice_count": frontier_budget_state.get("open_choice_count"),
         "frontier_budget_state": frontier_budget_state,
+        "required_scene_delta": required_scene_delta,
+        "actor_pressure": actor_pressure,
+        "location_motion_pressure": location_motion_pressure,
+        "recent_action_family_summary": recent_action_family_summary,
         "from_node_total_choice_count": selected.get("from_node_total_choice_count"),
         "from_node_open_choice_count": selected.get("from_node_open_choice_count"),
         "is_bloom_scene_candidate": bool(
@@ -864,6 +926,10 @@ def build_normal_packet(
             "but do not force a mismatch just to use an idea. "
             "If selected_frontier_item.bound_idea is present, treat it as the strongest current medium-range steering signal for this leaf unless continuity strongly argues otherwise. "
             "Use frontier_budget_state to understand current branch pressure. If pressure is soft or hard, prefer merges, closures, and narrow continuation over multiple fresh leaves. "
+            "Feel free to act creatively. Make bold choices as long as they fit in the story. "
+            "Introduce or reintroduce characters frequently. Characters make a story. "
+            "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
+            "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
             "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "
@@ -925,7 +991,7 @@ def build_planning_packet(
             "and together they must cover at least 2 of those categories with at least one event idea. Read the current IDEAS.md content first and add only genuinely new ideas, "
             "not duplicates and not recycled example seeds from the docs or existing ideas file. Then update the notes on each planning target "
             "with clearer Goal/Intent direction for future workers, and bind at least one planning target to a specific fresh or existing idea so later normal runs have a concrete direction signal. Decide whether any existing hook or global idea is worth steering toward "
-            "from those targets, even if it will take several later scenes to matter. If useful, add one or two structured story direction notes. "
+            "from those targets, even if it will take several later scenes to matter. Prefer steering that creates concrete short-horizon behavior such as introduce a character soon, move to a new or known location soon, escalate patrol pressure, or set up a merge or closure within 1-2 scenes. If useful, add one or two structured story direction notes. "
             "Do not generate, validate, or apply a new story scene in this run. "
             "If the world needs more offscreen motion, you may add one or two worldbuilding notes about patrols, rumors, factions, automata, danger escalation, or other ambient pressures. "
             "At the end, report the exact categorized ideas you appended, the exact choice notes you updated, any story notes you added, and whether you appended IDEAS.md."

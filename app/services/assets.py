@@ -20,9 +20,28 @@ GLOBAL_STYLE_PREFIX = (
     "vibrant magical atmosphere, 8k resolution, volumetric lighting, sense of wonder and adventure."
 )
 
+DEFAULT_ASSET_DIMENSIONS: dict[str, tuple[int, int]] = {
+    "background": (1600, 896),
+    "portrait": (1024, 1536),
+    "object_render": (1024, 1024),
+}
+
 SUBJECT_ONLY_SUFFIX = (
     "Plain white background. Styling applies to the subject only. Make sure subject is centered and the "
     "subject is the only thing visible besides the background. Make sure the full body is in view."
+)
+
+BACKGROUND_ENVIRONMENT_SUFFIX = (
+    "Environment scene only. No characters, no hands, no bodies, no faces, no portraits, no close foreground "
+    "subject, no viewer-facing protagonist, no person-shaped silhouette, and no staged hero object dominating "
+    "the frame. Show the setting itself as a wide establishing shot with clear depth and spacious landscape "
+    "composition suitable for a story scene backdrop. Important objects may appear only if they are naturally "
+    "embedded in the environment, not isolated like product shots."
+)
+
+BACKGROUND_NEGATIVE_SUFFIX = (
+    "character, person, portrait, hand, hands, face, body, figure, close-up subject, centered subject, "
+    "isolated object, white background, cutout, product shot"
 )
 
 PORTRAIT_FRAME_SUFFIX = (
@@ -41,6 +60,10 @@ DETAIL_GUIDANCE_SUFFIX = (
     "environment storytelling, and any important hooks. Do not specify art style directions beyond the "
     "content itself."
 )
+
+
+def default_dimensions_for_asset_kind(asset_kind: str) -> tuple[int, int]:
+    return DEFAULT_ASSET_DIMENSIONS.get(asset_kind, (1024, 1024))
 
 
 class ComfyUIClient:
@@ -269,8 +292,8 @@ class AssetService:
         entity_id: int,
         asset_kind: str,
         prompt: str,
-        width: int,
-        height: int,
+        width: int | None,
+        height: int | None,
         steps: int,
         guidance_scale: float,
         seed: int | None = None,
@@ -284,6 +307,15 @@ class AssetService:
         resolved_seed = int(seed if seed is not None else random.randint(1, 2**53 - 1))
         should_remove_background = remove_background or asset_kind in {"portrait", "object_render"}
         final_prompt = self.compose_generation_prompt(asset_kind=asset_kind, user_prompt=prompt)
+        resolved_negative_prompt = self.compose_negative_prompt(
+            asset_kind=asset_kind,
+            user_negative_prompt=negative_prompt,
+        )
+        resolved_width, resolved_height = self.resolve_generation_dimensions(
+            asset_kind=asset_kind,
+            width=width,
+            height=height,
+        )
         safe_name = self.build_filename_base(
             entity_type=entity_type,
             entity_id=entity_id,
@@ -295,9 +327,9 @@ class AssetService:
         prepared_workflow = self.prepare_comfyui_workflow(
             workflow,
             prompt=final_prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
+            negative_prompt=resolved_negative_prompt,
+            width=resolved_width,
+            height=resolved_height,
             steps=steps,
             guidance_scale=guidance_scale,
             seed=resolved_seed,
@@ -326,9 +358,9 @@ class AssetService:
             "prompt_id": prompt_id,
             "prompt": prompt,
             "final_prompt": final_prompt,
-            "negative_prompt": negative_prompt,
-            "width": width,
-            "height": height,
+            "negative_prompt": resolved_negative_prompt,
+            "width": resolved_width,
+            "height": resolved_height,
             "steps": steps,
             "guidance_scale": guidance_scale,
             "seed": resolved_seed,
@@ -375,11 +407,31 @@ class AssetService:
 
     def compose_generation_prompt(self, *, asset_kind: str, user_prompt: str) -> str:
         sections = [GLOBAL_STYLE_PREFIX, "", user_prompt.strip(), "", DETAIL_GUIDANCE_SUFFIX]
-        if asset_kind == "portrait":
+        if asset_kind == "background":
+            sections.extend(["", BACKGROUND_ENVIRONMENT_SUFFIX])
+        elif asset_kind == "portrait":
             sections.extend(["", SUBJECT_ONLY_SUFFIX, "", PORTRAIT_FRAME_SUFFIX])
         elif asset_kind == "object_render":
             sections.extend(["", SUBJECT_ONLY_SUFFIX, "", OBJECT_ISOLATION_SUFFIX])
         return "\n".join(part for part in sections if part is not None)
+
+    def compose_negative_prompt(self, *, asset_kind: str, user_negative_prompt: str | None) -> str | None:
+        parts = [part.strip() for part in [user_negative_prompt] if part and part.strip()]
+        if asset_kind == "background":
+            parts.append(BACKGROUND_NEGATIVE_SUFFIX)
+        if not parts:
+            return None
+        return ", ".join(parts)
+
+    def resolve_generation_dimensions(
+        self,
+        *,
+        asset_kind: str,
+        width: int | None,
+        height: int | None,
+    ) -> tuple[int, int]:
+        default_width, default_height = default_dimensions_for_asset_kind(asset_kind)
+        return width or default_width, height or default_height
 
     def load_workflow_template(self, workflow_path: str | Path) -> dict[str, Any]:
         path = Path(workflow_path).expanduser().resolve()

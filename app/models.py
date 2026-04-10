@@ -398,8 +398,8 @@ class AssetGenerateRequest(BaseModel):
     workflow_name: str = "text-to-image"
     filename_base: str | None = None
     negative_prompt: str | None = None
-    width: int = 1024
-    height: int = 1024
+    width: int | None = None
+    height: int | None = None
     steps: int = 25
     guidance_scale: float = 4.0
     seed: int | None = None

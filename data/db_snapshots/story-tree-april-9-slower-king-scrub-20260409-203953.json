@@ -1,0 +1,580 @@
+{
+  "created_at": "2026-04-09T20:39:53.776799-06:00",
+  "counts": {
+    "locations": 1,
+    "characters": 1,
+    "objects": 0,
+    "relations": 0,
+    "facts": 5,
+    "story_nodes": 1,
+    "story_node_present_entities": 1,
+    "choices": 3,
+    "assets": 3,
+    "generation_jobs": 0,
+    "branch_state": 1,
+    "inventory_entries": 0,
+    "unlocked_affordances": 0,
+    "relationship_states": 0,
+    "branch_tags": 1,
+    "story_hooks": 2,
+    "story_direction_notes": 2,
+    "worldbuilding_notes": 4
+  },
+  "locations": [
+    {
+      "id": 1,
+      "slug": "mushroom-field",
+      "name": "Mushroom Field",
+      "description": "A dew-cold meadow of towering mushrooms above buried green glass, freshly strung with counting wires while brass enumerators sweep the field at dawn.",
+      "canonical_summary": "The opening field: beautiful, damp, and quietly under survey by forces that count bodies, routes, and names.",
+      "created_at": "2026-04-10 02:38:32"
+    }
+  ],
+  "characters": [
+    {
+      "id": 1,
+      "slug": "the-tall-gnome",
+      "name": "The Tall Gnome",
+      "description": "An abnormally tall gnome with amnesia, five thumbs on the left hand, and a red-and-white striped bucket hat of unknown origin.",
+      "home_location_id": 1,
+      "canonical_summary": "An abnormally tall gnome with five thumbs on the left hand, a striped bucket hat of unknown origin, and the unnerving sense that somebody altered them for a purpose.",
+      "created_at": "2026-04-10 02:38:32",
+      "home_location_name": "Mushroom Field"
+    }
+  ],
+  "objects": [],
+  "facts": [
+    {
+      "id": 1,
+      "entity_type": "character",
+      "entity_id": 1,
+      "fact_text": "The protagonist is unmistakably a gnome, but stretched to roughly human size.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 2,
+      "entity_type": "character",
+      "entity_id": 1,
+      "fact_text": "The protagonist's left hand has five thumbs.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 3,
+      "entity_type": "character",
+      "entity_id": 1,
+      "fact_text": "The protagonist wears a red-and-white striped bucket hat and does not know how they got it.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 4,
+      "entity_type": "character",
+      "entity_id": 1,
+      "fact_text": "The protagonist begins with significant memory loss.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 5,
+      "entity_type": "world",
+      "entity_id": 0,
+      "fact_text": "The world is whimsical, surreal, and sincere; bizarre things are real and consequential, not punchlines.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-10 02:38:32"
+    }
+  ],
+  "relations": [],
+  "branch_state": {
+    "branch_key": "default",
+    "act_phase": "early",
+    "branch_depth": 0,
+    "latest_story_node_id": 1,
+    "notes": null,
+    "created_at": "2026-04-10 02:38:32",
+    "updated_at": "2026-04-10 02:38:41",
+    "inventory": [],
+    "affordances": [],
+    "relationships": [],
+    "tags": [
+      {
+        "id": 1,
+        "branch_key": "default",
+        "tag": "enumerators-closing-in",
+        "tag_type": "state",
+        "source": "story_reset",
+        "notes": "The opening scene begins under imminent survey pressure from the king's brass enumerators.",
+        "created_at": "2026-04-10 02:38:32"
+      }
+    ],
+    "active_hooks": [
+      {
+        "id": 1,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader conflict with the king's growing rule.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ]
+      },
+      {
+        "id": 2,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "A foe, royal agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the king's tightening regime, its enumerators, and its new automotons. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ]
+      }
+    ],
+    "resolved_hooks": [],
+    "eligible_major_hooks": [],
+    "blocked_major_hooks": [
+      {
+        "id": 1,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader conflict with the king's growing rule.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": false,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 0,
+          "remaining_distance": 20,
+          "development_distance_ready": false,
+          "development_required_depth": 6,
+          "remaining_development_distance": 6,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      },
+      {
+        "id": 2,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "A foe, royal agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the king's tightening regime, its enumerators, and its new automotons. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": false,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 0,
+          "remaining_distance": 20,
+          "development_distance_ready": false,
+          "development_required_depth": 6,
+          "remaining_development_distance": 6,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      }
+    ],
+    "developable_major_hooks": [],
+    "blocked_major_developments": [
+      {
+        "id": 1,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader conflict with the king's growing rule.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": false,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 0,
+          "remaining_distance": 20,
+          "development_distance_ready": false,
+          "development_required_depth": 6,
+          "remaining_development_distance": 6,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      },
+      {
+        "id": 2,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 1,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-10 02:38:32",
+        "updated_at": "2026-04-10 02:38:32",
+        "payoff_concept": "A foe, royal agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the king's tightening regime, its enumerators, and its new automotons. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": false,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 0,
+          "remaining_distance": 20,
+          "development_distance_ready": false,
+          "development_required_depth": 6,
+          "remaining_development_distance": 6,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      }
+    ],
+    "recurring_entities": [
+      {
+        "entity_type": "character",
+        "entity_id": 1,
+        "appearances": 1
+      },
+      {
+        "entity_type": "location",
+        "entity_id": 1,
+        "appearances": 1
+      }
+    ]
+  },
+  "story_nodes": [
+    {
+      "id": 1,
+      "branch_key": "default",
+      "parent_node_id": null,
+      "title": "Before the Counting Bell",
+      "scene_text": "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages. Between the stalks, thin black counting wires have been strung sometime in the night, and every quiet hum through them makes your five left thumbs twitch in sequence.\n\nYour striped bucket hat is cold with dew and warm at the brim. It feels like an ordinary hat that belonged in a real life before this one, except for the tiny stitches hidden inside the band and the place where somebody burned through a proper name. Each time the wires sing, you get the stubborn feeling that whoever left the hat on you meant it to guide you.\n\nFar away, a brass bell rings seven clipped notes. You do not know why that sound fills you with the certainty that something is coming to count you, misname you, and carry you off in paperwork. From deeper in the mist, you hear one heavier metallic step where no wagon should be. Between two mushroom roots, a green line of buried glass has surfaced through the mud like a window trying to breathe.\n\nIf the field is being surveyed at dawn, you have very little time to decide whether to climb, descend, or hold onto the few strange clues somebody left behind before the field decides for you.",
+      "summary": "The Tall Gnome wakes in the Mushroom Field just before a brass survey patrol crosses it, with counting wires underfoot, a bucket hat somebody left for him, and a green glass seam in the soil that stirs uneasily at the curse in his altered hand.",
+      "created_at": "2026-04-10 02:38:32",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages, while thin black counting wires hum low between the stalks.\"}, {\"speaker\": \"Narrator\", \"text\": \"Every pulse through the wires makes your five left thumbs twitch in sequence, as though your hand already knows the pattern being counted.\"}, {\"speaker\": \"Narrator\", \"text\": \"Inside the striped bucket hat, somebody has stitched small guiding marks and burned through the place where a proper name ought to be.\"}, {\"speaker\": \"You\", \"text\": \"I do not know who dressed me for this, but they expected me to move before sunrise.\"}, {\"speaker\": \"Narrator\", \"text\": \"A brass bell rings seven clipped notes somewhere beyond the mist, and a green seam of buried glass pushes up through the mud between two mushroom roots like a hidden window beginning to open.\"}]",
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages, while thin black counting wires hum low between the stalks."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Every pulse through the wires makes your five left thumbs twitch in sequence, as though your hand already knows the pattern being counted."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Inside the striped bucket hat, somebody has stitched small guiding marks and burned through the place where a proper name ought to be."
+        },
+        {
+          "speaker": "You",
+          "text": "I do not know who dressed me for this, but they expected me to move before sunrise."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "A brass bell rings seven clipped notes somewhere beyond the mist, and a green seam of buried glass pushes up through the mud between two mushroom roots like a hidden window beginning to open."
+        }
+      ],
+      "choices": [
+        {
+          "id": 1,
+          "from_node_id": 1,
+          "choice_text": "Trace the counting-wires to the green glass seam under the roots",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass storyline and let the field reveal one more strange rule before the larger mystery rushes in.\", \"choice_class\": \"progress\"}",
+          "created_at": "2026-04-10 02:38:32",
+          "notes_data": {
+            "notes": "Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass storyline and let the field reveal one more strange rule before the larger mystery rushes in.",
+            "choice_class": "progress"
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "goal": "find where the wires lead before the patrol reaches the field.",
+            "intent": "open the buried-glass storyline and let the field reveal one more strange rule before the larger mystery rushes in."
+          }
+        },
+        {
+          "id": 2,
+          "from_node_id": 1,
+          "choice_text": "Search the striped hat for a clue about who left it on you",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"Goal: find a personal trace of whoever left the hat on you before dawn. Intent: let the hat become the first backstory breadcrumb without forcing larger answers too early.\", \"choice_class\": \"inspection\"}",
+          "created_at": "2026-04-10 02:38:32",
+          "notes_data": {
+            "notes": "Goal: find a personal trace of whoever left the hat on you before dawn. Intent: let the hat become the first backstory breadcrumb without forcing larger answers too early.",
+            "choice_class": "inspection"
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "goal": "find a personal trace of whoever left the hat on you before dawn.",
+            "intent": "let the hat become the first backstory breadcrumb without forcing larger answers too early."
+          }
+        },
+        {
+          "id": 3,
+          "from_node_id": 1,
+          "choice_text": "Climb the tallest mushroom and watch what the survey patrol is dragging through the mist",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"Goal: confirm what immediate danger is moving through the field. Intent: bring outside pressure onstage early and maybe glimpse one strange machine or patrol detail without explaining the whole power behind it yet.\", \"choice_class\": \"progress\"}",
+          "created_at": "2026-04-10 02:38:32",
+          "notes_data": {
+            "notes": "Goal: confirm what immediate danger is moving through the field. Intent: bring outside pressure onstage early and maybe glimpse one strange machine or patrol detail without explaining the whole power behind it yet.",
+            "choice_class": "progress"
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "goal": "confirm what immediate danger is moving through the field.",
+            "intent": "bring outside pressure onstage early and maybe glimpse one strange machine or patrol detail without explaining the whole power behind it yet."
+          }
+        }
+      ],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 1,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 1,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 1,
+          "role": "player"
+        }
+      ]
+    }
+  ],
+  "story_direction_notes": [
+    {
+      "id": 2,
+      "note_type": "plotline",
+      "title": "Strange Brass Forces Before Named Rulers",
+      "note_text": "Introduce brass survey pressure and odd mechanical patrols gradually. Early scenes may show one strange walker, one alarming inspection, or one unnerving rumor, but should not hurry into naming the ruler behind it or explaining the whole regime too soon.",
+      "status": "active",
+      "priority": 5,
+      "related_entity_type": "character",
+      "related_entity_id": 1,
+      "related_hook_id": 2,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 1,
+      "note_type": "plotline",
+      "title": "One Past Event Exists, But It Can Wait",
+      "note_text": "Keep linking the bucket hat, the five-thumb curse, the amnesia, and waking in the Mushroom Field to the same hidden past event. Let the hat provide the first personal breadcrumb, but allow plenty of unrelated detours, local arcs, and present-tense trouble before the deeper backstory starts opening up.",
+      "status": "active",
+      "priority": 5,
+      "related_entity_type": "character",
+      "related_entity_id": 1,
+      "related_hook_id": 1,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    }
+  ],
+  "worldbuilding_notes": [
+    {
+      "id": 1,
+      "note_type": "regime_pressure",
+      "title": "Brass Survey Teams at Dawn",
+      "note_text": "Brass enumerators and survey engines have begun sweeping outlying districts at dawn. A few stranger metal walkers have appeared with them, but common people do not yet agree on what they are or who exactly commands them. Anything miscounted, unnamed, or physically irregular risks being claimed as an administrative error and removed.",
+      "status": "active",
+      "priority": 5,
+      "pressure": 5,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 3,
+      "note_type": "smuggling_network",
+      "title": "Names Travel Better Than Bodies",
+      "note_text": "There are covert routes for moving names, permits, and identities separately from the people who own them. Courier marks, hats, ribbons, and papers can outlast the memories of their carriers, especially when allies are trying to move someone ahead of the king's counting machines.",
+      "status": "active",
+      "priority": 4,
+      "pressure": 4,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 2,
+      "note_type": "hidden_infrastructure",
+      "title": "Glass Villages Beneath the Field",
+      "note_text": "Old green-glass settlements and sealed registry passages still run beneath certain mushroom fields. Their windows, lifts, and listening seams only surface when specific routes or bodies are recognized.",
+      "status": "active",
+      "priority": 4,
+      "pressure": 4,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    },
+    {
+      "id": 4,
+      "note_type": "ambient_danger",
+      "title": "Survey Weather Makes Bad Choices Permanent",
+      "note_text": "When the counting bells ring under bad weather, routes close hard and official mistakes become difficult to reverse. A branch can die from delay, capture, or bad timing just as easily as from violence.",
+      "status": "active",
+      "priority": 3,
+      "pressure": 3,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-10 02:38:32",
+      "updated_at": "2026-04-10 02:38:32"
+    }
+  ]
+}

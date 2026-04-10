@@ -166,6 +166,9 @@ class LLMGenerationService:
             "Use a mix of lyrical narration and clearer spoken dialogue.\n"
             "Narration may be more poetic or uncanny, but spoken dialogue should usually be more grounded and immediately understandable.\n"
             "The player character should usually be one of the clearest voices in the scene.\n"
+            "Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
+            "Introduce or reintroduce characters frequently. Characters make a story.\n"
+            "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
             "Prefer clear weird over murky weird. If a line sounds evocative but you cannot paraphrase it plainly, rewrite it.\n"
             "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.\n"
             "A hook is any unresolved mystery, unanswered question, ominous promise, unknown identity, suspicious clue, or strange causal thread that should matter later.\n"
@@ -191,6 +194,12 @@ class LLMGenerationService:
             "Cycles are allowed. Careful merges are allowed when branch-local consequences still make sense; do not collapse branches that now depend on different local state.\n"
             "Quick merges are a relief valve, not the default branch shape. If branch_shape.should_prefer_divergence is true, open at least one fresh path instead of only merging into existing scenes.\n"
             "Minor inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.\n"
+            "Do not simply restate the just-taken choice as another choice in the child scene. Advance the situation materially first.\n"
+            "Do not repeat the parent summary with only cosmetic wording changes.\n"
+            "If an inspection choice names a local prop, marker, knot, placard, seam, or similar focal object, establish it clearly in the scene text first instead of inventing it only in the choice menu.\n"
+            "Most multi-choice scenes should include at least one consequential option that is not pure inspection, such as a commitment, merge, ending, social move, location change, or response to immediate pressure.\n"
+            "If the branch has gone too long without another actor affecting events, bring in a person, faction, patrol, courier, rival, or other external pressure.\n"
+            "If the branch has lingered too long in one place, move to a new location or route deliberately back to an existing one.\n"
             "If frontier_budget_state.pressure_level is soft or hard, prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.\n"
             "When a local beat feels like it is winding down and arc_exit_candidate says a larger merge is plausible, you may use 1-2 transition scenes to close the local arc and route into another compatible storyline.\n"
             "Every choice must include internal planning notes in this form: 'Goal: ... Intent: ...'. Goal is the immediate purpose of taking the option. Intent is what broader direction, branch shape, or future possibility the option is meant to open, reinforce, or revisit.\n"
@@ -293,6 +302,7 @@ class LLMGenerationService:
         closure_choice_count = 0
         inspection_fresh_count = 0
         inferred_choice_classes: list[str] = []
+        consequential_choice_count = 0
         if branch_shape["should_prefer_divergence"] and merge_choice_count > 0 and fresh_choice_count == 0:
             issues.append(
                 "This branch has quick-merged too often recently. Open at least one fresh path instead of only merging into existing scenes."
@@ -322,6 +332,10 @@ class LLMGenerationService:
                     )
             if choice_class == "inspection" and choice.target_node_id is None:
                 inspection_fresh_count += 1
+            if choice_class in {"commitment", "ending"} or choice.target_node_id is not None:
+                consequential_choice_count += 1
+            elif choice_class == "progress" and self._choice_text_implies_consequence(choice.choice_text):
+                consequential_choice_count += 1
 
         pressure_level = frontier_budget.get("pressure_level")
         allow_second_fresh = bool(budget_config.get("allow_second_fresh_choice_only_for_bloom_scenes", True))
@@ -343,6 +357,7 @@ class LLMGenerationService:
             issues.append("Hard frontier pressure only allows fresh branching for bloom scenes with strong justification.")
         if pressure_level in {"soft", "hard"} and inspection_fresh_count > 0:
             issues.append("Inspection choices should reconverge quickly under frontier pressure instead of opening new durable leaves.")
+        _ = consequential_choice_count
 
         beat_budget = self.story_bible["beat_budget"]
         major_hook_updates = 0
@@ -523,6 +538,138 @@ class LLMGenerationService:
         if any(pattern.search(text) for pattern in self.INSPECTION_CHOICE_PATTERNS):
             return "inspection"
         return "progress"
+
+    def _choice_text_implies_consequence(self, value: str) -> bool:
+        text = (value or "").lower()
+        return any(
+            marker in text
+            for marker in (
+                "follow ",
+                "board",
+                "ride",
+                "enter",
+                "descend",
+                "climb",
+                "hide",
+                "surrender",
+                "run",
+                "return",
+                "call out",
+                "warn",
+                "speak",
+                "ask ",
+                "approach",
+            )
+        )
+
+    def _candidate_adds_actor_pressure(self, candidate: GenerationCandidate) -> bool:
+        if candidate.new_characters or candidate.floating_character_introductions:
+            return True
+        character_refs = [
+            reference for reference in candidate.entity_references
+            if reference.entity_type == "character"
+        ]
+        character_present = [
+            present for present in candidate.scene_present_entities
+            if present.entity_type == "character" and present.slot != "hero-center"
+        ]
+        if character_present:
+            return True
+        if len({reference.entity_id for reference in character_refs}) >= 2:
+            return True
+        texts = " ".join(
+            filter(
+                None,
+                [
+                    candidate.scene_summary,
+                    candidate.scene_text,
+                    *(line.text for line in candidate.dialogue_lines),
+                    *(choice.choice_text for choice in candidate.choices),
+                ],
+            )
+        ).lower()
+        return any(
+            marker in texts
+            for marker in ("patrol", "enumerator", "courier", "clerk", "rival", "auditor", "guard", "they arrive", "someone")
+        )
+
+    def _candidate_adds_location_motion(self, candidate: GenerationCandidate) -> bool:
+        if candidate.new_locations:
+            return True
+        texts = " ".join(
+            filter(
+                None,
+                [
+                    candidate.scene_summary,
+                    candidate.scene_text,
+                    *(choice.choice_text for choice in candidate.choices),
+                ],
+            )
+        ).lower()
+        return any(
+            marker in texts
+            for marker in ("arrive", "arrival", "board", "ride", "descend", "climb", "return", "reach", "enter", "cross into", "tunnel", "station", "depot", "gate")
+        )
+
+    def _candidate_repeats_action_family(self, candidate: GenerationCandidate, family: str) -> bool:
+        families = [self._classify_choice_action_family(choice.choice_text) for choice in candidate.choices]
+        return bool(families) and all(choice_family in {family, "other"} for choice_family in families)
+
+    def _classify_choice_action_family(self, choice_text: str) -> str:
+        text = (choice_text or "").lower()
+        if any(token in text for token in ("ask", "speak", "call", "answer", "warn", "bargain")):
+            return "social"
+        if any(token in text for token in ("board", "ride", "enter", "arrive", "return", "climb", "descend", "cross")):
+            return "travel"
+        if any(token in text for token in ("follow", "trace", "deeper")):
+            return "follow"
+        if any(token in text for token in ("touch", "press", "grip", "hold")):
+            return "touch"
+        if any(token in text for token in ("step back", "turn back", "observe", "watch", "wait")):
+            return "step_back"
+        if any(token in text for token in ("look", "listen", "inspect", "examine", "read", "study", "judge")):
+            return "inspect"
+        return "other"
+
+    def _candidate_has_material_delta(self, candidate: GenerationCandidate) -> bool:
+        if (
+            candidate.new_locations
+            or candidate.new_characters
+            or candidate.floating_character_introductions
+            or candidate.new_hooks
+            or candidate.hook_updates
+            or candidate.global_direction_notes
+            or candidate.inventory_changes
+            or candidate.affordance_changes
+            or candidate.relationship_changes
+            or candidate.discovered_clue_tags
+            or candidate.discovered_state_tags
+        ):
+            return True
+        if any(choice.target_node_id is not None or self._resolve_choice_class(choice) == "ending" for choice in candidate.choices):
+            return True
+        if any(choice.required_affordances for choice in candidate.choices):
+            return True
+        if self._candidate_adds_actor_pressure(candidate) or self._candidate_adds_location_motion(candidate):
+            return True
+        texts = " ".join(filter(None, [candidate.scene_summary, candidate.scene_text])).lower()
+        return any(
+            marker in texts
+            for marker in (
+                "arrive",
+                "arrival",
+                "patrol",
+                "seize",
+                "close",
+                "collapse",
+                "alarm",
+                "bell",
+                "courier",
+                "capture",
+                "faction",
+                "route closes",
+            )
+        )
 
     def _is_bloom_scene_candidate(
         self,

@@ -18,7 +18,7 @@ from app.config import Settings
 from app.database import connect
 from app.main import create_app
 from app.models import DirectionNoteProposal, GenerationCandidate, WorldbuildingNoteProposal
-from app.services.assets import AssetService
+from app.services.assets import AssetService, default_dimensions_for_asset_kind
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
 
@@ -155,6 +155,275 @@ SCENE_TRANSITION_CUE_PATTERNS = [
     re.compile(r"\b(head|go|went)\s+to\b", re.IGNORECASE),
     re.compile(r"\bportal\b", re.IGNORECASE),
 ]
+
+TEXT_SIMILARITY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "around",
+    "as",
+    "at",
+    "before",
+    "by",
+    "deeper",
+    "for",
+    "from",
+    "go",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "the",
+    "through",
+    "to",
+    "under",
+    "up",
+    "with",
+}
+
+CHOICE_GENERIC_TOKENS = {
+    "ask",
+    "choice",
+    "clue",
+    "clues",
+    "climb",
+    "counting",
+    "deeper",
+    "examine",
+    "faint",
+    "field",
+    "follow",
+    "glass",
+    "goal",
+    "green",
+    "hand",
+    "hat",
+    "hidden",
+    "inspect",
+    "intent",
+    "look",
+    "marker",
+    "mushroom",
+    "read",
+    "route",
+    "routes",
+    "seam",
+    "step",
+    "study",
+    "symbol",
+    "symbols",
+    "touch",
+    "trace",
+    "watch",
+    "wire",
+    "wires",
+}
+
+LOCAL_PROP_CHOICE_PATTERNS = [
+    re.compile(r"\b(?:inspect|examine|read|touch|press|study|step around|circle around|go around|look at|pick up|lift)\s+(?:the|a|an)\s+([a-z][a-z0-9' -]{2,60})", re.IGNORECASE),
+]
+
+
+def normalize_text_for_similarity(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def similarity_tokens(value: str, *, extra_stopwords: set[str] | None = None) -> set[str]:
+    stopwords = TEXT_SIMILARITY_STOPWORDS | (extra_stopwords or set())
+    return {
+        token[:-1] if token.endswith("s") and len(token) > 4 else token
+        for token in re.findall(r"[a-z0-9]+", normalize_text_for_similarity(value))
+        if len(token) >= 4 and token not in stopwords
+    }
+
+
+def texts_are_near_duplicates(left: str, right: str) -> bool:
+    normalized_left = normalize_text_for_similarity(left)
+    normalized_right = normalize_text_for_similarity(right)
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+    left_tokens = similarity_tokens(left)
+    right_tokens = similarity_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    overlap = left_tokens & right_tokens
+    if not overlap:
+        return False
+    smaller = min(len(left_tokens), len(right_tokens))
+    if len(overlap) >= 3 and (len(overlap) / max(smaller, 1)) >= 0.75:
+        return True
+    return len(left_tokens.symmetric_difference(right_tokens)) <= 1 and len(overlap) >= 2
+
+
+def extract_grounding_phrase(value: str) -> str:
+    phrase = (value or "").strip()
+    phrase = re.split(r"\b(?:for|with|that|where|while|before|after|beneath|under|near|beside)\b", phrase, maxsplit=1, flags=re.IGNORECASE)[0]
+    return phrase.strip(" .,!?:;\"'")
+
+
+def classify_choice_action_family(choice_text: str) -> str:
+    text = (choice_text or "").lower()
+    if any(token in text for token in ("ask", "speak", "call", "answer", "warn", "bargain")):
+        return "social"
+    if any(token in text for token in ("board", "ride", "enter", "arrive", "return", "climb", "descend", "cross", "head for", "go to")):
+        return "travel"
+    if any(token in text for token in ("follow", "trace", "deeper")):
+        return "follow"
+    if any(token in text for token in ("touch", "press", "grip", "hold")):
+        return "touch"
+    if any(token in text for token in ("step back", "turn back", "observe", "watch", "wait", "step aside")):
+        return "step_back"
+    if any(token in text for token in ("look", "listen", "inspect", "examine", "read", "study", "judge", "kneel beside")):
+        return "inspect"
+    return "other"
+
+
+def infer_choice_class_from_text(choice_text: str, notes: str | None) -> str:
+    text = " ".join(filter(None, [choice_text, notes or ""])).lower()
+    if any(pattern.search(text) for pattern in SCENE_TRANSITION_CUE_PATTERNS):
+        return "commitment"
+    if any(token in text for token in ("die", "death", "surrender", "give up", "accept capture", "let it take you")):
+        return "ending"
+    if any(token in text for token in ("look", "listen", "inspect", "examine", "read", "study", "judge")):
+        return "inspection"
+    if any(token in text for token in ("follow", "enter", "board", "ride", "climb", "descend", "return", "ask", "warn")):
+        return "commitment"
+    return "progress"
+
+
+def choice_text_implies_consequence(value: str) -> bool:
+    text = (value or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "follow ",
+            "board",
+            "ride",
+            "enter",
+            "descend",
+            "climb",
+            "hide",
+            "surrender",
+            "run",
+            "return",
+            "call out",
+            "warn",
+            "speak",
+            "ask ",
+            "approach",
+            "head for",
+        )
+    )
+
+
+def candidate_adds_actor_pressure(candidate: GenerationCandidate) -> bool:
+    if candidate.new_characters or candidate.floating_character_introductions:
+        return True
+    character_refs = [
+        reference for reference in candidate.entity_references
+        if reference.entity_type == "character"
+    ]
+    if any(
+        present.entity_type == "character" and present.slot != "hero-center"
+        for present in candidate.scene_present_entities
+    ):
+        return True
+    if len({reference.entity_id for reference in character_refs}) >= 2:
+        return True
+    texts = " ".join(
+        filter(
+            None,
+            [
+                candidate.scene_summary,
+                candidate.scene_text,
+                *(line.text for line in candidate.dialogue_lines),
+                *(choice.choice_text for choice in candidate.choices),
+            ],
+        )
+    ).lower()
+    return any(
+        marker in texts
+        for marker in ("patrol", "enumerator", "courier", "clerk", "rival", "auditor", "guard", "they arrive", "someone")
+    )
+
+
+def candidate_adds_location_motion(candidate: GenerationCandidate) -> bool:
+    if candidate.new_locations:
+        return True
+    texts = " ".join(
+        filter(
+            None,
+            [
+                candidate.scene_summary,
+                candidate.scene_text,
+                *(choice.choice_text for choice in candidate.choices),
+            ],
+        )
+    ).lower()
+    return any(
+        marker in texts
+        for marker in ("arrive", "arrival", "board", "ride", "descend", "climb", "return", "reach", "enter", "cross into", "tunnel", "station", "depot", "gate")
+    )
+
+
+def candidate_has_material_delta(candidate: GenerationCandidate) -> bool:
+    if (
+        candidate.new_locations
+        or candidate.new_characters
+        or candidate.floating_character_introductions
+        or candidate.new_hooks
+        or candidate.hook_updates
+        or candidate.global_direction_notes
+        or candidate.inventory_changes
+        or candidate.affordance_changes
+        or candidate.relationship_changes
+        or candidate.discovered_clue_tags
+        or candidate.discovered_state_tags
+    ):
+        return True
+    if any(choice.target_node_id is not None or infer_choice_class_from_text(choice.choice_text, choice.notes) == "ending" for choice in candidate.choices):
+        return True
+    if any(choice.required_affordances for choice in candidate.choices):
+        return True
+    if candidate_adds_actor_pressure(candidate) or candidate_adds_location_motion(candidate):
+        return True
+    texts = " ".join(filter(None, [candidate.scene_summary, candidate.scene_text])).lower()
+    return any(
+        marker in texts
+        for marker in ("arrive", "arrival", "patrol", "seize", "close", "collapse", "alarm", "bell", "courier", "capture", "faction", "route closes")
+    )
+
+
+def prune_existing_asset_requests(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> GenerationCandidate:
+    availability = packet.get("asset_availability") or []
+    existing_pairs = {
+        (asset_kind, entry.get("entity_type"), int(entry["entity_id"]))
+        for entry in availability
+        for asset_kind in (entry.get("available_asset_kinds") or [])
+        if entry.get("entity_type") and entry.get("entity_id") is not None
+    }
+    filtered_requests = []
+    seen_pairs: set[tuple[str | None, str | None, int | None]] = set()
+    for request in candidate.asset_requests:
+        pair = (
+            request.asset_kind,
+            request.entity_type,
+            int(request.entity_id) if request.entity_id is not None else None,
+        )
+        if pair in existing_pairs or pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        filtered_requests.append(request)
+    if len(filtered_requests) == len(candidate.asset_requests):
+        return candidate
+    return candidate.model_copy(update={"asset_requests": filtered_requests})
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -622,6 +891,13 @@ def build_validation_retry_user_prompt(
         "- scene_present_entities entries are for visible on-screen staging and must use slot, not role.\n"
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
         "- new_hooks are new hook proposals, so do not include hook ids there; include hook_type and summary instead.\n\n"
+        "- Do not simply restate the just-taken choice as another option. The new scene must materially advance before offering its next menu.\n"
+        "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
+        "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
+        "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
+        "- Most multi-choice scenes should include at least one consequential option that is not pure inspection.\n\n"
         "- Do not name a canonical character in scene text or choice text unless they have already appeared on this path or you are explicitly introducing them now.\n"
         f"- Already-met canonical characters on this path: {', '.join(allowed_names) if allowed_names else '(none yet besides implicit player context)'}.\n\n"
         "- If you are not deliberately changing affordances in this scene, return affordance_changes as [].\n"
@@ -674,6 +950,13 @@ def build_schema_retry_user_prompt(
         "- scene_present_entities entries should contain entity_type, entity_id, slot, and optional staging fields; they do not use role.\n"
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
         "- new_hooks entries are new hook proposals and require hook_type and summary; do not include hook ids there.\n"
+        "- Do not simply restate the just-taken choice as another option. Advance the scene before offering the next menu.\n"
+        "- Do not repeat the parent scene summary with only cosmetic changes.\n"
+        "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
+        "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
+        "- Most multi-choice scenes should include at least one consequential option that is not pure inspection.\n"
         "- If you are not deliberately changing affordances in this scene, return affordance_changes as [].\n"
         "- Do not copy available_affordance_names into affordance_changes.\n"
         "- Return JSON only, with no markdown fences or commentary.\n\n"
@@ -701,6 +984,7 @@ def build_planning_retry_user_prompt(
         "Important reminders:\n"
         "- Update at least one frontier choice note.\n"
         "- Bind at least one updated choice to a specific idea using bound_idea.\n"
+        "- Prefer planning notes that create short-horizon behavior such as introduce a character soon, move to a new or known location soon, escalate patrol pressure, or set up a merge/closure.\n"
         "- worldbuilding_notes are optional but allowed when the world needs more ambient pressure or conflict.\n\n"
         f"Planning issues:\n{json.dumps(issues, indent=2)}\n\n"
         "Previous invalid planning result:\n"
@@ -856,6 +1140,148 @@ def collect_scene_anchor_art_issues(
     ]
 
 
+def collect_redundant_progression_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    selected = packet.get("selected_frontier_item") or {}
+    context_summary = packet.get("context_summary") or {}
+    current_node = context_summary.get("current_node") or {}
+    parent_choice_text = (selected.get("choice_text") or "").strip()
+    parent_choice_notes = (selected.get("existing_choice_notes") or "").strip()
+    parent_summary = (current_node.get("summary") or "").strip()
+
+    issues: list[str] = []
+    if parent_summary and texts_are_near_duplicates(candidate.scene_summary or "", parent_summary):
+        issues.append(
+            "The new scene_summary too closely repeats the parent scene summary. Advance the situation materially instead of restating the same beat."
+        )
+
+    seen_choice_texts: list[str] = []
+    seen_choice_notes: list[str] = []
+    for choice in candidate.choices:
+        if parent_choice_text and texts_are_near_duplicates(choice.choice_text, parent_choice_text):
+            issues.append(
+                f"Choice '{choice.choice_text}' too closely repeats the just-taken choice. The next scene should offer a materially new follow-up, merge, or closure instead of re-offering the same action."
+            )
+        if parent_choice_notes and texts_are_near_duplicates(choice.notes or "", parent_choice_notes):
+            issues.append(
+                f"Choice '{choice.choice_text}' reuses the just-taken Goal/Intent almost verbatim. Give the new scene a distinct next-step purpose instead of repeating the same plan."
+            )
+        if any(texts_are_near_duplicates(choice.choice_text, prior_text) for prior_text in seen_choice_texts):
+            issues.append(
+                f"Choice '{choice.choice_text}' duplicates another choice in the same scene. Each option should represent a genuinely different next step."
+            )
+        if any(texts_are_near_duplicates(choice.notes or "", prior_notes) for prior_notes in seen_choice_notes):
+            issues.append(
+                f"Choice '{choice.choice_text}' duplicates another choice's Goal/Intent lane too closely. Separate the options more clearly."
+            )
+        seen_choice_texts.append(choice.choice_text)
+        seen_choice_notes.append(choice.notes or "")
+    return issues
+
+
+def collect_ungrounded_local_prop_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    selected = packet.get("selected_frontier_item") or {}
+    context_summary = packet.get("context_summary") or {}
+    current_node = context_summary.get("current_node") or {}
+    support_text = "\n".join(
+        filter(
+            None,
+            [
+                selected.get("choice_text") or "",
+                selected.get("existing_choice_notes") or "",
+                current_node.get("title") or "",
+                current_node.get("summary") or "",
+                candidate.scene_summary or "",
+                candidate.scene_text or "",
+                *(line.text for line in candidate.dialogue_lines),
+            ],
+        )
+    )
+    support_tokens = similarity_tokens(support_text, extra_stopwords=CHOICE_GENERIC_TOKENS)
+
+    issues: list[str] = []
+    for choice in candidate.choices:
+        for pattern in LOCAL_PROP_CHOICE_PATTERNS:
+            match = pattern.search(choice.choice_text or "")
+            if match is None:
+                continue
+            phrase = extract_grounding_phrase(match.group(1))
+            phrase_tokens = similarity_tokens(phrase, extra_stopwords=CHOICE_GENERIC_TOKENS)
+            if len(phrase_tokens) < 2:
+                continue
+            if len(phrase_tokens - support_tokens) >= 2:
+                issues.append(
+                    f"Choice '{choice.choice_text}' introduces a new focal prop or marker ('{phrase}') that the scene does not establish. If that object matters, establish it clearly in the scene text first or rename the choice to match grounded scene details."
+                )
+                break
+    return issues
+
+
+def collect_branch_pressure_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    actor_pressure = packet.get("actor_pressure") or {}
+    location_motion_pressure = packet.get("location_motion_pressure") or {}
+    action_summary = packet.get("recent_action_family_summary") or {}
+    issues: list[str] = []
+
+    repeated_action_family = action_summary.get("repeated_action_family")
+    repeated_action_count = int((action_summary.get("recent_action_family_counts") or {}).get(repeated_action_family or "", 0))
+
+    choice_classes: list[str] = []
+    consequential_choice_count = 0
+    for choice in candidate.choices:
+        choice_class = choice.choice_class or infer_choice_class_from_text(choice.choice_text, choice.notes)
+        choice_classes.append(choice_class)
+        if choice_class in {"commitment", "ending"} or choice.target_node_id is not None:
+            consequential_choice_count += 1
+        elif choice_class == "progress" and choice_text_implies_consequence(choice.choice_text):
+            consequential_choice_count += 1
+
+    if len(candidate.choices) >= 2 and consequential_choice_count == 0:
+        issues.append(
+            "Multi-choice scenes should include at least one consequential option, such as a commitment, merge, ending, social move, location change, or response to immediate pressure."
+        )
+
+    if actor_pressure.get("needs_more_people") and not candidate_adds_actor_pressure(candidate):
+        issues.append(
+            "This branch has gone too many scenes without another actor materially affecting events. Reintroduce or introduce a character, or bring external faction pressure onstage."
+        )
+
+    if location_motion_pressure.get("should_move") and not candidate_adds_location_motion(candidate):
+        issues.append(
+            "This branch has lingered in the same location for too long. Move to a new place, return to a meaningful known place, or otherwise make location motion explicit."
+        )
+
+    if repeated_action_family in {"inspect", "follow", "touch", "step_back"} and repeated_action_count >= 3:
+        candidate_families = [classify_choice_action_family(choice.choice_text) for choice in candidate.choices]
+        if candidate_families and all(family in {repeated_action_family, "other"} for family in candidate_families):
+            issues.append(
+                f"This branch has been overusing the '{repeated_action_family}' action family. Break the pattern with a social turn, location shift, merge, closure, or another materially different move."
+            )
+
+    if (
+        actor_pressure.get("needs_more_people")
+        or location_motion_pressure.get("should_move")
+        or repeated_action_count >= 3
+        or (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
+    ) and not candidate_has_material_delta(candidate):
+        issues.append(
+            "The scene does not appear to create a material delta. Advance danger, cast, location access, hook pressure, merge/closure state, or world pressure becoming immediate."
+        )
+
+    return issues
+
+
 def append_ideas(ideas_path: Path, ideas: list[PlanningIdea]) -> None:
     if not ideas:
         return
@@ -891,14 +1317,14 @@ def idea_tokens(value: str, *, exclude_generic: bool = False) -> set[str]:
     return tokens
 
 
-def idea_similarity_tokens(idea: PlanningIdea) -> set[str]:
-    return idea_tokens(f"{idea.title} {idea.note_text}")
-
-
 def jaccard_similarity(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def significant_idea_overlap(left: set[str], right: set[str]) -> int:
+    return len(left & right)
 
 
 def get_planning_idea_issues(packet: dict[str, Any], ideas: list[PlanningIdea]) -> list[str]:
@@ -923,10 +1349,10 @@ def get_planning_idea_issues(packet: dict[str, Any], ideas: list[PlanningIdea]) 
         item.get("title", ""): idea_tokens(item.get("title", ""), exclude_generic=True)
         for item in existing_ideas
     }
-    existing_similarity_tokens = {
+    existing_distinctive_similarity_tokens = {
         item.get("title", ""): idea_tokens(
             f"{item.get('title', '')} {item.get('note_text', '')}",
-            exclude_generic=False,
+            exclude_generic=True,
         )
         for item in existing_ideas
     }
@@ -959,18 +1385,24 @@ def get_planning_idea_issues(packet: dict[str, Any], ideas: list[PlanningIdea]) 
             )
 
         title_tokens = idea_tokens(idea.title, exclude_generic=True)
-        full_tokens = idea_similarity_tokens(idea)
+        distinctive_full_tokens = idea_tokens(
+            f"{idea.title} {idea.note_text}",
+            exclude_generic=True,
+        )
         for token in title_tokens:
             title_token_occurrences[token] = title_token_occurrences.get(token, 0) + 1
 
         for existing_title, tokens in existing_title_tokens.items():
-            if len(title_tokens & tokens) >= 2:
+            if len(title_tokens & tokens) >= 3:
                 issues.append(
                     f"Planning idea '{idea.title}' is too close to existing idea '{existing_title}'. Pick a more distinct concept."
                 )
                 break
-        for existing_title, tokens in existing_similarity_tokens.items():
-            if jaccard_similarity(full_tokens, tokens) >= 0.4:
+        for existing_title, tokens in existing_distinctive_similarity_tokens.items():
+            if (
+                significant_idea_overlap(distinctive_full_tokens, tokens) >= 2
+                and jaccard_similarity(distinctive_full_tokens, tokens) >= 0.35
+            ):
                 issues.append(
                     f"Planning idea '{idea.title}' is too similar to existing idea '{existing_title}'. Pick a more original concept."
                 )
@@ -989,10 +1421,10 @@ def get_planning_idea_issues(packet: dict[str, Any], ideas: list[PlanningIdea]) 
         )
 
     for index, idea in enumerate(ideas):
-        left_tokens = idea_similarity_tokens(idea)
+        left_tokens = idea_tokens(f"{idea.title} {idea.note_text}", exclude_generic=True)
         for other in ideas[index + 1 :]:
-            right_tokens = idea_similarity_tokens(other)
-            if jaccard_similarity(left_tokens, right_tokens) >= 0.4:
+            right_tokens = idea_tokens(f"{other.title} {other.note_text}", exclude_generic=True)
+            if significant_idea_overlap(left_tokens, right_tokens) >= 2 and jaccard_similarity(left_tokens, right_tokens) >= 0.35:
                 issues.append(
                     f"Planning ideas '{idea.title}' and '{other.title}' are too similar to each other. Spread the concepts farther apart."
                 )
@@ -1155,8 +1587,8 @@ def apply_normal_result(
             "entity_type": asset_request.entity_type,
             "entity_id": asset_request.entity_id,
             "prompt": asset_request.prompt,
-            "width": asset_request.width or 1024,
-            "height": asset_request.height or 1024,
+            "width": asset_request.width or default_dimensions_for_asset_kind(asset_request.asset_kind)[0],
+            "height": asset_request.height or default_dimensions_for_asset_kind(asset_request.asset_kind)[1],
             "steps": asset_request.steps or 25,
             "guidance_scale": asset_request.guidance_scale or 4.0,
             "seed": asset_request.seed,
@@ -1694,6 +2126,10 @@ def main() -> None:
                         )
                         parsed = parse_llm_result(packet, raw)
                         assert isinstance(parsed, GenerationCandidate)
+                        parsed = prune_existing_asset_requests(
+                            packet=packet,
+                            candidate=parsed,
+                        )
                         validated_payload = validate_candidate(client, parsed)
                         continuity_issues = collect_character_continuity_issues(
                             packet=packet,
@@ -1703,7 +2139,25 @@ def main() -> None:
                             packet=packet,
                             candidate=parsed,
                         )
-                        combined_extra_issues = continuity_issues + scene_anchor_issues
+                        redundant_progression_issues = collect_redundant_progression_issues(
+                            packet=packet,
+                            candidate=parsed,
+                        )
+                        ungrounded_prop_issues = collect_ungrounded_local_prop_issues(
+                            packet=packet,
+                            candidate=parsed,
+                        )
+                        branch_pressure_issues = collect_branch_pressure_issues(
+                            packet=packet,
+                            candidate=parsed,
+                        )
+                        combined_extra_issues = (
+                            continuity_issues
+                            + scene_anchor_issues
+                            + redundant_progression_issues
+                            + ungrounded_prop_issues
+                            + branch_pressure_issues
+                        )
                         if combined_extra_issues:
                             validated_payload["valid"] = False
                             validated_payload["issues"] = list(validated_payload.get("issues", [])) + combined_extra_issues

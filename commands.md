@@ -26,30 +26,14 @@ while ($true) {
 
 ## AIDER + LM studio
 single prompt:
-aider --model openai/nemotron-3-nano-4b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message "create a new file called hello-world.md"
 
-aider --model openai/nemotron-3-nano-4b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message-file docs/llm_story_worker.md
 
-aider --model openai/gpt-oss-20b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message-file docs/llm_story_worker.md
-
-aider --model openai/qwen/qwen3.5-35b-a3b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --file docs/llm_story_worker.md --message "Please read the contents of this file and tell me what you find"
-
-aider --model openai/qwen/qwen3.5-35b-a3b --openai-api-key "dummy-api-key" --openai-api-base "http://localhost:1234/v1" --edit-format whole --no-auto-commits --no-show-model-warnings --no-git --yes --message-file docs/llm_story_worker.md
-
+### This one below is good
 python -m app.tools.run_story_worker_local --model nvidia/nemotron-3-nano-4b --max-retries 3 --request-timeout 1800
 
 python -m app.tools.run_story_worker_local --model qwen/qwen3.5-35b-a3b
 
 lms load qwen/qwen3.5-35b-a3b --identifier story-qwen --ttl 60 --gpu max --context-length 100000 -y && python -m app.tools.run_story_worker_local --model story-qwen && lms unload story-qwen
-
-
-lms load qwen/qwen3.5-35b-a3b --identifier story-qwen --ttl 60 --gpu max --context-length 100000 -y
-try {
-    if ($?) { python -m app.tools.run_story_worker_local --model story-qwen }
-}
-finally {
-    lms unload story-qwen
-}
 
 
 lms load qwen/qwen3.5-35b-a3b --identifier story-qwen --ttl 60 --gpu max --context-length 100000 -y; try { if ($?) { python -m app.tools.run_story_worker_local --model story-qwen } } finally { lms unload story-qwen }

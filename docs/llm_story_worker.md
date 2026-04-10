@@ -9,6 +9,9 @@ This is the single per-run entrypoint for the story-expansion loop.
 - The story should expand over many runs while preserving continuity across recurring places, characters, objects, hooks, and assets.
 - Setting and characters: whimsical, surreal, adventurous, sincere, slightly unhinged.
 - Writing Tone: straightforward but can use prose to enhance or certain characters could have an interesting way of speaking (eg: in rhymes or alliteration) as long as it is immediately understandable
+- Feel free to act creatively. Make bold choices as long as they fit in the story.
+- Introduce or reintroduce characters frequently. Characters make a story.
+- Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.
 
 ## What This Repo Does
 - Stores global canon in SQLite.
@@ -33,6 +36,8 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
 - Most of the time, do not change code.
 - Your normal job is to continue the story one scene at a time.
 - Preserve continuity, tone, pacing, hooks, persistent consequences, and visual follow-through.
+- Do not confuse continuity with timidity. The story should move, surprise, and commit.
+- Most scenes should do more than inspect the nearest strange object again.
 - Only touch code/docs if the human explicitly asks for repo changes or the loop is blocked by a real tooling/schema bug.
 
 ## Execution Default
@@ -100,6 +105,8 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
   - `new_hooks` are only for brand-new hooks, so do not include existing hook ids there
 - If the current place does not change, it is okay to keep the same `current_scene`.
 - If the player clearly arrives somewhere new, explicitly change `current_scene`.
+- If a branch has lingered in one place too long, move to a new location or route deliberately back to an existing one.
+- If a branch has gone too long without another actor affecting events, bring in a person, faction, patrol, courier, rival, or other external pressure.
 
 ## Runtime Fallbacks
 - If you omit stage metadata in a same-place continuation, the runtime may inherit the parent scene's current location and visible entities.
@@ -164,7 +171,8 @@ Too vague:
 - `This should later resolve into a true character.`
 
 Good broad direction:
-- `The bucket hat was given to him by someone from his missing past, and its inner mirror can briefly show near-future or adjacent-memory glimpses for reasons that will matter much later.`
+- `The bucket hat was given to him by someone from his missing past, and clues around it should help recover the same hidden event that caused the amnesia, the field arrival, and the wider conflict.`
+- `The five-thumbed hand is a curse or hostile alteration tied to that same past event. Institutions and automotons may react to it, but the hand is not a gifted access token.`
 
 Bad over-binding:
 - `The bucket hat is just tram platform equipment and the stitching is its operating manual.`

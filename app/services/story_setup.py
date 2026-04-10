@@ -539,22 +539,24 @@ class StorySetupService:
                 "scene_title": "Before the Counting Bell",
                 "scene_summary": (
                     "The Tall Gnome wakes in the Mushroom Field just before a brass survey patrol crosses it, "
-                    "with counting wires underfoot, a bucket hat that seems to remember routes, and a green "
-                    "glass seam in the soil that reacts to the altered hand."
+                    "with counting wires underfoot, a bucket hat somebody left for him, and a green glass seam "
+                    "in the soil that stirs uneasily at the curse in his altered hand."
                 ),
                 "scene_text": (
                     "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages. "
                     "Between the stalks, thin black counting wires have been strung sometime in the night, and "
                     "every quiet hum through them makes your five left thumbs twitch in sequence.\n\n"
-                    "Your striped bucket hat is cold with dew and warm at the brim. Tiny route marks have been "
-                    "stitched inside it, then half-burned through where a proper name ought to be. Each time the "
-                    "wires sing, the hat gives a faint, stubborn tug toward the deeper parts of the field.\n\n"
+                    "Your striped bucket hat is cold with dew and warm at the brim. It feels like an ordinary hat "
+                    "that belonged in a real life before this one, except for the tiny stitches hidden inside the "
+                    "band and the place where somebody burned through a proper name. Each time the wires sing, you "
+                    "get the stubborn feeling that whoever left the hat on you meant it to guide you.\n\n"
                     "Far away, a brass bell rings seven clipped notes. You do not know why that sound fills you "
                     "with the certainty that something is coming to count you, misname you, and carry you off in "
-                    "paperwork. Between two mushroom roots, a green line of buried glass has surfaced through the "
-                    "mud like a window trying to breathe.\n\n"
+                    "paperwork. From deeper in the mist, you hear one heavier metallic step where no wagon should be. "
+                    "Between two mushroom roots, a green line of buried glass has surfaced through the mud like a "
+                    "window trying to breathe.\n\n"
                     "If the field is being surveyed at dawn, you have very little time to decide whether to climb, "
-                    "descend, or listen to the clothing that should not know more than you do."
+                    "descend, or hold onto the few strange clues somebody left behind before the field decides for you."
                 ),
                 "dialogue_lines": [
                     {
@@ -567,7 +569,7 @@ class StorySetupService:
                     },
                     {
                         "speaker": "Narrator",
-                        "text": "Inside the striped bucket hat, somebody has stitched route marks and burned through the place where a proper name ought to be.",
+                        "text": "Inside the striped bucket hat, somebody has stitched small guiding marks and burned through the place where a proper name ought to be.",
                     },
                     {
                         "speaker": "You",
@@ -581,17 +583,17 @@ class StorySetupService:
                 "choices": [
                     {
                         "choice_text": "Trace the counting-wires to the green glass seam under the roots",
-                        "notes": "Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass registry storyline and test whether the altered hand belongs to hidden machinery.",
+                        "notes": "Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass storyline and let the field reveal one more strange rule before the larger mystery rushes in.",
                         "choice_class": "progress",
                     },
                     {
-                        "choice_text": "Raise the striped hat into the wind and listen for the route it remembers",
-                        "notes": "Goal: learn whether the hat responds to the same system watching the field. Intent: develop the hat as a courier token tied to wider stolen-name routes instead of treating it as a local curiosity.",
+                        "choice_text": "Search the striped hat for a clue about who left it on you",
+                        "notes": "Goal: find a personal trace of whoever left the hat on you before dawn. Intent: let the hat become the first backstory breadcrumb without forcing larger answers too early.",
                         "choice_class": "inspection",
                     },
                     {
-                        "choice_text": "Climb the tallest mushroom and watch for the brass enumerators",
-                        "notes": "Goal: confirm what immediate danger is moving through the field. Intent: bring active world pressure onstage early so the story gains pursuit, timing, and harder branch stakes.",
+                        "choice_text": "Climb the tallest mushroom and watch what the survey patrol is dragging through the mist",
+                        "notes": "Goal: confirm what immediate danger is moving through the field. Intent: bring outside pressure onstage early and maybe glimpse one strange machine or patrol detail without explaining the whole power behind it yet.",
                         "choice_class": "progress",
                     },
                 ],
@@ -616,58 +618,58 @@ class StorySetupService:
                 "hook_type": "identity_mystery",
                 "importance": "major",
                 "summary": (
-                    "The striped bucket hat behaves less like clothing than a routed token from a hidden network "
-                    "that moves names, routes, and identities through the world."
+                    "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field "
+                    "all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him."
                 ),
                 "payoff_concept": (
-                    "The hat is tied to a clandestine route-and-name smuggling system that intersects with the "
-                    "protagonist's missing past; later payoffs should connect it to wider political and registry "
-                    "pressures, not just the nearest local scene."
+                    "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it "
+                    "should help recover the personal history behind the same event that caused the amnesia, the field arrival, "
+                    "and the broader tightening pressure gathering beyond the field."
                 ),
                 "must_not_imply": [
-                    "Do not reduce the hat to a one-scene clue or a simple local magical object.",
-                    "Do not let the first nearby NPC fully explain where the hat came from or who sent it.",
+                    "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+                    "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.",
                 ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
                 "min_distance_to_payoff": 20,
-                "min_distance_to_next_development": 4,
+                "min_distance_to_next_development": 6,
                 "required_clue_tags": [],
                 "required_state_tags": [],
                 "status": "active",
                 "notes": (
-                    "Long-range major hook. Early developments should reveal route fragments, delivery rules, "
-                    "or recognition pressure without collapsing the mystery into the nearest scene."
+                    "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but "
+                    "they should leave plenty of room for unrelated local arcs before the shared past event comes into focus."
                 ),
             },
             "hand": {
                 "hook_type": "body_mystery",
                 "importance": "major",
                 "summary": (
-                    "The five-thumbed hand and stretched gnome body match measuring schemes used by buried "
-                    "registry machinery and royal enumerators, suggesting deliberate alteration."
+                    "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, "
+                    "or hostile alteration tied to the same hidden event that erased his memory and left him in the field."
                 ),
                 "payoff_concept": (
-                    "The protagonist was physically reconfigured for access, counting, or passage through systems "
-                    "that ordinary bodies cannot satisfy; later payoffs should tie this to broader civic or royal "
-                    "machinery rather than a single local device."
+                    "A foe, state agent, or enemy force altered the protagonist on purpose, and that injury now entangles "
+                    "him with the tightening survey apparatus, its enumerators, and its stranger metal walkers. Systems may react to "
+                    "the curse, but the hand is not a gift or privileged access token."
                 ),
                 "must_not_imply": [
-                    "Do not explain the body alteration as a random mutation or harmless fantasy oddity.",
-                    "Do not solve the hand mystery with a single lock, plate, or one-scene mechanism.",
+                    "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+                    "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.",
                 ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
                 "min_distance_to_payoff": 20,
-                "min_distance_to_next_development": 4,
+                "min_distance_to_next_development": 6,
                 "required_clue_tags": [],
                 "required_state_tags": [],
                 "status": "active",
                 "notes": (
-                    "Long-range major hook. Early scenes may find evidence that the body fits systems of measurement, "
-                    "survey, or transit, but should not yet reveal who changed it or why."
+                    "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, "
+                    "but they should not hurry into naming the culprit or explaining the whole curse."
                 ),
             },
         }
@@ -687,11 +689,11 @@ class StorySetupService:
         notes = [
             {
                 "note_type": "plotline",
-                "title": "Hat as Contraband Route Token",
+                "title": "One Past Event Exists, But It Can Wait",
                 "note_text": (
-                    "Treat the bucket hat as a surviving piece of a larger route-and-name traffic system. "
-                    "Future scenes should let it attract attention from couriers, auditors, smugglers, or machines "
-                    "that recognize delivery marks without paying off its exact origin too early."
+                    "Keep linking the bucket hat, the five-thumb curse, the amnesia, and waking in the Mushroom Field "
+                    "to the same hidden past event. Let the hat provide the first personal breadcrumb, but allow plenty of unrelated "
+                    "detours, local arcs, and present-tense trouble before the deeper backstory starts opening up."
                 ),
                 "priority": 5,
                 "related_entity_type": "character",
@@ -700,11 +702,10 @@ class StorySetupService:
             },
             {
                 "note_type": "plotline",
-                "title": "Body Fits Systems It Should Not",
+                "title": "Strange Brass Forces Before Named Rulers",
                 "note_text": (
-                    "Keep connecting the altered hand and stretched body to broader systems of counting, access, "
-                    "measurement, and civic control. The useful pattern is recognition by institutions and devices, "
-                    "not a parade of isolated hand-shaped gimmicks."
+                    "Introduce brass survey pressure and odd mechanical patrols gradually. Early scenes may show one strange walker, "
+                    "one alarming inspection, or one unnerving rumor, but should not hurry into naming the ruler behind it or explaining the whole regime too soon."
                 ),
                 "priority": 5,
                 "related_entity_type": "character",
@@ -724,10 +725,9 @@ class StorySetupService:
         notes = [
             {
                 "note_type": "regime_pressure",
-                "title": "The King's Brass Enumerators",
+                "title": "Brass Survey Teams at Dawn",
                 "note_text": (
-                    "The crown has deployed brass enumerators and survey engines to recatalog outlying districts at dawn. "
-                    "Anything miscounted, unnamed, or physically irregular risks being claimed as an administrative error."
+                    "Brass enumerators and survey engines have begun sweeping outlying districts at dawn. A few stranger metal walkers have appeared with them, but common people do not yet agree on what they are or who exactly commands them. Anything miscounted, unnamed, or physically irregular risks being claimed as an administrative error and removed."
                 ),
                 "priority": 5,
                 "pressure": 5,
@@ -747,7 +747,7 @@ class StorySetupService:
                 "title": "Names Travel Better Than Bodies",
                 "note_text": (
                     "There are covert routes for moving names, permits, and identities separately from the people who own them. "
-                    "Courier marks, hats, ribbons, and route tokens can outlast the memories of their carriers."
+                    "Courier marks, hats, ribbons, and papers can outlast the memories of their carriers, especially when allies are trying to move someone ahead of the new counting machines."
                 ),
                 "priority": 4,
                 "pressure": 4,
@@ -856,56 +856,76 @@ class StorySetupService:
                 "importance": "major",
                 "summary": (
                     "The striped bucket hat, the lost first name, the amnesia, and waking in the Mushroom Field "
-                    "all point to the same hidden past event."
+                    "all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him."
                 ),
                 "payoff_concept": (
-                    "The bucket hat came from someone in the protagonist's missing past, and its mirror holds a strange foresight-or-memory function that was meant to guide or protect him for reasons revealed much later."
+                    "The bucket hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the same hidden event that caused the amnesia, the field arrival, and the wider tightening pressure gathering beyond the field."
                 ),
                 "must_not_imply": [
-                    "Do not reduce the bucket hat to ordinary tram uniform gear or platform-issued clothing.",
-                    "Do not fully reveal who gave the hat or why until much later.",
+                    "Do not reduce the bucket hat to impersonal route hardware, ordinary tram uniform gear, or platform-issued clothing.",
+                    "Do not fully reveal who gave the hat or why it was left with him until much later.",
                 ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
                 "min_distance_to_payoff": 20,
-                "min_distance_to_next_development": 4,
+                "min_distance_to_next_development": 6,
                 "required_clue_tags": [],
                 "required_state_tags": [],
                 "status": "active",
                 "notes": (
-                    "This is a long-range major hook. Do not pay it off early just because a later clue feels tempting."
+                    "This is a long-range major hook. Let the hat provide only sparse early breadcrumbs and leave room for unrelated arcs before the deeper past starts opening."
                 ),
             },
             {
                 "hook_type": "body_mystery",
                 "importance": "major",
                 "summary": (
-                    "The five-thumbed left hand and the protagonist's altered body suggest deliberate transformation, "
-                    "tampering, or design."
+                    "The five-thumbed left hand and the protagonist's altered body suggest a deliberate curse, "
+                    "mutilation, or hostile alteration tied to the same hidden event."
                 ),
                 "payoff_concept": (
-                    "The altered hand and stretched body are the result of deliberate intervention tied to the protagonist's missing past, not a random fantasy oddity."
+                    "The altered hand and stretched body are the result of deliberate intervention tied to the protagonist's missing past and later entangled with the tightening survey apparatus; they are not a random fantasy oddity or privileged access token."
                 ),
                 "must_not_imply": [
-                    "Do not explain the altered body as a simple local platform side effect.",
-                    "Do not treat the five thumbs as a joke mutation with no larger meaning.",
+                    "Do not explain the altered body as a simple local platform side effect, harmless oddity, or beneficial upgrade.",
+                    "Do not treat the five thumbs as a joke mutation or privileged passkey with no larger meaning.",
                 ],
                 "linked_entity_type": "character",
                 "linked_entity_id": protagonist_id,
                 "introduced_at_depth": 0,
                 "min_distance_to_payoff": 20,
-                "min_distance_to_next_development": 4,
+                "min_distance_to_next_development": 6,
                 "required_clue_tags": [],
                 "required_state_tags": [],
                 "status": "active",
                 "notes": (
-                    "This is a long-range major hook tied to the protagonist's body and should not be solved in the opening stretch."
+                    "This is a long-range major hook tied to the protagonist's body and should stay uneasy and partially unexplained through the opening stretch."
                 ),
             },
         ]
         for hook in desired_hooks:
             existing = existing_by_summary.get(hook["summary"].strip().lower())
+            if existing is None:
+                existing = next(
+                    (
+                        candidate
+                        for candidate in existing_hooks
+                        if candidate["hook_type"] == hook["hook_type"]
+                        and candidate["importance"] == hook["importance"]
+                        and (
+                            (
+                                candidate.get("linked_entity_type") == hook["linked_entity_type"]
+                                and int(candidate.get("linked_entity_id") or 0) == int(hook["linked_entity_id"])
+                            )
+                            or (
+                                candidate.get("linked_entity_type") in {None, "", "null"}
+                                and candidate.get("linked_entity_id") in {None, 0, "0"}
+                            )
+                        )
+                    ),
+                    None,
+                )
             if existing is None:
                 self.branch_state.create_hook(branch_key=branch_key, **hook)
                 continue

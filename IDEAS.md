@@ -127,3 +127,27 @@ Suggested format:
 - [Character] The Ember Scribe: A being whose skin is made of cooled volcanic glass, allowing them to write with fire that never burns and erases itself when read aloud.
 - [Location] The Hollow Clocktower: A structure built from frozen soundwaves; its walls vibrate silently, and any touch produces a single unheard memory of the toucher's deepest regret.
 - [Event] The Bloom of Unwritten Songs: When a forgotten melody is finally sung in perfect pitch, it causes all nearby objects to briefly forget their purpose and dance for exactly 13 seconds before returning to normal function.
+
+- [Character] The Chrono-Crawling Frog: A frog who has absorbed time from a broken pocket watch, causing its legs to move in reverse when it jumps and forward when it eats. It believes the future is made of jellybeans.
+- [Location] The Library That Grows Teeth: An underground glass village where books sprout tiny fangs at night, chewing on forgotten stories until they become edible. The walls are made of polished obsidian that reflects not your face but the last thing you will regret.
+- [Event] The Great Unfolding: Once every century, all clocks in the world stop at 3:17 AM. At that moment, a single frog leaps from a clock tower into a sky full of floating origami birds made of forgotten promises.
+
+- [Character] The Clocksmith Who Dreams in Reverse Time: A clockmaker who repairs timepieces by listening to their regrets. Each broken watch reveals a memory the owner tried to erase, and fixing it requires the maker to relive the moment they chose to forget.
+- [Location] The Bazaar of Unclaimed Possessions: A floating market where every item is someone’s abandoned hope. A child’s laughter echoes from a cracked teacup, and a lost wedding ring spins slowly in the air, refusing to be claimed.
+- [Event] The Silence That Screams Backwards: At midnight, all speech reverses direction. Words spoken forward become echoes that travel backward into throats, forcing listeners to remember what they never said before it was born.
+
+- [Character] The Gutter Singers: A troupe of amphibious musicians who cultivate sound from the vibrations of forgotten subway tunnels. Their instruments are made entirely of hollowed-out glass, and each note alters the local gravity for a few seconds.
+- [Location] The Library of Unwritten Hours: An underground archive where books grow in real-time based on the reader's imagination. The shelves are made of living coral, and the doors open only when someone forgets a dream they once had.
+- [Event] The Great Unraveling: Once per century, all clocks in the world simultaneously lose their hands. For 24 hours, time flows backward only for those who have never lied. During this hour, memories become physical objects that drift upward into the sky.
+
+- [Character] The Gutter-Singer Who Feeds on Static: A frog with translucent skin that vibrates when it hears unheard frequencies. It lives in a subway tunnel where time drips like honey, and its song can make metal weep or bloom into temporary flowers.
+- [Location] The Library of Unfinished Apologies: A vast underground vault where every glass floor is a mirror reflecting only what someone has yet to say. The walls are made of frozen sighs, and the air hums with unsent letters that float upward like dandelion seeds.
+- [Event] The Day the Moon Forgot Its Shadow: At midnight, all shadows retreat into the sky and become sentient clouds. Creatures must navigate a world where they are the only thing left to hold darkness together.
+
+- [Character] The Luminous Cartographer of Unwritten Routes: A frog with translucent skin that maps the dreams of sleeping clouds, leaving trails of phosphorescent ink that only appear when the listener hums a forgotten lullaby.
+- [Location] The Library of Unread Books: An underground vault where books grow like vines and their pages are made of solidified moonlight; reading them causes temporary flight but erases one's ability to remember the next sentence.
+- [Event] The Great Unfurling: Once per lunar tide, every surface in the world simultaneously peels back like a giant scroll, revealing a new layer of reality that is only visible to those who have never lied.
+
+- [Character] The Gravity-Weaver's Shadow: A being of shifting darkness that walks upside-down, leaving trails of inverted gravity. Where it passes, objects float upward and time flows in spirals, but only the shadow can see the true direction.
+- [Location] The Clockwork Garden of Forgotten Tides: A desert where sand dunes pulse with rhythmic tides that never reach the sea. Each wave is a memory of a lost ocean, and the wind carries whispers in languages no one remembers having spoken.
+- [Event] The Day the Stars Forgot Their Names: When all celestial bodies collectively lose their names, reality briefly becomes unlabelled—no one can call anything by its proper term. The sky fills with blank constellations that rearrange into stories only dreamers can read.

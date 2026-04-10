@@ -19,6 +19,12 @@ class StoryGraphService:
         r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
         re.IGNORECASE | re.DOTALL,
     )
+    INSPECT_ACTION_PATTERN = re.compile(r"\b(look|listen|inspect|examine|read|study|watch|judge)\b", re.IGNORECASE)
+    FOLLOW_ACTION_PATTERN = re.compile(r"\b(follow|trace|descend|deeper)\b", re.IGNORECASE)
+    TOUCH_ACTION_PATTERN = re.compile(r"\b(touch|press|grip|hold)\b", re.IGNORECASE)
+    STEP_BACK_ACTION_PATTERN = re.compile(r"\b(step back|turn back|back away|wait|let .* watch|observe)\b", re.IGNORECASE)
+    SOCIAL_ACTION_PATTERN = re.compile(r"\b(ask|speak|call|answer|tell|bargain|warn|hide from|follow them|join)\b", re.IGNORECASE)
+    LOCATION_TRANSITION_PATTERN = re.compile(r"\b(board|ride|enter|arrive|reach|head to|go to|return to|climb|cross|step into)\b", re.IGNORECASE)
     _CHOICE_BINDING_UNSET = object()
 
     def __init__(self, connection: sqlite3.Connection) -> None:
@@ -597,19 +603,68 @@ class StoryGraphService:
         mixed_merge_count = 0
         nodes_opening_fresh_paths = 0
         merge_only_streak = 0
+        same_location_streak = 0
+        single_actor_scene_streak = 0
+        action_family_counts: dict[str, int] = {}
+        repeated_action_family: str | None = None
+        recent_primary_location_id: int | None = None
 
         for index, row in enumerate(rows):
-            choices = fetch_all(
-                self.connection,
-                "SELECT id, to_node_id FROM choices WHERE from_node_id = ? ORDER BY id",
-                (row["id"],),
-            )
+            node = self.get_story_node(int(row["id"])) or {}
+            choices = node.get("choices") or []
             total_choices = len(choices)
             merge_choices = sum(1 for choice in choices if choice["to_node_id"] is not None)
             fresh_choices = sum(1 for choice in choices if choice["to_node_id"] is None)
             is_merge_only = total_choices > 0 and merge_choices > 0 and fresh_choices == 0
             opens_fresh_path = fresh_choices > 0
             is_mixed = merge_choices > 0 and fresh_choices > 0
+            current_scene = next(
+                (
+                    entity for entity in (node.get("entities") or [])
+                    if entity.get("entity_type") == "location" and entity.get("role") == "current_scene"
+                ),
+                None,
+            )
+            current_scene_location_id = (
+                int(current_scene["entity_id"]) if current_scene and current_scene.get("entity_id") is not None else None
+            )
+            if index == same_location_streak and current_scene_location_id is not None:
+                if recent_primary_location_id is None or current_scene_location_id == recent_primary_location_id:
+                    same_location_streak += 1
+                    recent_primary_location_id = current_scene_location_id
+
+            character_ids = {
+                int(entity["entity_id"])
+                for entity in (node.get("entities") or [])
+                if entity.get("entity_type") == "character" and entity.get("entity_id") is not None
+            } | {
+                int(entity["entity_id"])
+                for entity in (node.get("present_entities") or [])
+                if entity.get("entity_type") == "character" and entity.get("entity_id") is not None
+            }
+            has_character_pressure = (
+                len(character_ids) >= 2
+                or any(
+                    entity.get("entity_type") == "character"
+                    and entity.get("slot") != "hero-center"
+                    for entity in (node.get("present_entities") or [])
+                )
+                or any(
+                    entity.get("entity_type") == "character"
+                    and entity.get("role") in {"introduced", "speaker", "present"}
+                    for entity in (node.get("entities") or [])
+                )
+            )
+            if index == single_actor_scene_streak and not has_character_pressure:
+                single_actor_scene_streak += 1
+
+            node_action_families = {
+                family
+                for choice in choices
+                if (family := self._classify_choice_action_family(choice.get("choice_text") or "")) != "other"
+            }
+            for family in node_action_families:
+                action_family_counts[family] = action_family_counts.get(family, 0) + 1
 
             if is_merge_only:
                 merge_only_count += 1
@@ -630,8 +685,17 @@ class StoryGraphService:
                     "fresh_choices": fresh_choices,
                     "is_merge_only": is_merge_only,
                     "opens_fresh_path": opens_fresh_path,
+                    "current_scene_location_id": current_scene_location_id,
+                    "has_character_pressure": has_character_pressure,
+                    "action_families": sorted(node_action_families),
                 }
             )
+
+        if action_family_counts:
+            repeated_action_family = max(
+                action_family_counts.items(),
+                key=lambda item: (item[1], item[0]),
+            )[0]
 
         should_prefer_divergence = (
             merge_only_streak >= merge_only_streak_limit
@@ -657,11 +721,33 @@ class StoryGraphService:
             "merge_only_count": merge_only_count,
             "mixed_merge_count": mixed_merge_count,
             "nodes_opening_fresh_paths": nodes_opening_fresh_paths,
+            "same_location_streak": same_location_streak,
+            "single_actor_scene_streak": single_actor_scene_streak,
+            "recent_action_family_counts": action_family_counts,
+            "repeated_action_family": repeated_action_family,
             "merge_pressure_level": merge_pressure_level,
             "should_prefer_divergence": should_prefer_divergence,
             "reason": reason,
             "recent_nodes": recent_nodes,
         }
+
+    def _classify_choice_action_family(self, choice_text: str) -> str:
+        text = (choice_text or "").strip().lower()
+        if not text:
+            return "other"
+        if self.SOCIAL_ACTION_PATTERN.search(text):
+            return "social"
+        if self.LOCATION_TRANSITION_PATTERN.search(text):
+            return "travel"
+        if self.FOLLOW_ACTION_PATTERN.search(text):
+            return "follow"
+        if self.TOUCH_ACTION_PATTERN.search(text):
+            return "touch"
+        if self.STEP_BACK_ACTION_PATTERN.search(text):
+            return "step_back"
+        if self.INSPECT_ACTION_PATTERN.search(text):
+            return "inspect"
+        return "other"
 
     def list_frontier(
         self,
@@ -1256,6 +1342,10 @@ class StoryGraphService:
             score += 2.0
         elif choice_class == "ending":
             score += 1.0
+        if branch_shape.get("single_actor_scene_streak", 0) >= 2:
+            score += 2.5
+        if branch_shape.get("same_location_streak", 0) >= 3:
+            score += 2.5
         if branch_shape.get("should_prefer_divergence"):
             score += 8.0
         elif branch_shape.get("merge_pressure_level") == "medium":
@@ -1278,6 +1368,10 @@ class StoryGraphService:
             reason = "High-priority continuity target: this leaf carries a bound medium-range idea and should be revisited."
         elif branch_shape.get("should_prefer_divergence"):
             reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."
+        elif branch_shape.get("same_location_streak", 0) >= 3:
+            reason = "Location-motion target: this branch has lingered in one place and should move, return somewhere meaningful, or transition."
+        elif branch_shape.get("single_actor_scene_streak", 0) >= 2:
+            reason = "Character-pressure target: this branch needs another person or faction pressure onstage soon."
         elif global_budget.get("pressure_level") in {"soft", "hard"} and sibling_open_choices > 1:
             reason = "Frontier-control target: this parent already has several active siblings, so a merge or closure here would reduce branch sprawl."
         elif eligible_major > 0:

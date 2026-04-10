@@ -20,14 +20,19 @@ from app.services.canon import CanonResolver
 from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
 from app.services.story_setup import StorySetupService
+from app.tools.prepare_story_run import build_validation_checklist
 from app.tools.run_story_worker_local import (
     PlanningIdea,
     build_asset_prompt,
+    collect_branch_pressure_issues,
     collect_character_continuity_issues,
+    collect_redundant_progression_issues,
     get_planning_idea_issues,
     infer_missing_asset_requests,
+    collect_ungrounded_local_prop_issues,
     normalize_generation_candidate_payload,
     parse_llm_result,
+    prune_existing_asset_requests,
     collect_scene_anchor_art_issues,
 )
 
@@ -357,6 +362,95 @@ def test_comfyui_generation_registers_asset(tmp_path: Path, monkeypatch) -> None
     assert "Do not specify art style directions beyond the content itself." in prompt_text
 
 
+def test_background_generation_prompt_enforces_environment_only_rules(tmp_path: Path) -> None:
+    from app.services.assets import AssetService
+
+    with connect(tmp_path / "background_prompt_test.db") as connection:
+        service = AssetService(connection, tmp_path)
+        prompt = service.compose_generation_prompt(
+            asset_kind="background",
+            user_prompt="A vaulted chamber of green glass seams and violet light.",
+        )
+        negative_prompt = service.compose_negative_prompt(
+            asset_kind="background",
+            user_negative_prompt=None,
+        )
+
+    assert "Environment scene only." in prompt
+    assert "No characters, no hands, no bodies, no faces" in prompt
+    assert "wide establishing shot" in prompt
+    assert negative_prompt is not None
+    assert "character" in negative_prompt
+    assert "hand" in negative_prompt
+    assert "isolated object" in negative_prompt
+
+
+def test_background_generation_defaults_to_landscape_dimensions(tmp_path: Path, monkeypatch) -> None:
+    output_dir = tmp_path / "comfy_output" / "background"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated_file = output_dir / "bg_00001_.png"
+    Image.new("RGB", (64, 64), color=(100, 100, 140)).save(generated_file)
+
+    monkeypatch.setenv("COMFYUI_OUTPUT_DIR", str(tmp_path / "comfy_output"))
+
+    from app.services import assets as assets_module
+
+    captured_workflow: dict[str, object] = {}
+
+    def fake_submit_workflow(self, workflow):
+        captured_workflow.update(workflow)
+        return "prompt-background-defaults"
+
+    monkeypatch.setattr(assets_module.ComfyUIClient, "submit_workflow", fake_submit_workflow)
+    monkeypatch.setattr(
+        assets_module.ComfyUIClient,
+        "wait_for_history",
+        lambda self, prompt_id: {
+            "outputs": {
+                "9": {
+                    "images": [
+                        {
+                            "filename": "bg_00001_.png",
+                            "subfolder": "background",
+                            "type": "output",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    def fake_import_generated_asset(self, *, source_path, entity_type, entity_id, asset_kind, filename_base, generated_root):
+        imported = tmp_path / "imported" / asset_kind / f"{entity_type}_{entity_id}_{filename_base}.png"
+        imported.parent.mkdir(parents=True, exist_ok=True)
+        imported.write_bytes(source_path.read_bytes())
+        return imported
+
+    monkeypatch.setattr(assets_module.AssetService, "import_generated_asset", fake_import_generated_asset)
+
+    client, _ = build_client(tmp_path)
+    response = client.post(
+        "/assets/generate",
+        json={
+            "asset_kind": "background",
+            "entity_type": "location",
+            "entity_id": 2,
+            "prompt": "A vaulted chamber of green glass seams and violet light.",
+            "workflow_name": "text-to-image",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    metadata = json.loads(data["asset"]["prompt_text"])
+    assert metadata["width"] == 1600
+    assert metadata["height"] == 896
+    assert metadata["negative_prompt"] is not None
+    latent_node = captured_workflow["76:68"]["inputs"]  # type: ignore[index]
+    assert latent_node["width"] == 1600
+    assert latent_node["height"] == 896
+
+
 def test_character_generation_prompt_enforces_subject_only_rules(tmp_path: Path) -> None:
     from app.services.assets import AssetService
 
@@ -580,13 +674,15 @@ def test_seed_opening_story_creates_long_range_major_hooks(tmp_path: Path) -> No
 
     assert hat_hook["min_distance_to_payoff"] == 20
     assert body_hook["min_distance_to_payoff"] == 20
-    assert hat_hook["min_distance_to_next_development"] == 4
-    assert body_hook["min_distance_to_next_development"] == 4
+    assert hat_hook["min_distance_to_next_development"] == 6
+    assert body_hook["min_distance_to_next_development"] == 6
     assert hat_hook["introduced_at_depth"] == 0
     assert body_hook["introduced_at_depth"] == 0
-    assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
+    assert "same hidden past event" in (hat_hook["summary"] or "").lower()
+    assert "friend, ally, or protector" in (hat_hook["payoff_concept"] or "").lower()
     assert hat_hook["must_not_imply"]
-    assert "deliberate intervention" in (body_hook["payoff_concept"] or "").lower()
+    assert "curse, mutilation, or hostile alteration" in (body_hook["summary"] or "").lower()
+    assert "privileged access token" in (body_hook["payoff_concept"] or "").lower()
     assert body_hook["must_not_imply"]
 
 
@@ -641,8 +737,8 @@ def test_seed_opening_story_backfills_existing_major_hook_direction(tmp_path: Pa
         hook for hook in hooks
         if "bucket hat" in hook["summary"].lower() and hook["importance"] == "major"
     )
-    assert "missing past" in (hat_hook["payoff_concept"] or "").lower()
-    assert any("tram uniform gear" in guardrail.lower() for guardrail in hat_hook["must_not_imply"])
+    assert "friend, ally, or protector" in (hat_hook["payoff_concept"] or "").lower()
+    assert any("uniform gear" in guardrail.lower() for guardrail in hat_hook["must_not_imply"])
 
 
 def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_path: Path) -> None:
@@ -727,8 +823,8 @@ def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_p
     assert all(choice["status"] == "open" for choice in choices)
     assert {choice["choice_class"] for choice in choices} == {"inspection", "progress"}
     assert all(choice["planning"] is not None for choice in choices)
-    assert any("hidden network" in hook["summary"].lower() for hook in hooks)
-    assert any("deliberate alteration" in hook["summary"].lower() for hook in hooks)
+    assert any("same hidden past event" in hook["summary"].lower() for hook in hooks)
+    assert any("curse, mutilation, or hostile alteration" in hook["summary"].lower() for hook in hooks)
 
     ideas_text = ideas_path.read_text(encoding="utf-8")
     assert "Clerk Nettle" not in ideas_text
@@ -1947,6 +2043,110 @@ def test_prepare_story_run_surfaces_worldbuilding_notes_in_normal_packet(tmp_pat
     assert any(note["title"] == "Clockwork Patrols" for note in worldbuilding_notes)
 
 
+def test_generation_prompt_includes_bold_character_and_location_guidance(tmp_path: Path) -> None:
+    _, _ = build_client(tmp_path)
+    service = LLMGenerationService(Path(__file__).resolve().parents[1])
+    prompt = service.build_prompt({"branch_key": "default"})
+
+    assert "Feel free to act creatively. Make bold choices as long as they fit in the story." in prompt
+    assert "Introduce or reintroduce characters frequently. Characters make a story." in prompt
+    assert "Introduce new locations frequently when appropriate" in prompt
+
+
+def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
+    checklist = build_validation_checklist(
+        branch_shape={
+            "should_prefer_divergence": True,
+            "single_actor_scene_streak": 2,
+            "same_location_streak": 3,
+            "repeated_action_family": "inspect",
+        }
+    )
+
+    assert any("Feel free to act creatively" in item for item in checklist)
+    assert any("Characters make a story" in item for item in checklist)
+    assert any("Introduce new locations frequently" in item for item in checklist)
+    assert any("gone several scenes without enough character pressure" in item for item in checklist)
+    assert any("lingered in one place too long" in item for item in checklist)
+    assert any("repeating the 'inspect' action family" in item for item in checklist)
+
+
+def test_branch_shape_tracks_location_actor_and_action_pressure(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        previous_id = None
+        for index in range(4):
+            node = story.create_story_node(
+                branch_key="default",
+                title=f"Static Node {index}",
+                scene_text="The same field keeps humming while the gnome remains alone.",
+                summary="The branch lingers in the same field with the same lone protagonist.",
+                parent_node_id=previous_id,
+                referenced_entities=[{"entity_type": "location", "entity_id": 1, "role": "current_scene"}],
+                present_entities=[{"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True}],
+            )
+            story.create_choice(
+                from_node_id=int(node["id"]),
+                choice_text="Follow the humming seam deeper",
+                notes='{"notes":"Goal: keep following the seam. Intent: continue the same investigation.","choice_class":"progress"}',
+            )
+            previous_id = int(node["id"])
+
+        branch_shape = story.describe_branch_shape("default")
+
+    assert branch_shape["same_location_streak"] >= 3
+    assert branch_shape["single_actor_scene_streak"] >= 3
+    assert branch_shape["repeated_action_family"] == "follow"
+
+
+def test_collect_branch_pressure_issues_rejects_static_same_location_all_inspection_scene() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The gnome remains alone in the same field, still inspecting the seam.",
+                "scene_text": "Nothing materially changes. The same seam glows and the same gnome watches it.",
+                "choices": [
+                    {
+                        "choice_text": "Inspect the seam more closely",
+                        "notes": "Goal: inspect the seam more closely. Intent: continue the same inspection loop.",
+                        "choice_class": "inspection",
+                    },
+                    {
+                        "choice_text": "Listen to the seam carefully",
+                        "notes": "Goal: listen to the seam carefully. Intent: continue the same inspection loop.",
+                        "choice_class": "inspection",
+                    },
+                ],
+                "entity_references": [
+                    {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+                ],
+            }
+        ),
+    )
+
+    issues = collect_branch_pressure_issues(
+        packet={
+            "actor_pressure": {"needs_more_people": True},
+            "location_motion_pressure": {"should_move": True},
+            "recent_action_family_summary": {
+                "repeated_action_family": "inspect",
+                "recent_action_family_counts": {"inspect": 4},
+            },
+            "frontier_budget_state": {"pressure_level": "normal"},
+        },
+        candidate=candidate,
+    )
+
+    assert any("consequential option" in issue for issue in issues)
+    assert any("gone too many scenes without another actor" in issue for issue in issues)
+    assert any("lingered in the same location" in issue for issue in issues)
+
+
 def test_rebalance_frontier_parks_excess_choices_and_can_unpark(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
@@ -2164,22 +2364,29 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
             {
                 "branch_key": "default",
                 "scene_title": "Mock Loop Scene",
-                "scene_summary": "A valid mocked scene candidate.",
-                "scene_text": "The mocked local worker produces a scene without touching the database in dry-run mode.",
-                "choices": [
-                    {
-                        "choice_text": "Take the mocked path",
-                        "notes": "Goal: confirm the local runner can validate a mocked scene. Intent: prove the CLI works before real model calls.",
-                    },
-                    {
-                        "choice_text": "Stay put and inspect the result",
-                        "notes": "Goal: keep the branch stable while testing. Intent: preserve a second valid option for schema coverage.",
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+                    "scene_summary": "A valid mocked scene candidate with immediate patrol pressure.",
+                    "scene_text": "The mocked local worker produces a scene without touching the database in dry-run mode while a brass patrol closes in from the edge of the field.",
+                    "choices": [
+                        {
+                            "choice_text": "Take the mocked path",
+                            "notes": "Goal: confirm the local runner can validate a mocked scene. Intent: prove the CLI works before real model calls.",
+                        },
+                        {
+                                "choice_text": "Climb down and head for the lantern gate",
+                                "notes": "Goal: leave the current perch before the patrol closes in. Intent: prove the runner accepts a consequential location-moving option.",
+                            },
+                    ],
+                    "global_direction_notes": [
+                        {
+                            "note_type": "plotline",
+                            "title": "Mock CLI Momentum",
+                            "note_text": "Use this dry-run scene to prove the local worker can carry a concrete next-step direction.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
     command = [
         sys.executable,
@@ -2442,6 +2649,52 @@ def test_planning_idea_validation_requires_event() -> None:
 
     issues = get_planning_idea_issues(packet, ideas)
     assert any("at least one event idea" in issue for issue in issues)
+
+
+def test_planning_idea_validation_allows_distinct_poetic_titles() -> None:
+    packet = {
+        "planning_policy": {"ideas_per_run": 3},
+        "ideas_file": {
+            "current_content": """
+## Open Ideas
+- [Location] The City That Breathes in Reverse Humid Air: A metropolis where humidity rises at night.
+- [Event] The Day the Stars Forgot How to Shine: A celestial event of stalled light.
+""",
+            "open_ideas": [
+                {
+                    "category": "Location",
+                    "title": "The City That Breathes in Reverse Humid Air",
+                    "note_text": "A metropolis where humidity rises at night.",
+                },
+                {
+                    "category": "Event",
+                    "title": "The Day the Stars Forgot How to Shine",
+                    "note_text": "A celestial event of stalled light.",
+                },
+            ],
+        },
+    }
+    ideas = [
+        PlanningIdea(
+            category="character",
+            title="The Luminous Cartographer of Unwritten Horizons",
+            note_text="A mapmaker who inks roads onto moth wings so travelers can only follow them at dusk.",
+        ),
+        PlanningIdea(
+            category="location",
+            title="The Library That Breathes With Forgotten Birthdays",
+            note_text="A library whose shelves exhale cake-sweet dust whenever a lost anniversary nears.",
+        ),
+        PlanningIdea(
+            category="event",
+            title="The Day the Stars Forgot Their Names",
+            note_text="For one night, constellations trade identities and every route-chart points somewhere slightly wrong.",
+        ),
+    ]
+
+    issues = get_planning_idea_issues(packet, ideas)
+    assert all("too close to existing idea" not in issue for issue in issues)
+    assert all("too similar to existing idea" not in issue for issue in issues)
 
 
 def test_prepare_story_run_surfaces_bound_idea_on_selected_frontier_item(tmp_path: Path) -> None:
@@ -2871,6 +3124,161 @@ def test_collect_scene_anchor_art_issues_flags_object_art_for_travel_scene() -> 
     )
 
     assert any("Do not use object_render as a stand-in for a scene background" in issue for issue in issues)
+
+
+def test_collect_redundant_progression_issues_flags_repeated_parent_choice_and_summary() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The tall gnome wakes in the Mushroom Field just before a brass survey patrol crosses it.",
+                "scene_text": "The next scene should have advanced, but this one stalls.",
+                "choices": [
+                    {
+                        "choice_text": "Trace the counting-wires to the green glass seam",
+                        "notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+                    }
+                ],
+            }
+        ),
+    )
+
+    issues = collect_redundant_progression_issues(
+        packet={
+            "selected_frontier_item": {
+                "choice_text": "Trace the counting-wires to the green glass seam",
+                "existing_choice_notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+            },
+            "context_summary": {
+                "current_node": {
+                    "summary": "The tall gnome wakes in the Mushroom Field just before a brass survey patrol crosses it."
+                }
+            },
+        },
+        candidate=candidate,
+    )
+
+    assert any("too closely repeats the just-taken choice" in issue for issue in issues)
+    assert any("too closely repeats the parent scene summary" in issue for issue in issues)
+
+
+def test_collect_ungrounded_local_prop_issues_flags_menu_only_prop() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The seam glows brighter under the altered hand.",
+                "scene_text": "The green glass seam pulses when touched and the wires hum beneath the roots.",
+                "choices": [
+                    {
+                        "choice_text": "Step around the velvet knot",
+                        "notes": "Goal: inspect the marker from another angle. Intent: widen the local branch with a clue-first alternative.",
+                    }
+                ],
+            }
+        ),
+    )
+
+    issues = collect_ungrounded_local_prop_issues(
+        packet={
+            "selected_frontier_item": {
+                "choice_text": "Trace the counting-wires to the green glass seam",
+                "existing_choice_notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+            },
+            "context_summary": {
+                "current_node": {
+                    "title": "The Counting Bell",
+                    "summary": "The wires twitch beneath the field and a green seam glows in the soil.",
+                }
+            },
+        },
+        candidate=candidate,
+    )
+
+    assert any("introduces a new focal prop or marker" in issue for issue in issues)
+
+
+def test_collect_ungrounded_local_prop_issues_allows_grounded_seam_phrase() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The cracked seam glows brighter under the altered hand.",
+                "scene_text": "A cracked seam of green glass runs beneath the roots while the counting wires hum beside it.",
+                "choices": [
+                    {
+                        "choice_text": "Examine the cracked seam for clues.",
+                        "notes": "Goal: inspect the damaged seam closely. Intent: gather a clue without changing location or inventing a new prop.",
+                    }
+                ],
+            }
+        ),
+    )
+
+    issues = collect_ungrounded_local_prop_issues(
+        packet={
+            "selected_frontier_item": {
+                "choice_text": "Follow the pulse toward the humming wires",
+                "existing_choice_notes": "Goal: trace the glowing seam to understand its pattern. Intent: open a route-discovery path that may lead to hidden glyphs.",
+            },
+            "context_summary": {
+                "current_node": {
+                    "title": "The Brass Toll Echoes",
+                    "summary": "A distant brass toll echoes across the field as dawn lifts the dew, brightening the cracked seam that pulses when touched.",
+                }
+            },
+        },
+        candidate=candidate,
+    )
+
+    assert issues == []
+
+
+def test_prune_existing_asset_requests_drops_already_available_art() -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The protagonist remains on screen.",
+                "scene_text": "The scene does not need new portrait art.",
+                "choices": [
+                    {
+                        "choice_text": "Keep going",
+                        "notes": "Goal: continue the branch. Intent: prove duplicate art requests can be ignored safely.",
+                    }
+                ],
+                "asset_requests": [
+                    {
+                        "job_type": "generate_portrait",
+                        "asset_kind": "portrait",
+                        "entity_type": "character",
+                        "entity_id": 1,
+                    }
+                ],
+            }
+        ),
+    )
+
+    pruned = prune_existing_asset_requests(
+        packet={
+            "asset_availability": [
+                {
+                    "entity_type": "character",
+                    "entity_id": 1,
+                    "name": "The Tall Gnome",
+                    "available_asset_kinds": ["portrait", "cutout"],
+                }
+            ]
+        },
+        candidate=candidate,
+    )
+
+    assert pruned.asset_requests == []
+
 
 def test_generation_validation_rejects_non_location_current_scene(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
