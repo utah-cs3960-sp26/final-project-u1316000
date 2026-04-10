@@ -151,3 +151,15 @@ Suggested format:
 - [Character] The Gravity-Weaver's Shadow: A being of shifting darkness that walks upside-down, leaving trails of inverted gravity. Where it passes, objects float upward and time flows in spirals, but only the shadow can see the true direction.
 - [Location] The Clockwork Garden of Forgotten Tides: A desert where sand dunes pulse with rhythmic tides that never reach the sea. Each wave is a memory of a lost ocean, and the wind carries whispers in languages no one remembers having spoken.
 - [Event] The Day the Stars Forgot Their Names: When all celestial bodies collectively lose their names, reality briefly becomes unlabelled—no one can call anything by its proper term. The sky fills with blank constellations that rearrange into stories only dreamers can read.
+
+- [Character] The Chrono-Scatterer: A nomad who carries a pocket of unspooled time, allowing them to briefly relive any moment from their past as if it were happening now, but each use erodes a memory of their own name.
+- [Location] The Library of Unwritten Regrets: A cavernous hall where books are written in the margins of dreams; reading one causes the reader to briefly inhabit the regret expressed, but only if they have not yet forgiven it.
+- [Event] The Day the Colors Forgot How to Lie: At dawn, all colors in a region become truthful; objects reveal their true nature (e.g., a mirror shows only what is needed, not desired), and emotions manifest as literal weather patterns that cannot be suppressed.
+
+- [Character] The Chrono-Singed Frog Conductor: A frog who conducts tram trains that run on reversed gravity, where passengers float upward during rush hour and crash into the ceiling at sunset. Their skin glows faintly with time-stained patterns from each journey.
+- [Location] The Library of Unread Futures: An underground glass village where books are written in languages that haven't been invented yet. The walls breathe slowly, and the ceiling is a rotating map of possible timelines.
+- [Event] The Day the Tram Forgot Its Destination: Once per lunar cycle, all tram trains simultaneously lose their destination and spiral into a skyward vortex that only appears during the colorless hour between twilight and dawn. No one knows where they're going—only that they'll never return.
+
+- [Character] The Clockwork Sigher: A sentient pocket watch that breathes when left unopened, growing a single leaf each year to mark the passing of time it has witnessed.
+- [Location] The Hollow Compass: An antique compass that points not north but toward the nearest place where someone has ever felt deeply alone; its needle melts into silver when used correctly.
+- [Event] The Bloom of Unremembered Births: Every 13 years, a single child is born without memory but with the ability to plant flowers that bloom only in dreams; each flower contains a seed of someone’s forgotten birthday.

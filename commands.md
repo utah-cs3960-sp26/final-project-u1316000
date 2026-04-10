@@ -29,7 +29,8 @@ single prompt:
 
 
 ### This one below is good
-python -m app.tools.run_story_worker_local --model nvidia/nemotron-3-nano-4b --max-retries 3 --request-timeout 1800
+python -m app.tools.run_story_worker_local --max-retries 3 --request-timeout 1800 --model nvidia/nemotron-3-nano-4b 
+while ($true) { python -m app.tools.run_story_worker_local --max-retries 3 --request-timeout 1800 --model nvidia/nemotron-3-nano-4b }
 
 python -m app.tools.run_story_worker_local --model qwen/qwen3.5-35b-a3b
 

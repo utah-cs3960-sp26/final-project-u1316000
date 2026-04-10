@@ -434,6 +434,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Do not repeat the parent scene summary with only cosmetic wording changes.",
         "If an inspection choice names a local prop, marker, knot, placard, seam, or similar focal object, establish it clearly in the scene text first instead of inventing it only in the menu.",
         "Most multi-choice scenes should include at least one consequential option that is not pure inspection.",
+        "Use reveal_guardrails when present. Early patrol pressure and one strange machine sighting are okay, but do not name deferred rulers or explain the full backstory too early.",
         "For major hooks, include a payoff_concept describing the intended direction of the later payoff.",
         "If a hook is still on development cooldown, do not explore it, advance it, or even strongly hint at it yet.",
         "A good payoff_concept should describe the general shape of the later answer, not just tie the mystery to the nearest currently available local system.",
@@ -476,6 +477,37 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
             f"This branch has been repeating the '{branch_shape.get('repeated_action_family')}' action family. Break the pattern with a social turn, location shift, merge, closure, or immediate external pressure."
         )
     return checklist
+
+
+def build_reveal_guardrails(*, act_phase: str | None = None) -> dict[str, Any]:
+    early_phase = act_phase in {None, "", "early"}
+    allowed_now = [
+        "Immediate patrol pressure, survey teams, brass enumerators, and ordinary administrative danger.",
+        "One small unnerving machine detail, one strange metal walker, or one isolated patrol-machine encounter.",
+        "A first personal breadcrumb from the hat, such as a stitch, scorch mark, mirror oddity, or trace left by whoever placed it.",
+        "Hints that the altered hand is cursed, painful, suspicious, or reacts badly to the environment.",
+        "Unrelated local arcs, new characters, new locations, and present-tense danger that do not force the deeper answers yet.",
+    ]
+    avoid_for_now = [
+        "Do not name the king or explain the full ruler/regime behind the survey pressure yet.",
+        "Do not explain who commands the strange metal walkers, what they are called officially, or how many exist.",
+        "Do not explain who cursed or altered the protagonist, or why, yet.",
+        "Do not fully explain who gave the hat, why it was left here, or how the full past event happened yet.",
+        "Do not turn the hand into a simple privileged access key or fully explain the backstory because of one local mechanism.",
+    ]
+    if not early_phase:
+        avoid_for_now = [
+            item for item in avoid_for_now
+            if "Do not name the king" not in item
+        ]
+    return {
+        "rule": (
+            "You may hint at larger forces early, but keep major ruler/backstory revelations slow. "
+            "Use pressure, rumors, and partial sightings before direct explanation."
+        ),
+        "allowed_now": allowed_now,
+        "avoid_for_now": avoid_for_now,
+    }
 
 
 def build_candidate_template(branch_key: str) -> dict[str, Any]:
@@ -852,6 +884,7 @@ def build_normal_packet(
         "recent_action_family_counts": branch_shape.get("recent_action_family_counts", {}),
         "guidance": "If one action family dominates recent scenes, break the pattern with a social turn, location shift, merge, closure, or immediate external pressure.",
     }
+    reveal_guardrails = build_reveal_guardrails(act_phase=context.get("act_phase"))
     return {
         "run_mode": "normal",
         "message": (
@@ -868,6 +901,7 @@ def build_normal_packet(
         "global_open_choice_count": frontier_budget_state.get("open_choice_count"),
         "frontier_budget_state": frontier_budget_state,
         "required_scene_delta": required_scene_delta,
+        "reveal_guardrails": reveal_guardrails,
         "actor_pressure": actor_pressure,
         "location_motion_pressure": location_motion_pressure,
         "recent_action_family_summary": recent_action_family_summary,
@@ -930,6 +964,7 @@ def build_normal_packet(
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
+            "Follow reveal_guardrails strictly: small patrol-machine sightings and first hat breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
             "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "

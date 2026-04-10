@@ -1800,6 +1800,9 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "ideas_file_summary" in packet
         assert packet["ideas_file_summary"]["path"].endswith("IDEAS.md")
         assert packet["ideas_file_summary"]["open_ideas"]
+        assert "reveal_guardrails" in packet
+        assert any("machine" in item.lower() or "metal walker" in item.lower() for item in packet["reveal_guardrails"]["allowed_now"])
+        assert any("do not name the king" in item.lower() for item in packet["reveal_guardrails"]["avoid_for_now"])
         assert "validation_checklist" in packet
         assert "candidate_template" in packet
         assert "endpoint_contract" in packet
@@ -1813,6 +1816,7 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "choice id" in packet["next_action"].lower()
         assert "ideas.md" in packet["next_action"].lower()
         assert "asset_availability" in packet["next_action"]
+        assert "reveal_guardrails" in packet["next_action"]
         assert packet["planning_policy"]["chance"] == 0.25
         assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
     finally:
