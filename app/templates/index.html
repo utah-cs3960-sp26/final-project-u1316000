@@ -191,6 +191,27 @@
     {% endif %}
     {{ card_end() }}
 
+    {{ card_start("Stuck Frontier Choices") }}
+    {% if stuck_choices %}
+        <ul>
+        {% for choice in stuck_choices %}
+            <li>
+                <strong>#{{ choice.choice_id }}</strong> - {{ choice.choice_text }}
+                <span class="meta">(node #{{ choice.from_node_id }}, fails {{ choice.failed_run_count }}, {{ choice.status }})</span>
+                {% if choice.last_failed_at %}
+                    <div class="meta">Last failed: {{ choice.last_failed_at }}</div>
+                {% endif %}
+                {% if choice.last_error %}
+                    <div class="meta">{{ choice.last_error[:180] }}{% if choice.last_error|length > 180 %}...{% endif %}</div>
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p class="empty">No stuck frontier choices right now.</p>
+    {% endif %}
+    {{ card_end() }}
+
     {{ card_start("Recent Assets") }}
     {% if assets %}
         <ul>

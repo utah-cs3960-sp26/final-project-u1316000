@@ -266,6 +266,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             "hooks": branch_state.list_hooks_with_readiness("default")[:5],
             "story_direction_notes": story_notes.list_notes(limit=5),
             "worldbuilding_notes": worldbuilding.list_notes(limit=5),
+            "stuck_choices": story.list_stuck_frontier_choices(limit=8),
             "db_path": str(settings.database_path),
         }
         return templates.TemplateResponse(request, "index.html", context)

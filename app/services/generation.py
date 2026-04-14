@@ -211,6 +211,7 @@ class LLMGenerationService:
             "If frontier_budget_state.pressure_level is soft or hard, prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.\n"
             "When a local beat feels like it is winding down and arc_exit_candidate says a larger merge is plausible, you may use 1-2 transition scenes to close the local arc and route into another compatible storyline.\n"
             "Every choice must include internal planning notes in this form: 'NEXT_NODE: ... FURTHER_GOALS: ...'. NEXT_NODE should state a specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader follow-through, medium-range aim, or later pressure the branch should keep in motion.\n"
+            "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
             "Choices may optionally include choice_class values inspection, progress, commitment, or ending.\n"
             "Ending choices are allowed. Death, capture, transformation, dead ends, and hub-return closures are all valid if they fit the scene.\n"
             "If you need to use a recurring canonical character who has not been met on this specific path yet, add a floating_character_introduction with that existing character_id and a short reusable first-meeting beat. Floating introductions are for recurring characters only, not locations or objects.\n"

@@ -33,6 +33,8 @@ from app.tools.run_story_worker_local import (
     normalize_generation_candidate_payload,
     parse_llm_result,
     prune_existing_asset_requests,
+    normalize_visible_generic_speakers,
+    repair_generation_candidate,
     collect_scene_anchor_art_issues,
 )
 
@@ -76,6 +78,7 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "story_hooks",
         "story_direction_notes",
         "worldbuilding_notes",
+        "worker_choice_failures",
     }.issubset(tables)
 
 
@@ -2040,6 +2043,7 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert any("strange" in item.lower() or "anomaly" in item.lower() for item in packet["reveal_guardrails"]["allowed_now"])
         assert any("deferred rulers" in item.lower() or "full regime" in item.lower() or "masterminds" in item.lower() for item in packet["reveal_guardrails"]["avoid_for_now"])
         assert "validation_checklist" in packet
+        assert any("Use NEXT_NODE as a base for your scene" in item for item in packet["validation_checklist"])
         assert "candidate_template" in packet
         assert "endpoint_contract" in packet
         assert "full_context" not in packet
@@ -2051,8 +2055,10 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["candidate_template"]["floating_character_introductions"] == []
         assert packet["candidate_template"]["asset_requests"] == []
         assert "choice_handoff" in packet
+        assert "consequential_choice_requirement" in packet
         assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
         assert "choice id" in packet["next_action"].lower()
+        assert "Use NEXT_NODE as a base for your scene" in packet["next_action"]
         assert "ideas.md" in packet["next_action"].lower()
         assert "asset_availability" in packet["next_action"]
         assert "reveal_guardrails" in packet["next_action"]
@@ -2499,6 +2505,124 @@ def test_rebalance_frontier_parks_excess_choices_and_can_unpark(tmp_path: Path) 
     assert unpark_result.returncode == 0
     unpark_payload = json.loads(unpark_result.stdout)
     assert unpark_payload["choice"]["status"] == "open"
+
+
+def test_choice_failure_tracking_only_parks_at_five_and_resets_when_reopened(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    choice_id = int(client.get("/frontier").json()[0]["choice_id"])
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        for index in range(4):
+            record = story.record_choice_worker_failure(choice_id=choice_id, error=f"failure {index + 1}")
+            assert int(record["failed_run_count"]) == index + 1
+            choice = story.get_choice(choice_id)
+            assert choice is not None
+            assert choice["status"] == "open"
+
+        record = story.record_choice_worker_failure(choice_id=choice_id, error="failure 5")
+        assert int(record["failed_run_count"]) == 5
+        choice = story.get_choice(choice_id)
+        assert choice is not None
+        assert choice["status"] == "parked"
+
+        reopened = story.set_choice_status(choice_id, "open")
+        assert reopened["status"] == "open"
+        assert story.get_choice_failure(choice_id) is None
+
+
+def test_choices_with_four_failures_remain_in_frontier_until_threshold(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    choice_id = int(client.get("/frontier").json()[0]["choice_id"])
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        for index in range(4):
+            story.record_choice_worker_failure(choice_id=choice_id, error=f"failure {index + 1}")
+
+    frontier = client.get("/frontier").json()
+    assert any(int(item["choice_id"]) == choice_id for item in frontier)
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        story.record_choice_worker_failure(choice_id=choice_id, error="failure 5")
+
+    frontier_after = client.get("/frontier").json()
+    assert all(int(item["choice_id"]) != choice_id for item in frontier_after)
+
+
+def test_run_story_worker_failure_counts_once_per_failed_run_not_retry_attempt(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    choice_id = int(client.get("/frontier").json()[0]["choice_id"])
+    log_file = tmp_path / "worker_log.ndjson"
+
+    response_file = tmp_path / "invalid_responses.json"
+    response_file.write_text(
+        json.dumps(
+            [
+                {
+                    "branch_key": "default",
+                    "scene_summary": "A repetitive invalid scene.",
+                    "scene_text": "This scene intentionally repeats the same move without advancing anything.",
+                    "choices": [
+                        {
+                            "choice_text": "Follow the grooves beneath the velvet-marked mushroom",
+                            "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom.",
+                        }
+                    ],
+                },
+                {
+                    "branch_key": "default",
+                    "scene_summary": "A repetitive invalid scene.",
+                    "scene_text": "This scene intentionally repeats the same move without advancing anything.",
+                    "choices": [
+                        {
+                            "choice_text": "Follow the grooves beneath the velvet-marked mushroom",
+                            "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom.",
+                        }
+                    ],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.run_story_worker_local",
+        "--model",
+        "mock-model",
+        "--max-retries",
+        "2",
+        "--log-file",
+        str(log_file),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "CYOA_DB_PATH": str(db_path),
+            "CYOA_LOCAL_WORKER_RESPONSE_FILE": str(response_file),
+            "CYOA_PLANNING_ROLL": "1.0",
+        },
+    )
+
+    assert result.returncode != 0
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        failure = story.get_choice_failure(choice_id)
+
+    assert failure is not None
+    assert int(failure["failed_run_count"]) == 1
 
 
 def test_generation_validation_rejects_inspection_fresh_branching_under_frontier_pressure(tmp_path: Path) -> None:
@@ -3117,6 +3241,102 @@ def test_parse_llm_result_uses_generation_candidate_normalizer_for_common_shape_
     assert candidate.asset_requests[0].asset_kind == "portrait"
 
 
+def test_normalize_visible_generic_speakers_maps_to_single_obvious_named_character(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        canon = CanonResolver(connection)
+        character = canon.create_or_get_character(
+            name="Brass Patrol Member",
+            description="A brass-armored survey officer with a severe stare.",
+        )
+        character_id = int(character["id"])
+
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "A patrol voice cuts across the field.",
+                "scene_text": "A brass patrol officer steps into the dew with a metallic creak.",
+                "dialogue_lines": [
+                    {"speaker": "Patrol Member", "text": "Hold still and keep your cursed hand where I can see it."}
+                ],
+                "entity_references": [
+                    {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+                    {"entity_type": "character", "entity_id": character_id, "role": "introduced"},
+                ],
+                "choices": [
+                    {
+                        "choice_text": "Raise your hand slowly",
+                        "notes": "NEXT_NODE: answer the interruption directly. FURTHER_GOALS: prove obvious generic speaker labels can be normalized safely.",
+                    }
+                ],
+            }
+        ),
+    )
+
+    with contextlib.ExitStack() as stack:
+        previous_db = os.environ.get("CYOA_DB_PATH")
+        os.environ["CYOA_DB_PATH"] = str(db_path)
+        stack.callback(lambda: os.environ.__setitem__("CYOA_DB_PATH", previous_db) if previous_db is not None else os.environ.pop("CYOA_DB_PATH", None))
+        normalized = normalize_visible_generic_speakers(
+            packet={"selected_frontier_item": {"from_node_id": 1}},
+            candidate=candidate,
+        )
+
+    assert normalized.dialogue_lines[0].speaker == "Brass Patrol Member"
+
+
+def test_repair_generation_candidate_prunes_safe_near_miss_shapes(tmp_path: Path) -> None:
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_summary": "The patrol closes in at the lip of the vault.",
+                "scene_text": "Metal steps echo nearby while the vault air tightens around the protagonist.",
+                "choices": [
+                    {
+                        "choice_text": "Inspect the closing patrol shadow",
+                        "notes": "NEXT_NODE: inspect the pressure more closely. FURTHER_GOALS: keep the pressure visible without changing course.",
+                    },
+                    {
+                        "choice_text": "Inspect the closing patrol shadow",
+                        "notes": "NEXT_NODE: inspect the pressure more closely. FURTHER_GOALS: keep the pressure visible without changing course.",
+                    },
+                ],
+                "floating_character_introductions": [
+                    {"character_id": 1, "intro_text": "The Tall Gnome steps forward."}
+                ],
+                "hook_updates": [
+                    {"hook_id": 11, "status": "active", "progress_note": "The blocked mystery stirs again."}
+                ],
+            }
+        ),
+    )
+
+    with contextlib.ExitStack() as stack:
+        previous_db = os.environ.get("CYOA_DB_PATH")
+        os.environ["CYOA_DB_PATH"] = str(tmp_path / "repair_test.db")
+        stack.callback(lambda: os.environ.__setitem__("CYOA_DB_PATH", previous_db) if previous_db is not None else os.environ.pop("CYOA_DB_PATH", None))
+        bootstrap_database(tmp_path / "repair_test.db")
+        repaired = repair_generation_candidate(
+            packet={
+                "context_summary": {
+                    "blocked_major_hooks": [{"id": 11}],
+                    "blocked_major_developments": [],
+                }
+            },
+            candidate=candidate,
+        )
+
+    assert repaired.floating_character_introductions == []
+    assert repaired.hook_updates == []
+    assert len(repaired.choices) == 1
+
+
 def test_infer_missing_asset_requests_detects_current_scene_background(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/reset-opening-canon")
@@ -3315,6 +3535,7 @@ def test_ui_pages_render(tmp_path: Path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "CYOA World Console" in response.text
+    assert "Stuck Frontier Choices" in response.text
     seed_page = client.get("/ui/seed")
     assert seed_page.status_code == 200
     assert "Manual World Seeding" in seed_page.text
@@ -3368,6 +3589,21 @@ def test_story_notes_endpoints_and_ui(tmp_path: Path) -> None:
     assert death_page.status_code == 200
     assert "You Died" in death_page.text
     assert "Restart Adventure" in death_page.text
+
+
+def test_home_console_renders_stuck_choice_details(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    choice_id = int(client.get("/frontier").json()[0]["choice_id"])
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        story.record_choice_worker_failure(choice_id=choice_id, error="Validation failed: repeated seam follow loop.")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Stuck Frontier Choices" in response.text
+    assert "repeated seam follow loop" in response.text
 
 
 def test_collect_scene_anchor_art_issues_flags_object_art_for_travel_scene() -> None:

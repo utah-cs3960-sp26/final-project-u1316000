@@ -227,6 +227,14 @@ CHOICE_GENERIC_TOKENS = {
 LOCAL_PROP_CHOICE_PATTERNS = [
     re.compile(r"\b(?:inspect|examine|read|touch|press|study|step around|circle around|go around|look at|pick up|lift)\s+(?:the|a|an)\s+([a-z][a-z0-9' -]{2,60})", re.IGNORECASE),
 ]
+NONVISUAL_SPEAKER_PATTERNS = [
+    re.compile(r"\bunseen\b", re.IGNORECASE),
+    re.compile(r"\bunknown\b", re.IGNORECASE),
+    re.compile(r"\bmysterious\b", re.IGNORECASE),
+    re.compile(r"\(o\.s\.\)", re.IGNORECASE),
+    re.compile(r"\boffscreen\b", re.IGNORECASE),
+    re.compile(r"\bover (the )?(radio|speaker|intercom)\b", re.IGNORECASE),
+]
 
 
 def normalize_text_for_similarity(value: str) -> str:
@@ -429,6 +437,163 @@ def prune_existing_asset_requests(
         return candidate
     return candidate.model_copy(update={"asset_requests": filtered_requests})
 
+
+def is_nonvisual_speaker_label(value: str) -> bool:
+    normalized = (value or "").strip()
+    return any(pattern.search(normalized) for pattern in NONVISUAL_SPEAKER_PATTERNS)
+
+
+def speaker_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", (value or "").lower())
+        if token not in {"a", "an", "the"}
+    }
+
+
+def normalize_visible_generic_speakers(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> GenerationCandidate:
+    selected = packet.get("selected_frontier_item") or {}
+    parent_node_id = selected.get("from_node_id")
+    if parent_node_id is None or not candidate.dialogue_lines:
+        return candidate
+
+    settings = Settings.from_env()
+    connection = connect(settings.database_path)
+    try:
+        canon = CanonResolver(connection)
+        story = StoryGraphService(connection)
+        character_ids = set(story.list_lineage_entity_ids(int(parent_node_id), "character"))
+        parent_node = story.get_story_node(int(parent_node_id)) or {}
+        for entity in (parent_node.get("entities") or []):
+            if entity.get("entity_type") == "character" and entity.get("entity_id") is not None:
+                character_ids.add(int(entity["entity_id"]))
+        for entity in (parent_node.get("present_entities") or []):
+            if entity.get("entity_type") == "character" and entity.get("entity_id") is not None:
+                character_ids.add(int(entity["entity_id"]))
+        for entity in candidate.entity_references:
+            if entity.entity_type == "character":
+                character_ids.add(int(entity.entity_id))
+        for entity in candidate.scene_present_entities:
+            if entity.entity_type == "character":
+                character_ids.add(int(entity.entity_id))
+
+        known_names = {
+            str(character.get("name") or "").strip(): speaker_tokens(str(character.get("name") or ""))
+            for character_id in sorted(character_ids)
+            if (character := canon.get_character(character_id)) is not None and str(character.get("name") or "").strip()
+        }
+        new_names = {
+            character.name.strip(): speaker_tokens(character.name.strip())
+            for character in candidate.new_characters
+            if character.name.strip()
+        }
+        name_tokens = {**known_names, **new_names}
+
+        changed = False
+        normalized_lines = []
+        for line in candidate.dialogue_lines:
+            speaker = (line.speaker or "").strip()
+            lowered = speaker.lower()
+            if not speaker or lowered in {"narrator", "you"} or is_nonvisual_speaker_label(speaker):
+                normalized_lines.append(line)
+                continue
+            if any(speaker.casefold() == name.casefold() for name in name_tokens):
+                normalized_lines.append(line)
+                continue
+            tokens = speaker_tokens(speaker)
+            if not tokens:
+                normalized_lines.append(line)
+                continue
+            matches = [
+                name
+                for name, candidate_tokens in name_tokens.items()
+                if (
+                    tokens == candidate_tokens
+                    or (len(tokens) >= 2 and tokens.issubset(candidate_tokens))
+                    or (len(tokens) == 1 and name in new_names and tokens.issubset(candidate_tokens))
+                )
+            ]
+            if len(matches) == 1:
+                normalized_lines.append(line.model_copy(update={"speaker": matches[0]}))
+                changed = True
+                continue
+            normalized_lines.append(line)
+
+        if not changed:
+            return candidate
+        return candidate.model_copy(update={"dialogue_lines": normalized_lines})
+    finally:
+        connection.close()
+
+
+def repair_generation_candidate(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> GenerationCandidate:
+    updated_candidate = normalize_visible_generic_speakers(packet=packet, candidate=candidate)
+
+    blocked_hook_ids = {
+        int(hook["id"])
+        for hook in (
+            ((packet.get("context_summary") or {}).get("blocked_major_hooks") or [])
+            + (((packet.get("context_summary") or {}).get("blocked_major_developments") or []))
+        )
+        if hook.get("id") is not None
+    }
+    if blocked_hook_ids:
+        filtered_hook_updates = [
+            hook_update
+            for hook_update in updated_candidate.hook_updates
+            if int(hook_update.hook_id) not in blocked_hook_ids
+        ]
+        if len(filtered_hook_updates) != len(updated_candidate.hook_updates):
+            updated_candidate = updated_candidate.model_copy(update={"hook_updates": filtered_hook_updates})
+
+    filtered_floating_intros = [
+        intro for intro in updated_candidate.floating_character_introductions
+        if int(intro.character_id) != 1
+    ]
+    if len(filtered_floating_intros) != len(updated_candidate.floating_character_introductions):
+        updated_candidate = updated_candidate.model_copy(update={"floating_character_introductions": filtered_floating_intros})
+
+    deduped_choices = []
+    for choice in updated_candidate.choices:
+        if any(
+            texts_are_near_duplicates(choice.choice_text, existing.choice_text)
+            or texts_are_near_duplicates(choice.notes or "", existing.notes or "")
+            for existing in deduped_choices
+        ):
+            continue
+        deduped_choices.append(choice)
+    if len(deduped_choices) != len(updated_candidate.choices) and deduped_choices:
+        updated_candidate = updated_candidate.model_copy(update={"choices": deduped_choices})
+
+    if len(updated_candidate.choices) >= 2:
+        inferred_classes = [
+            choice.choice_class or infer_choice_class_from_text(choice.choice_text, choice.notes)
+            for choice in updated_candidate.choices
+        ]
+        if all(choice_class == "inspection" for choice_class in inferred_classes):
+            upgraded_choices = list(updated_candidate.choices)
+            for index, choice in enumerate(upgraded_choices):
+                if choice.choice_class is not None:
+                    continue
+                combined_text = " ".join(filter(None, [choice.choice_text, choice.notes or ""])).lower()
+                if (
+                    choice_text_implies_consequence(choice.choice_text)
+                    or any(token in combined_text for token in ("patrol", "hide", "run", "surrender", "approach", "speak", "ask ", "return", "enter", "climb", "descend"))
+                ):
+                    upgraded_choices[index] = choice.model_copy(update={"choice_class": "commitment"})
+                    updated_candidate = updated_candidate.model_copy(update={"choices": upgraded_choices})
+                    break
+
+    return updated_candidate
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one local story-worker loop against LM Studio."
@@ -549,6 +714,7 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         "In particular, do not copy read-only branch context into affordance_changes; if you are not unlocking/suspending/restoring/retiring an affordance now, return affordance_changes as [].\n"
         "If reveal_guardrails are present in the packet, obey them strictly. Early local pressure, partial strange sightings, and first personal breadcrumbs are okay. Dumping the hidden regime, true masterminds, or full backstory too early is not okay yet.\n"
         "If choice_handoff is present in the packet, treat NEXT_NODE as the immediate scene result you should actually deliver or clearly pivot from, and treat FURTHER_GOALS as medium-range steering pressure.\n"
+        "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it in playable text. Hooks, worldbuilding notes, and other behind-the-scenes coherence trackers often name things the player has not learned yet.\n"
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs exist specifically to make idea usage easier during normal runs like this one.\n"
         "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
@@ -894,6 +1060,7 @@ def build_validation_retry_user_prompt(
         "Do not explain the changes. Do not stop. Keep trying until validation passes.\n\n"
         "Important reminders:\n"
         "- Every choice.notes value must use meaningful planning notes in the form 'NEXT_NODE: ... FURTHER_GOALS: ...'.\n"
+        "- Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
         "- Reuse existing art instead of requesting duplicate generation.\n\n"
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
@@ -906,6 +1073,7 @@ def build_validation_retry_user_prompt(
         "- new_hooks are new hook proposals, so do not include hook ids there; include hook_type and summary instead.\n\n"
         "- Do not simply restate the just-taken choice as another option. The new scene must materially advance before offering its next menu.\n"
         "- If choice_handoff is present in the packet, deliver or clearly pivot from its NEXT_NODE instead of ignoring it.\n"
+        "- Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "- Do not name a character, object, location, title, faction, or system in playable text just because it appears in hooks, worldbuilding, or other behind-the-scenes packet memory. Check whether the player actually knows it yet.\n"
         "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
@@ -942,6 +1110,7 @@ def build_schema_retry_user_prompt(
             "Important reminders:\n"
             "- choice_text is required.\n"
             "- notes must use meaningful planning notes in the form 'NEXT_NODE: ... FURTHER_GOALS: ...'.\n"
+            "- Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
             "- If choice_class is 'ending', include ending_category.\n"
             "- Return JSON only, with no markdown fences or commentary.\n\n"
             f"Schema issues:\n{json.dumps(issues, indent=2)}\n\n"
@@ -960,6 +1129,7 @@ def build_schema_retry_user_prompt(
         "'right-foreground-object', or 'center-foreground-object'.\n"
         "- scene_present_entities and entity_references must use positive existing entity_id values; never omit entity_id and never use 0.\n"
         "- Every choice.notes value must use meaningful planning notes in the form 'NEXT_NODE: ... FURTHER_GOALS: ...'.\n"
+        "- Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
         "- new_locations/new_characters/new_objects are only for brand-new canon entities. Existing canon belongs in entity_references or scene_present_entities instead.\n"
@@ -970,6 +1140,7 @@ def build_schema_retry_user_prompt(
         "- new_hooks entries are new hook proposals and require hook_type and summary; do not include hook ids there.\n"
         "- Do not simply restate the just-taken choice as another option. Advance the scene before offering the next menu.\n"
         "- If choice_handoff is present in the packet, deliver or clearly pivot from its NEXT_NODE instead of ignoring it.\n"
+        "- Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "- Do not name a character, object, location, title, faction, or system in playable text just because it appears in hooks, worldbuilding, or other behind-the-scenes packet memory. Check whether the player actually knows it yet.\n"
         "- Do not repeat the parent scene summary with only cosmetic changes.\n"
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
@@ -2155,6 +2326,10 @@ def main() -> None:
                             packet=packet,
                             candidate=parsed,
                         )
+                        parsed = repair_generation_candidate(
+                            packet=packet,
+                            candidate=parsed,
+                        )
                         validated_payload = validate_candidate(client, parsed)
                         continuity_issues = collect_character_continuity_issues(
                             packet=packet,
@@ -2253,6 +2428,20 @@ def main() -> None:
         append_run_finished_log(log_path=log_path, args=args, result=result)
         print(json.dumps(result, indent=2))
     except BaseException as exc:
+        if not args.dry_run and packet and packet.get("run_mode") == "normal":
+            choice_id = ((packet.get("selected_frontier_item") or {}).get("choice_id"))
+            if choice_id is not None:
+                try:
+                    settings = Settings.from_env()
+                    with connect(settings.database_path) as connection:
+                        story = StoryGraphService(connection)
+                        story.record_choice_worker_failure(
+                            choice_id=int(choice_id),
+                            error=str(exc),
+                            auto_park_threshold=5,
+                        )
+                except Exception:
+                    pass
         append_run_failed_log(log_path=log_path, args=args, packet=packet, error=exc)
         raise
 

@@ -499,6 +499,8 @@ class StoryGraphService:
             (status, choice_id),
         )
         self.connection.commit()
+        if status == "open":
+            self.clear_choice_failure(choice_id)
         choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
         if choice is None:
             return {}
@@ -1191,12 +1193,96 @@ class StoryGraphService:
             "story_hooks",
             "story_direction_notes",
             "worldbuilding_notes",
+            "worker_choice_failures",
         ]
         counts: dict[str, int] = {}
         for table_name in table_names:
             row = fetch_one(self.connection, f"SELECT COUNT(*) AS count FROM {table_name}")
             counts[table_name] = int(row["count"]) if row else 0
         return counts
+
+    def get_choice_failure(self, choice_id: int) -> dict[str, Any] | None:
+        return fetch_one(
+            self.connection,
+            "SELECT * FROM worker_choice_failures WHERE choice_id = ?",
+            (choice_id,),
+        )
+
+    def clear_choice_failure(self, choice_id: int) -> None:
+        self.connection.execute(
+            "DELETE FROM worker_choice_failures WHERE choice_id = ?",
+            (choice_id,),
+        )
+        self.connection.commit()
+
+    def record_choice_worker_failure(
+        self,
+        *,
+        choice_id: int,
+        error: str,
+        auto_park_threshold: int = 5,
+    ) -> dict[str, Any]:
+        choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
+        if choice is None:
+            raise ValueError(f"Unknown choice id: {choice_id}")
+        self.connection.execute(
+            """
+            INSERT INTO worker_choice_failures (choice_id, failed_run_count, last_failed_at, last_error, updated_at)
+            VALUES (?, 1, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(choice_id) DO UPDATE SET
+                failed_run_count = worker_choice_failures.failed_run_count + 1,
+                last_failed_at = CURRENT_TIMESTAMP,
+                last_error = excluded.last_error,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (choice_id, error),
+        )
+        record = self.get_choice_failure(choice_id) or {}
+        failed_run_count = int(record.get("failed_run_count") or 0)
+        if failed_run_count >= auto_park_threshold and choice.get("status") == "open":
+            self.connection.execute(
+                "UPDATE choices SET status = 'parked' WHERE id = ?",
+                (choice_id,),
+            )
+            self.connection.execute(
+                """
+                UPDATE worker_choice_failures
+                SET auto_parked_at = COALESCE(auto_parked_at, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE choice_id = ?
+                """,
+                (choice_id,),
+            )
+        self.connection.commit()
+        return self.get_choice_failure(choice_id) or record
+
+    def list_stuck_frontier_choices(self, *, limit: int = 10) -> list[dict[str, Any]]:
+        return fetch_all(
+            self.connection,
+            """
+            SELECT
+                w.choice_id,
+                w.failed_run_count,
+                w.last_failed_at,
+                w.last_error,
+                w.auto_parked_at,
+                c.from_node_id,
+                c.choice_text,
+                c.status,
+                sn.branch_key,
+                sn.title AS from_node_title
+            FROM worker_choice_failures w
+            JOIN choices c ON c.id = w.choice_id
+            JOIN story_nodes sn ON sn.id = c.from_node_id
+            ORDER BY
+                CASE WHEN c.status = 'parked' THEN 1 ELSE 0 END DESC,
+                w.failed_run_count DESC,
+                w.last_failed_at DESC,
+                w.choice_id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
 
     def _list_present_entities(self, story_node_id: int) -> list[dict[str, Any]]:
         rows = fetch_all(

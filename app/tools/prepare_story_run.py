@@ -100,7 +100,7 @@ def summarize_context(
             },
             off_path_character_labels,
         )
-        for hook in context.get("active_hooks", [])
+        for hook in context.get("active_hooks", [])[:4]
     ]
     eligible_major_hooks = [
         _annotate_text_with_character_status(
@@ -112,23 +112,20 @@ def summarize_context(
             },
             off_path_character_labels,
         )
-        for hook in context.get("eligible_major_hooks", [])
+        for hook in context.get("eligible_major_hooks", [])[:2]
     ]
     blocked_major_hooks = [
         _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
-                "payoff_concept": hook.get("payoff_concept"),
-                "must_not_imply": hook.get("must_not_imply", []),
                 "remaining_distance": (hook.get("readiness") or {}).get("remaining_distance"),
                 "remaining_development_distance": (hook.get("readiness") or {}).get("remaining_development_distance"),
-                "missing_clue_tags": (hook.get("readiness") or {}).get("missing_clue_tags", []),
-                "missing_state_tags": (hook.get("readiness") or {}).get("missing_state_tags", []),
+                "rule": "Do not advance this hook yet.",
             },
             off_path_character_labels,
         )
-        for hook in context.get("blocked_major_hooks", [])
+        for hook in context.get("blocked_major_hooks", [])[:2]
     ]
     developable_major_hooks = [
         _annotate_text_with_character_status(
@@ -140,20 +137,19 @@ def summarize_context(
             },
             off_path_character_labels,
         )
-        for hook in context.get("developable_major_hooks", [])
+        for hook in context.get("developable_major_hooks", [])[:2]
     ]
     blocked_major_developments = [
         _annotate_text_with_character_status(
             {
                 "id": hook["id"],
                 "summary": hook["summary"],
-                "payoff_concept": hook.get("payoff_concept"),
-                "must_not_imply": hook.get("must_not_imply", []),
                 "remaining_development_distance": (hook.get("readiness") or {}).get("remaining_development_distance"),
+                "rule": "Do not develop this hook yet.",
             },
             off_path_character_labels,
         )
-        for hook in context.get("blocked_major_developments", [])
+        for hook in context.get("blocked_major_developments", [])[:2]
     ]
     global_direction_notes = [
         _annotate_text_with_character_status(
@@ -167,7 +163,7 @@ def summarize_context(
             },
             off_path_character_labels,
         )
-        for note in context.get("global_direction_notes", [])
+        for note in context.get("global_direction_notes", [])[:3]
     ]
     worldbuilding_notes = [
         {
@@ -179,11 +175,11 @@ def summarize_context(
             "priority": note["priority"],
             "pressure": note.get("pressure", 2),
         }
-        for note in context.get("worldbuilding_notes", [])
+        for note in context.get("worldbuilding_notes", [])[:3]
     ]
     recent_nodes = [
         _annotate_text_with_character_status(node, off_path_character_labels)
-        for node in (context.get("branch_shape") or {}).get("recent_nodes", [])[:4]
+        for node in (context.get("branch_shape") or {}).get("recent_nodes", [])[:3]
     ]
     merge_candidates = [
         _annotate_text_with_character_status(
@@ -194,7 +190,7 @@ def summarize_context(
             },
             off_path_character_labels,
         )
-        for candidate in context.get("merge_candidates", [])
+        for candidate in context.get("merge_candidates", [])[:3]
     ]
 
     return {
@@ -274,6 +270,7 @@ def build_choice_handoff(choice: dict[str, Any] | None = None) -> dict[str, Any]
     return {
         "rule": (
             "Treat NEXT_NODE as the concrete immediate result your new scene should actually deliver or clearly pivot from. "
+            "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it. "
             "Treat FURTHER_GOALS as the medium-range pressure that should keep moving after the immediate beat lands."
         ),
         "next_node": next_node,
@@ -435,6 +432,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
         "If you need to use a recurring canonical character who has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.",
         "In choice notes, NEXT_NODE should state the specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader direction, later pressure, or branch shape that should continue beyond that.",
+        "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.",
         "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
         "Do not put existing canon entities into new_locations, new_characters, or new_objects. Existing canon should use entity_references and scene_present_entities.",
         "Persistent objects are exceptional. Ordinary props, vehicles, and local scenery should usually stay in scene text instead of becoming new_objects.",
@@ -924,6 +922,17 @@ def build_normal_packet(
         "recent_action_family_counts": branch_shape.get("recent_action_family_counts", {}),
         "guidance": "If one action family dominates recent scenes, break the pattern with a social turn, location shift, merge, closure, or immediate external pressure.",
     }
+    consequential_choice_requirement = {
+        "required": bool(
+            (frontier_budget_state.get("pressure_level") in {"soft", "hard"})
+            or (branch_shape.get("same_location_streak") or 0) >= 3
+            or (branch_shape.get("single_actor_scene_streak") or 0) >= 2
+            or branch_shape.get("repeated_action_family") in {"inspect", "follow", "touch", "step_back"}
+        ),
+        "rule": (
+            "If you return 2 or more choices, at least one should be a commitment, social move, location shift, merge, closure, or immediate-pressure response."
+        ),
+    }
     reveal_guardrails = build_reveal_guardrails(act_phase=context.get("act_phase"))
     choice_handoff = build_choice_handoff(selected_choice)
     return {
@@ -946,6 +955,7 @@ def build_normal_packet(
         "actor_pressure": actor_pressure,
         "location_motion_pressure": location_motion_pressure,
         "recent_action_family_summary": recent_action_family_summary,
+        "consequential_choice_requirement": consequential_choice_requirement,
         "from_node_total_choice_count": selected.get("from_node_total_choice_count"),
         "from_node_open_choice_count": selected.get("from_node_open_choice_count"),
         "is_bloom_scene_candidate": bool(
@@ -975,7 +985,7 @@ def build_normal_packet(
         "asset_availability": asset_availability,
         "ideas_file_summary": {
             "path": ideas_file["path"],
-            "open_ideas": ideas_file.get("open_ideas", [])[:8],
+            "open_ideas": ideas_file.get("open_ideas", [])[:5],
         },
         "validation_checklist": build_validation_checklist(branch_shape=context.get("branch_shape")),
         "candidate_template": build_candidate_template(selected["branch_key"], context=context),
@@ -1008,7 +1018,8 @@ def build_normal_packet(
             "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Worldbuilding files, hooks, and other behind-the-scenes coherence trackers often name things the player is not aware of yet. "
             "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
-            "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. "
+            "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it. "
+            "If consequential_choice_requirement.required is true and you return multiple choices, make sure at least one option is a commitment, social move, location shift, merge, closure, or immediate-pressure response. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "

@@ -15,6 +15,7 @@ This is the single per-run entrypoint for the story-expansion loop.
 - Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Behind-the-scenes hooks, worldbuilding notes, and coherence trackers often name things the player has not learned yet.
 - If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like `Guard` or `Patrol Member` should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.
 - Frequently use ideas from `IDEAS.md` when the current branch genuinely supports them. Planning runs happen specifically to make idea usage easier during normal runs.
+- Use `NEXT_NODE` as a base for your scene, but expand and elaborate on it. Do not simply repeat it.
 
 ## What This Repo Does
 - Stores global canon in SQLite.

@@ -289,6 +289,18 @@ SCHEMA_STATEMENTS = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS worker_choice_failures (
+        choice_id INTEGER PRIMARY KEY,
+        failed_run_count INTEGER NOT NULL DEFAULT 0,
+        last_failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_error TEXT,
+        auto_parked_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (choice_id) REFERENCES choices(id)
+    )
+    """,
 ]
 
 
