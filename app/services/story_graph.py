@@ -10,6 +10,7 @@ from app.database import fetch_all, fetch_one
 from app.models import ChoiceReplace, GenerationCandidate
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
+from app.services.story_notes import StoryDirectionService
 
 
 class StoryGraphService:
@@ -1061,28 +1062,22 @@ class StoryGraphService:
                     ),
                 )
 
-            for direction_note in candidate.global_direction_notes:
-                self.connection.execute(
-                    """
-                    INSERT INTO story_direction_notes (
-                        note_type, title, note_text, status, priority, related_entity_type, related_entity_id,
-                        related_hook_id, source_branch_key, notes, created_by
+            if candidate.global_direction_notes:
+                story_notes = StoryDirectionService(self.connection)
+                for direction_note in candidate.global_direction_notes:
+                    story_notes.create_note(
+                        note_type=direction_note.note_type,
+                        title=direction_note.title,
+                        note_text=direction_note.note_text,
+                        status=direction_note.status,
+                        priority=direction_note.priority,
+                        related_entity_type=direction_note.related_entity_type,
+                        related_entity_id=direction_note.related_entity_id,
+                        related_hook_id=direction_note.related_hook_id,
+                        source_branch_key=direction_note.source_branch_key or request_branch_key,
+                        notes=direction_note.notes,
+                        created_by="generation_apply",
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'generation_apply')
-                    """,
-                    (
-                        direction_note.note_type,
-                        direction_note.title,
-                        direction_note.note_text,
-                        direction_note.status,
-                        direction_note.priority,
-                        direction_note.related_entity_type,
-                        direction_note.related_entity_id,
-                        direction_note.related_hook_id,
-                        direction_note.source_branch_key or request_branch_key,
-                        direction_note.notes,
-                    ),
-                )
 
             for inventory_change in candidate.inventory_changes:
                 object_id = inventory_change.object_id

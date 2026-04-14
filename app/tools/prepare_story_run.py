@@ -434,7 +434,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Do not repeat the parent scene summary with only cosmetic wording changes.",
         "If an inspection choice names a local prop, marker, knot, placard, seam, or similar focal object, establish it clearly in the scene text first instead of inventing it only in the menu.",
         "Most multi-choice scenes should include at least one consequential option that is not pure inspection.",
-        "Use reveal_guardrails when present. Early patrol pressure and one strange machine sighting are okay, but do not name deferred rulers or explain the full backstory too early.",
+        "Use reveal_guardrails when present. Early local pressure and partial strange sightings are okay, but do not dump deferred rulers, hidden powers, or deep backstory too early.",
         "For major hooks, include a payoff_concept describing the intended direction of the later payoff.",
         "If a hook is still on development cooldown, do not explore it, advance it, or even strongly hint at it yet.",
         "A good payoff_concept should describe the general shape of the later answer, not just tie the mystery to the nearest currently available local system.",
@@ -482,27 +482,27 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
 def build_reveal_guardrails(*, act_phase: str | None = None) -> dict[str, Any]:
     early_phase = act_phase in {None, "", "early"}
     allowed_now = [
-        "Immediate patrol pressure, survey teams, brass enumerators, and ordinary administrative danger.",
-        "One small unnerving machine detail, one strange metal walker, or one isolated patrol-machine encounter.",
-        "A first personal breadcrumb from the hat, such as a stitch, scorch mark, mirror oddity, or trace left by whoever placed it.",
-        "Hints that the altered hand is cursed, painful, suspicious, or reacts badly to the environment.",
-        "Unrelated local arcs, new characters, new locations, and present-tense danger that do not force the deeper answers yet.",
+        "Immediate local danger, patrol pressure, inspections, rumors, and ordinary present-tense trouble.",
+        "One small unnerving mechanism, creature, sighting, or isolated anomaly that hints at larger forces without fully explaining them.",
+        "A first personal breadcrumb from an important object, scar, curse, keepsake, missing memory, or other intimate mystery thread.",
+        "Suspicious reactions from the environment, bystanders, or institutions that make the mystery feel real without solving it.",
+        "Unrelated local arcs, new characters, new locations, and present-tense conflict that do not force the deeper answers yet.",
     ]
     avoid_for_now = [
-        "Do not name the king or explain the full ruler/regime behind the survey pressure yet.",
-        "Do not explain who commands the strange metal walkers, what they are called officially, or how many exist.",
-        "Do not explain who cursed or altered the protagonist, or why, yet.",
-        "Do not fully explain who gave the hat, why it was left here, or how the full past event happened yet.",
-        "Do not turn the hand into a simple privileged access key or fully explain the backstory because of one local mechanism.",
+        "Do not name deferred rulers, secret masters, or the full regime behind broad external pressure too early.",
+        "Do not fully explain who commands the strange forces, what they are called officially, or how large they are yet.",
+        "Do not fully explain the cause, culprit, or purpose behind the protagonist's biggest personal mysteries yet.",
+        "Do not fully explain the origin or purpose of an emotionally important object or keepsake too early.",
+        "Do not let one local mechanism or one nearby NPC dump the full backstory, true conspiracy, or final answer all at once.",
     ]
     if not early_phase:
         avoid_for_now = [
             item for item in avoid_for_now
-            if "Do not name the king" not in item
+            if "Do not name deferred rulers" not in item
         ]
     return {
         "rule": (
-            "You may hint at larger forces early, but keep major ruler/backstory revelations slow. "
+            "You may hint at larger forces early, but keep major hidden-power and backstory revelations slow. "
             "Use pressure, rumors, and partial sightings before direct explanation."
         ),
         "allowed_now": allowed_now,
@@ -510,7 +510,40 @@ def build_reveal_guardrails(*, act_phase: str | None = None) -> dict[str, Any]:
     }
 
 
-def build_candidate_template(branch_key: str) -> dict[str, Any]:
+def build_candidate_template(branch_key: str, *, context: dict[str, Any]) -> dict[str, Any]:
+    current_node = context.get("current_node") or {}
+    current_entities = current_node.get("entities") or []
+    current_location = next(
+        (
+            entity for entity in current_entities
+            if entity.get("entity_type") == "location" and entity.get("entity_id")
+        ),
+        None,
+    )
+    player_character = next(
+        (
+            entity for entity in current_entities
+            if entity.get("entity_type") == "character"
+            and entity.get("entity_id")
+            and (entity.get("role") in {"player", "hero", "protagonist"})
+        ),
+        None,
+    )
+    entity_references = []
+    if current_location and current_location.get("entity_id"):
+        entity_references.append(
+            {"entity_type": "location", "entity_id": int(current_location["entity_id"]), "role": "current_scene"}
+        )
+    scene_present_entities = []
+    if player_character and player_character.get("entity_id"):
+        scene_present_entities.append(
+            {
+                "entity_type": "character",
+                "entity_id": int(player_character["entity_id"]),
+                "slot": "hero-center",
+                "focus": True,
+            }
+        )
     return {
         "branch_key": branch_key,
         "scene_title": "",
@@ -526,15 +559,9 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
         "new_locations": [],
         "new_characters": [],
         "new_objects": [],
-        "floating_character_introductions": [
-            {"character_id": 2, "intro_text": ""}
-        ],
-        "entity_references": [
-            {"entity_type": "location", "entity_id": 1, "role": "current_scene"}
-        ],
-        "scene_present_entities": [
-            {"entity_type": "character", "entity_id": 1, "slot": "hero-center", "focus": True}
-        ],
+        "floating_character_introductions": [],
+        "entity_references": entity_references,
+        "scene_present_entities": scene_present_entities,
         "fact_updates": [],
         "relation_updates": [],
         "new_hooks": [
@@ -556,15 +583,7 @@ def build_candidate_template(branch_key: str) -> dict[str, Any]:
         "inventory_changes": [],
         "affordance_changes": [],
         "relationship_changes": [],
-        "asset_requests": [
-            {
-                "job_type": "generate_portrait",
-                "asset_kind": "portrait",
-                "entity_type": "character",
-                "entity_id": 1,
-                "prompt": "",
-            }
-        ],
+        "asset_requests": [],
         "discovered_clue_tags": [],
         "discovered_state_tags": [],
     }
@@ -936,7 +955,7 @@ def build_normal_packet(
             "open_ideas": ideas_file.get("open_ideas", [])[:8],
         },
         "validation_checklist": build_validation_checklist(branch_shape=context.get("branch_shape")),
-        "candidate_template": build_candidate_template(selected["branch_key"]),
+        "candidate_template": build_candidate_template(selected["branch_key"], context=context),
         "endpoint_contract": {
             "validate_generation": "POST /jobs/validate-generation with the GenerationCandidate JSON as the request body.",
             "apply_generation": (
@@ -964,7 +983,7 @@ def build_normal_packet(
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
-            "Follow reveal_guardrails strictly: small patrol-machine sightings and first hat breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
+            "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
             "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "

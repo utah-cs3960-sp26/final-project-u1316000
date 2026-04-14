@@ -32,6 +32,40 @@ class WorldbuildingService:
     def get_note(self, note_id: int) -> dict[str, Any] | None:
         return fetch_one(self.connection, "SELECT * FROM worldbuilding_notes WHERE id = ?", (note_id,))
 
+    def find_note_by_title(
+        self,
+        *,
+        note_type: str,
+        title: str,
+        source_branch_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_type = note_type.strip().lower()
+        normalized_title = title.strip().lower()
+        rows = fetch_all(
+            self.connection,
+            """
+            SELECT *
+            FROM worldbuilding_notes
+            WHERE lower(trim(title)) = ?
+            ORDER BY
+                CASE
+                    WHEN lower(trim(note_type)) = ? THEN 0
+                    ELSE 1
+                END,
+                CASE
+                    WHEN source_branch_key = ? THEN 0
+                    WHEN source_branch_key IS NULL THEN 1
+                    ELSE 2
+                END,
+                status = 'active' DESC,
+                pressure DESC,
+                priority DESC,
+                id ASC
+            """,
+            (normalized_title, normalized_type, source_branch_key),
+        )
+        return rows[0] if rows else None
+
     def create_note(
         self,
         *,
@@ -45,6 +79,23 @@ class WorldbuildingService:
         notes: str | None = None,
         created_by: str = "manual",
     ) -> dict[str, Any]:
+        existing = self.find_note_by_title(
+            note_type=note_type,
+            title=title,
+            source_branch_key=source_branch_key,
+        )
+        if existing is not None:
+            return self.update_note(
+                int(existing["id"]),
+                note_type=note_type,
+                title=title,
+                note_text=note_text,
+                status=status,
+                priority=priority,
+                pressure=pressure,
+                source_branch_key=source_branch_key,
+                notes=notes,
+            )
         cursor = self.connection.execute(
             """
             INSERT INTO worldbuilding_notes (

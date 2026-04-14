@@ -741,6 +741,72 @@ def test_seed_opening_story_backfills_existing_major_hook_direction(tmp_path: Pa
     assert any("uniform gear" in guardrail.lower() for guardrail in hat_hook["must_not_imply"])
 
 
+def test_story_note_creation_reuses_existing_title_and_type(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+
+    first = client.post(
+        "/story-notes",
+        json={
+            "note_type": "plotline",
+            "title": "Recurring Pressure",
+            "note_text": "First version.",
+            "status": "active",
+            "priority": 3,
+        },
+    )
+    assert first.status_code == 200
+    first_id = first.json()["id"]
+
+    second = client.post(
+        "/story-notes",
+        json={
+            "note_type": "plotline",
+            "title": "Recurring Pressure",
+            "note_text": "Revised version.",
+            "status": "active",
+            "priority": 5,
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["id"] == first_id
+    assert second.json()["note_text"] == "Revised version."
+    assert second.json()["priority"] == 5
+
+
+def test_worldbuilding_creation_reuses_existing_title_and_type(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+
+    first = client.post(
+        "/worldbuilding",
+        json={
+            "note_type": "world_pressure",
+            "title": "Dawn Sweep",
+            "note_text": "First version.",
+            "status": "active",
+            "priority": 2,
+            "pressure": 2,
+        },
+    )
+    assert first.status_code == 200
+    first_id = first.json()["id"]
+
+    second = client.post(
+        "/worldbuilding",
+        json={
+            "note_type": "world_pressure",
+            "title": "Dawn Sweep",
+            "note_text": "Revised version.",
+            "status": "active",
+            "priority": 4,
+            "pressure": 5,
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["id"] == first_id
+    assert second.json()["note_text"] == "Revised version."
+    assert second.json()["pressure"] == 5
+
+
 def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     db_path = tmp_path / "hard_reset.db"
@@ -1801,8 +1867,8 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["ideas_file_summary"]["path"].endswith("IDEAS.md")
         assert packet["ideas_file_summary"]["open_ideas"]
         assert "reveal_guardrails" in packet
-        assert any("machine" in item.lower() or "metal walker" in item.lower() for item in packet["reveal_guardrails"]["allowed_now"])
-        assert any("do not name the king" in item.lower() for item in packet["reveal_guardrails"]["avoid_for_now"])
+        assert any("strange" in item.lower() or "anomaly" in item.lower() for item in packet["reveal_guardrails"]["allowed_now"])
+        assert any("deferred rulers" in item.lower() or "full regime" in item.lower() or "masterminds" in item.lower() for item in packet["reveal_guardrails"]["avoid_for_now"])
         assert "validation_checklist" in packet
         assert "candidate_template" in packet
         assert "endpoint_contract" in packet
@@ -1812,6 +1878,8 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["context_summary"]["global_direction_notes"][0]["title"] == "Transit Trouble Seed"
         assert "branch_shape" in packet["context_summary"]
         assert "global_direction_notes" in packet["candidate_template"]
+        assert packet["candidate_template"]["floating_character_introductions"] == []
+        assert packet["candidate_template"]["asset_requests"] == []
         assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
         assert "choice id" in packet["next_action"].lower()
         assert "ideas.md" in packet["next_action"].lower()
