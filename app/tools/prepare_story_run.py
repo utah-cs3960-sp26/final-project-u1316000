@@ -263,6 +263,24 @@ def build_compact_selected_frontier_item(
     return compact
 
 
+def build_choice_handoff(choice: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if not choice:
+        return None
+    planning = choice.get("planning") or {}
+    next_node = (planning.get("next_node") or planning.get("goal") or "").strip()
+    further_goals = (planning.get("further_goals") or planning.get("intent") or "").strip()
+    if not next_node and not further_goals:
+        return None
+    return {
+        "rule": (
+            "Treat NEXT_NODE as the concrete immediate result your new scene should actually deliver or clearly pivot from. "
+            "Treat FURTHER_GOALS as the medium-range pressure that should keep moving after the immediate beat lands."
+        ),
+        "next_node": next_node,
+        "further_goals": further_goals,
+    }
+
+
 def build_focus_canon_slice(
     context: dict[str, Any],
     canon: CanonResolver,
@@ -411,12 +429,12 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Include at least one choice.",
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
         "Do not create more than 5 choices on any scene node.",
-        "Every choice must include notes in this exact pattern: `Goal: ... Intent: ...`.",
+        "Every choice must include planning notes. Prefer `NEXT_NODE: ... FURTHER_GOALS: ...`; older `Goal: ... Intent: ...` is still accepted for compatibility.",
         "Use choice_class when helpful: inspection, progress, commitment, or ending.",
         "Inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.",
         "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
         "If you need to use a recurring canonical character who has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.",
-        "In choice notes, Goal means the immediate purpose of taking the option. Intent means the broader direction, future possibility, branch shape, or likely payoff lane the option is meant to open or reinforce.",
+        "In choice notes, NEXT_NODE should state the specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader direction, later pressure, or branch shape that should continue beyond that. Older Goal/Intent notes mean roughly the same thing.",
         "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
         "Do not put existing canon entities into new_locations, new_characters, or new_objects. Existing canon should use entity_references and scene_present_entities.",
         "Persistent objects are exceptional. Ordinary props, vehicles, and local scenery should usually stay in scene text instead of becoming new_objects.",
@@ -553,8 +571,8 @@ def build_candidate_template(branch_key: str, *, context: dict[str, Any]) -> dic
             {"speaker": "Narrator", "text": ""},
         ],
         "choices": [
-            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "progress"},
-            {"choice_text": "", "notes": "Goal:  Intent: ", "choice_class": "commitment"},
+            {"choice_text": "", "notes": "NEXT_NODE:  FURTHER_GOALS: ", "choice_class": "progress"},
+            {"choice_text": "", "notes": "NEXT_NODE:  FURTHER_GOALS: ", "choice_class": "commitment"},
         ],
         "new_locations": [],
         "new_characters": [],
@@ -904,6 +922,7 @@ def build_normal_packet(
         "guidance": "If one action family dominates recent scenes, break the pattern with a social turn, location shift, merge, closure, or immediate external pressure.",
     }
     reveal_guardrails = build_reveal_guardrails(act_phase=context.get("act_phase"))
+    choice_handoff = build_choice_handoff(selected_choice)
     return {
         "run_mode": "normal",
         "message": (
@@ -933,6 +952,7 @@ def build_normal_packet(
         ),
         "arc_exit_candidate": context.get("arc_exit_candidate"),
         "selected_frontier_item": build_compact_selected_frontier_item(selected, choice=selected_choice),
+        "choice_handoff": choice_handoff,
         "preview_payload": {
             "branch_key": selected["branch_key"],
             "choice_id": selected["choice_id"],
@@ -983,6 +1003,7 @@ def build_normal_packet(
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
+            "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
@@ -1026,7 +1047,7 @@ def build_planning_packet(
         "worldbuilding_notes": worldbuilding_notes,
         "planning_targets": targets,
         "endpoint_contract": {
-            "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'Goal: ... Intent: ...', 'idea_binding': {...}} to strengthen future direction for that frontier choice and optionally bind it to a concrete idea.",
+            "update_choice_notes": "POST /choices/{choice_id} with JSON {'notes': 'NEXT_NODE: ... FURTHER_GOALS: ...', 'idea_binding': {...}} so the next normal run gets a concrete immediate handoff plus medium-range steering.",
             "story_notes": "POST /story-notes to add structured global planning memory when a medium- or long-range direction deserves to persist across workers.",
             "worldbuilding": "POST /worldbuilding to add or update ambient world-pressure memory such as patrols, rumors, or automata movements.",
             "ideas_file": "Append directly to IDEAS.md using categorized ideas for characters, locations, objects, or events when you have fun future-facing possibilities worth preserving.",
@@ -1044,7 +1065,7 @@ def build_planning_packet(
             f"{planning_policy['ideas_per_run']} new categorized ideas to IDEAS.md. Each idea must be a concrete character, location, object, or event seed, "
             "and together they must cover at least 2 of those categories with at least one event idea. Read the current IDEAS.md content first and add only genuinely new ideas, "
             "not duplicates and not recycled example seeds from the docs or existing ideas file. Then update the notes on each planning target "
-            "with clearer Goal/Intent direction for future workers, and bind at least one planning target to a specific fresh or existing idea so later normal runs have a concrete direction signal. Decide whether any existing hook or global idea is worth steering toward "
+            "with clearer NEXT_NODE/FURTHER_GOALS direction for future workers, and bind at least one planning target to a specific fresh or existing idea so later normal runs have a concrete direction signal. Decide whether any existing hook or global idea is worth steering toward "
             "from those targets, even if it will take several later scenes to matter. Prefer steering that creates concrete short-horizon behavior such as introduce a character soon, move to a new or known location soon, escalate patrol pressure, or set up a merge or closure within 1-2 scenes. If useful, add one or two structured story direction notes. "
             "Do not generate, validate, or apply a new story scene in this run. "
             "If the world needs more offscreen motion, you may add one or two worldbuilding notes about patrols, rumors, factions, automata, danger escalation, or other ambient pressures. "

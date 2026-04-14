@@ -583,17 +583,17 @@ class StorySetupService:
                 "choices": [
                     {
                         "choice_text": "Trace the counting-wires to the green glass seam under the roots",
-                        "notes": "Goal: find where the wires lead before the patrol reaches the field. Intent: open the buried-glass storyline and let the field reveal one more strange rule before the larger mystery rushes in.",
+                        "notes": "NEXT_NODE: The wires lead to the green glass seam and the field reveals one more concrete rule before the patrol arrives. FURTHER_GOALS: Open the buried-glass storyline without forcing the deeper backstory too early.",
                         "choice_class": "progress",
                     },
                     {
                         "choice_text": "Search the striped hat for a clue about who left it on you",
-                        "notes": "Goal: find a personal trace of whoever left the hat on you before dawn. Intent: let the hat become the first backstory breadcrumb without forcing larger answers too early.",
+                        "notes": "NEXT_NODE: You find one small personal trace inside the hat that narrows who left it on you. FURTHER_GOALS: Let the hat become the first backstory breadcrumb without forcing larger answers too early.",
                         "choice_class": "inspection",
                     },
                     {
                         "choice_text": "Climb the tallest mushroom and watch what the survey patrol is dragging through the mist",
-                        "notes": "Goal: confirm what immediate danger is moving through the field. Intent: bring outside pressure onstage early and maybe glimpse one strange machine or patrol detail without explaining the whole power behind it yet.",
+                        "notes": "NEXT_NODE: You get a clearer look at the immediate danger moving through the field and glimpse one strange patrol detail. FURTHER_GOALS: Bring outside pressure onstage early without explaining the larger power behind it yet.",
                         "choice_class": "progress",
                     },
                 ],

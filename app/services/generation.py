@@ -32,7 +32,8 @@ class LLMGenerationService:
         re.compile(r"\bmysterious\b", re.IGNORECASE),
     ]
     CHOICE_NOTES_PATTERN = re.compile(
-        r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
+        r"(?:goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+))|"
+        r"(?:next_node\s*:\s*(?P<next_node>.+?)\s+further_goals\s*:\s*(?P<further_goals>.+))",
         re.IGNORECASE | re.DOTALL,
     )
     MIN_ENTITY_DESCRIPTION_LENGTH = 12
@@ -202,7 +203,7 @@ class LLMGenerationService:
             "If the branch has lingered too long in one place, move to a new location or route deliberately back to an existing one.\n"
             "If frontier_budget_state.pressure_level is soft or hard, prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.\n"
             "When a local beat feels like it is winding down and arc_exit_candidate says a larger merge is plausible, you may use 1-2 transition scenes to close the local arc and route into another compatible storyline.\n"
-            "Every choice must include internal planning notes in this form: 'Goal: ... Intent: ...'. Goal is the immediate purpose of taking the option. Intent is what broader direction, branch shape, or future possibility the option is meant to open, reinforce, or revisit.\n"
+            "Every choice must include internal planning notes. Prefer this form: 'NEXT_NODE: ... FURTHER_GOALS: ...'. NEXT_NODE should state a specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader follow-through, medium-range aim, or later pressure the branch should keep in motion. Older 'Goal: ... Intent: ...' notes are still accepted, but NEXT_NODE/FURTHER_GOALS is preferred.\n"
             "Choices may optionally include choice_class values inspection, progress, commitment, or ending.\n"
             "Ending choices are allowed. Death, capture, transformation, dead ends, and hub-return closures are all valid if they fit the scene.\n"
             "If you need to use a recurring canonical character who has not been met on this specific path yet, add a floating_character_introduction with that existing character_id and a short reusable first-meeting beat. Floating introductions are for recurring characters only, not locations or objects.\n"
@@ -314,13 +315,15 @@ class LLMGenerationService:
             notes = (choice.notes or "").strip()
             if not notes:
                 issues.append(
-                    f"Choice '{choice.choice_text}' must include notes describing Goal and Intent."
+                    f"Choice '{choice.choice_text}' must include planning notes describing either NEXT_NODE/FURTHER_GOALS or Goal/Intent."
                 )
                 continue
             match = self.CHOICE_NOTES_PATTERN.search(notes)
-            if match is None or len(match.group("goal").strip()) < 12 or len(match.group("intent").strip()) < 12:
+            next_node = (match.group("next_node") or match.group("goal") or "").strip() if match else ""
+            further_goals = (match.group("further_goals") or match.group("intent") or "").strip() if match else ""
+            if match is None or len(next_node) < 12 or len(further_goals) < 12:
                 issues.append(
-                    f"Choice '{choice.choice_text}' must use notes in the form 'Goal: ... Intent: ...' with meaningful content."
+                    f"Choice '{choice.choice_text}' must use notes in the form 'NEXT_NODE: ... FURTHER_GOALS: ...' or 'Goal: ... Intent: ...' with meaningful content."
                 )
             choice_class = self._resolve_choice_class(choice)
             inferred_choice_classes.append(choice_class)

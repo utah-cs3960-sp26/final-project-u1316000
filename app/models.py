@@ -235,7 +235,7 @@ class GeneratedChoice(BaseModel):
     choice_text: str
     notes: str = Field(
         min_length=20,
-        pattern=r"^Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*$",
+        pattern=r"^(?:Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*|NEXT_NODE:\s*\S[\s\S]*FURTHER_GOALS:\s*\S[\s\S]*)$",
     )
     choice_class: ChoiceClass | None = None
     ending_category: EndingCategory | None = None

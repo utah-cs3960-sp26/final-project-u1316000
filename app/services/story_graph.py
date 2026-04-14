@@ -17,7 +17,8 @@ class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
 
     CHOICE_NOTES_PATTERN = re.compile(
-        r"goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+)",
+        r"(?:goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+))|"
+        r"(?:next_node\s*:\s*(?P<next_node>.+?)\s+further_goals\s*:\s*(?P<further_goals>.+))",
         re.IGNORECASE | re.DOTALL,
     )
     INSPECT_ACTION_PATTERN = re.compile(r"\b(look|listen|inspect|examine|read|study|watch|judge)\b", re.IGNORECASE)
@@ -1294,9 +1295,15 @@ class StoryGraphService:
         match = self.CHOICE_NOTES_PATTERN.search(raw_notes.strip())
         if match is None:
             return None
+        next_node = (match.group("next_node") or match.group("goal") or "").strip()
+        further_goals = (match.group("further_goals") or match.group("intent") or "").strip()
+        if not next_node or not further_goals:
+            return None
         return {
-            "goal": match.group("goal").strip(),
-            "intent": match.group("intent").strip(),
+            "next_node": next_node,
+            "further_goals": further_goals,
+            "goal": next_node,
+            "intent": further_goals,
         }
 
     def _score_frontier_item(

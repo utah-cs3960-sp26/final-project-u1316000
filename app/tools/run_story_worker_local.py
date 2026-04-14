@@ -35,7 +35,10 @@ class PlanningIdeaBinding(BaseModel):
 
 class PlanningChoiceUpdate(BaseModel):
     choice_id: int
-    notes: str
+    notes: str = Field(
+        min_length=20,
+        pattern=r"^(?:Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*|NEXT_NODE:\s*\S[\s\S]*FURTHER_GOALS:\s*\S[\s\S]*)$",
+    )
     bound_idea: PlanningIdeaBinding | None = None
 
 
@@ -67,7 +70,7 @@ class RevivalChoiceResult(BaseModel):
     choice_text: str
     notes: str = Field(
         min_length=20,
-        pattern=r"^Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*$",
+        pattern=r"^(?:Goal:\s*\S[\s\S]*Intent:\s*\S[\s\S]*|NEXT_NODE:\s*\S[\s\S]*FURTHER_GOALS:\s*\S[\s\S]*)$",
     )
     choice_class: Literal["inspection", "progress", "commitment", "ending"] | None = None
     ending_category: Literal["death", "dead_end", "capture", "transformation", "hub_return"] | None = None
@@ -544,6 +547,7 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         "Leave optional arrays empty unless you are intentionally changing something. "
         "In particular, do not copy read-only branch context into affordance_changes; if you are not unlocking/suspending/restoring/retiring an affordance now, return affordance_changes as [].\n"
         "If reveal_guardrails are present in the packet, obey them strictly. Early local pressure, partial strange sightings, and first personal breadcrumbs are okay. Dumping the hidden regime, true masterminds, or full backstory too early is not okay yet.\n"
+        "If choice_handoff is present in the packet, treat NEXT_NODE as the immediate scene result you should actually deliver or clearly pivot from, and treat FURTHER_GOALS as medium-range steering pressure.\n"
         "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
         "Packet:\n"
         f"{json.dumps(packet, indent=2)}"
@@ -881,7 +885,7 @@ def build_validation_retry_user_prompt(
         "Fix the listed issues and return a corrected GenerationCandidate JSON object only.\n"
         "Do not explain the changes. Do not stop. Keep trying until validation passes.\n\n"
         "Important reminders:\n"
-        "- Every choice.notes value must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+        "- Every choice.notes value must use meaningful planning notes. Prefer 'NEXT_NODE: ... FURTHER_GOALS: ...'; older 'Goal: ... Intent: ...' is still accepted.\n"
         "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
         "- Reuse existing art instead of requesting duplicate generation.\n\n"
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
@@ -893,6 +897,7 @@ def build_validation_retry_user_prompt(
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
         "- new_hooks are new hook proposals, so do not include hook ids there; include hook_type and summary instead.\n\n"
         "- Do not simply restate the just-taken choice as another option. The new scene must materially advance before offering its next menu.\n"
+        "- If choice_handoff is present in the packet, deliver or clearly pivot from its NEXT_NODE instead of ignoring it.\n"
         "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
@@ -925,7 +930,7 @@ def build_schema_retry_user_prompt(
             "Do not explain the changes. Do not stop. Keep trying until the JSON parses and validates.\n\n"
             "Important reminders:\n"
             "- choice_text is required.\n"
-            "- notes must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+            "- notes must use meaningful planning notes. Prefer 'NEXT_NODE: ... FURTHER_GOALS: ...'; older 'Goal: ... Intent: ...' is still accepted.\n"
             "- If choice_class is 'ending', include ending_category.\n"
             "- Return JSON only, with no markdown fences or commentary.\n\n"
             f"Schema issues:\n{json.dumps(issues, indent=2)}\n\n"
@@ -943,7 +948,7 @@ def build_schema_retry_user_prompt(
         "'hero-center', 'left-support', 'right-support', 'left-foreground-object', "
         "'right-foreground-object', or 'center-foreground-object'.\n"
         "- scene_present_entities and entity_references must use positive existing entity_id values; never omit entity_id and never use 0.\n"
-        "- Every choice.notes value must literally include both 'Goal:' and 'Intent:' with meaningful content.\n"
+        "- Every choice.notes value must use meaningful planning notes. Prefer 'NEXT_NODE: ... FURTHER_GOALS: ...'; older 'Goal: ... Intent: ...' is still accepted.\n"
         "- Set target_node_id to null unless you are intentionally quick-merging into one of the listed merge_candidates.\n"
         "- Return only GenerationCandidate fields. Do not include pre_change_url, ideas_to_append, validation_status, or next_action.\n"
         "- new_locations/new_characters/new_objects are only for brand-new canon entities. Existing canon belongs in entity_references or scene_present_entities instead.\n"
@@ -953,6 +958,7 @@ def build_schema_retry_user_prompt(
         "- Locations usually belong in entity_references with role current_scene, not in scene_present_entities.\n"
         "- new_hooks entries are new hook proposals and require hook_type and summary; do not include hook ids there.\n"
         "- Do not simply restate the just-taken choice as another option. Advance the scene before offering the next menu.\n"
+        "- If choice_handoff is present in the packet, deliver or clearly pivot from its NEXT_NODE instead of ignoring it.\n"
         "- Do not repeat the parent scene summary with only cosmetic changes.\n"
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
@@ -987,6 +993,7 @@ def build_planning_retry_user_prompt(
         "Important reminders:\n"
         "- Update at least one frontier choice note.\n"
         "- Bind at least one updated choice to a specific idea using bound_idea.\n"
+        "- Prefer choice notes in the form 'NEXT_NODE: ... FURTHER_GOALS: ...' so later normal runs get a concrete handoff.\n"
         "- Prefer planning notes that create short-horizon behavior such as introduce a character soon, move to a new or known location soon, escalate patrol pressure, or set up a merge/closure.\n"
         "- worldbuilding_notes are optional but allowed when the world needs more ambient pressure or conflict.\n\n"
         f"Planning issues:\n{json.dumps(issues, indent=2)}\n\n"

@@ -1880,6 +1880,7 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "global_direction_notes" in packet["candidate_template"]
         assert packet["candidate_template"]["floating_character_introductions"] == []
         assert packet["candidate_template"]["asset_requests"] == []
+        assert "choice_handoff" in packet
         assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
         assert "choice id" in packet["next_action"].lower()
         assert "ideas.md" in packet["next_action"].lower()
@@ -1889,6 +1890,42 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
     finally:
         ideas_path.write_text(original_ideas, encoding="utf-8")
+
+
+def test_prepare_story_run_exposes_choice_handoff_from_next_node_notes(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_choice_id = client.get("/frontier").json()[0]["choice_id"]
+
+    update_response = client.post(
+        f"/choices/{frontier_choice_id}",
+        json={
+            "notes": (
+                "NEXT_NODE: The seam opens and reveals a lift below the roots. "
+                "FURTHER_GOALS: Bring in survey pressure and move the branch underground soon."
+            )
+        },
+    )
+    assert update_response.status_code == 200
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--choice-id",
+        str(frontier_choice_id),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+    packet = json.loads(result.stdout)
+    assert packet["choice_handoff"]["next_node"] == "The seam opens and reveals a lift below the roots."
+    assert packet["choice_handoff"]["further_goals"] == "Bring in survey pressure and move the branch underground soon."
 
 
 def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
