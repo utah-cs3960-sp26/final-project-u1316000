@@ -31,6 +31,11 @@ class LLMGenerationService:
         re.compile(r"\bunknown\b", re.IGNORECASE),
         re.compile(r"\bmysterious\b", re.IGNORECASE),
     ]
+    NONVISUAL_SPEAKER_PATTERNS = [
+        re.compile(r"\(o\.s\.\)", re.IGNORECASE),
+        re.compile(r"\boffscreen\b", re.IGNORECASE),
+        re.compile(r"\bover (the )?(radio|speaker|intercom)\b", re.IGNORECASE),
+    ]
     CHOICE_NOTES_PATTERN = re.compile(
         r"next_node\s*:\s*(?P<next_node>.+?)\s+further_goals\s*:\s*(?P<further_goals>.+)",
         re.IGNORECASE | re.DOTALL,
@@ -170,6 +175,7 @@ class LLMGenerationService:
             "Introduce or reintroduce characters frequently. Characters make a story.\n"
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
             "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it in playable text. Behind-the-scenes hooks, notes, worldbuilding files, and coherence trackers often name things the player has not learned yet.\n"
+            "If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like 'Guard' or 'Patrol Member' should be reserved for unseen or offscreen voices, or kept in narration until the character has a true name.\n"
             "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs exist specifically to make idea usage easier during normal runs like this one.\n"
             "Prefer clear weird over murky weird. If a line sounds evocative but you cannot paraphrase it plainly, rewrite it.\n"
             "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.\n"
@@ -456,6 +462,13 @@ class LLMGenerationService:
                         + ", ".join(sorted(mentioned_blocked_names))
                         + "."
                     )
+        issues.extend(
+            self._collect_visible_speaker_issues(
+                candidate=candidate,
+                canon=canon,
+                assets=assets,
+            )
+        )
 
         available_affordances = {row["name"] for row in branch_state_service.list_available_affordances(candidate.branch_key)}
         unlocked_affordances = available_affordances | {
@@ -808,6 +821,70 @@ class LLMGenerationService:
             if any(pattern.search(speaker) for pattern in self.PLACEHOLDER_SPEAKER_PATTERNS):
                 markers.add(speaker)
         return sorted(markers)
+
+    def _speaker_is_nonvisual(self, speaker: str) -> bool:
+        normalized = (speaker or "").strip()
+        return any(pattern.search(normalized) for pattern in (*self.PLACEHOLDER_SPEAKER_PATTERNS, *self.NONVISUAL_SPEAKER_PATTERNS))
+
+    def _collect_visible_speaker_issues(
+        self,
+        *,
+        candidate: GenerationCandidate,
+        canon: CanonResolver,
+        assets: AssetService,
+    ) -> list[str]:
+        issues: list[str] = []
+        explicit_portrait_targets = {
+            int(request.entity_id)
+            for request in candidate.asset_requests
+            if request.entity_type == "character"
+            and request.entity_id is not None
+            and request.asset_kind in {"portrait", "cutout"}
+        }
+        existing_characters_by_name = {
+            (character.get("name") or "").strip().lower(): character
+            for character in canon.list_characters()
+            if (character.get("name") or "").strip()
+        }
+        new_character_names = {
+            (character.name or "").strip().lower()
+            for character in candidate.new_characters
+            if (character.name or "").strip()
+        }
+        seen_speakers: set[str] = set()
+
+        for line in candidate.dialogue_lines:
+            speaker = (line.speaker or "").strip()
+            lowered = speaker.lower()
+            if not speaker or lowered in {"narrator", "you"} or self._speaker_is_nonvisual(speaker):
+                continue
+            if lowered in seen_speakers:
+                continue
+            seen_speakers.add(lowered)
+            if lowered in new_character_names:
+                continue
+
+            character = existing_characters_by_name.get(lowered)
+            if character is None:
+                issues.append(
+                    f"Visible dialogue speaker '{speaker}' must correspond to a named existing character or a named new_characters entry. "
+                    "If the speaker should stay generic for now, make them explicitly unseen/offscreen instead of showing them on-screen."
+                )
+                continue
+
+            character_id = int(character["id"])
+            preferred_asset = assets.get_preferred_asset(
+                entity_type="character",
+                entity_id=character_id,
+                preferred_kinds=["cutout", "portrait"],
+            )
+            if preferred_asset is None and character_id not in explicit_portrait_targets:
+                issues.append(
+                    f"Visible dialogue speaker '{speaker}' does not have character art yet. "
+                    "Reuse existing portrait/cutout art, add a portrait request, or keep the speaker explicitly unseen/offscreen."
+                )
+
+        return issues
 
     def _mystery_marker_is_covered(
         self,

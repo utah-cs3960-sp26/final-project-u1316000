@@ -163,3 +163,7 @@ Suggested format:
 - [Character] The Clockwork Sigher: A sentient pocket watch that breathes when left unopened, growing a single leaf each year to mark the passing of time it has witnessed.
 - [Location] The Hollow Compass: An antique compass that points not north but toward the nearest place where someone has ever felt deeply alone; its needle melts into silver when used correctly.
 - [Event] The Bloom of Unremembered Births: Every 13 years, a single child is born without memory but with the ability to plant flowers that bloom only in dreams; each flower contains a seed of someone’s forgotten birthday.
+
+- [Character] The Clockwork Sigher Who Unravels Time by Breathing in Reverse: A being composed of living clock gears that inhales time backward, causing moments to dissolve into vapor. Their breath erases memories of future events, leaving only echoes of what might have been.
+- [Location] The Garden of Unasked Questions: A field where every unspoken question sprouts as a translucent vine that whispers the answer only to those who have forgotten how to ask. The soil is made of polished silence.
+- [Event] The Festival of Unmade Choices: Once per lunar cycle, all possible futures collide into a single moment where every character experiences the same choice they never made. Time does not skip—it simply forgets to move forward.

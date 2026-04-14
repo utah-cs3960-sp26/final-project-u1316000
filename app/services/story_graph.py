@@ -16,6 +16,15 @@ from app.services.story_notes import StoryDirectionService
 class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
 
+    NONVISUAL_SPEAKER_PATTERNS = (
+        re.compile(r"\bunseen\b", re.IGNORECASE),
+        re.compile(r"\bunknown\b", re.IGNORECASE),
+        re.compile(r"\bmysterious\b", re.IGNORECASE),
+        re.compile(r"\(o\.s\.\)", re.IGNORECASE),
+        re.compile(r"\boffscreen\b", re.IGNORECASE),
+        re.compile(r"\bover (the )?(radio|speaker|intercom)\b", re.IGNORECASE),
+    )
+    AUTO_STAGE_CHARACTER_SLOTS = ("left-support", "right-support")
     CHOICE_NOTES_PATTERN = re.compile(
         r"(?:goal\s*:\s*(?P<goal>.+?)\s+intent\s*:\s*(?P<intent>.+))|"
         r"(?:next_node\s*:\s*(?P<next_node>.+?)\s+further_goals\s*:\s*(?P<further_goals>.+))",
@@ -952,6 +961,7 @@ class StoryGraphService:
                     canonical_summary=location.canonical_summary,
                 )
 
+            created_character_ids_by_name: dict[str, int] = {}
             for character in candidate.new_characters:
                 home_location_id = None
                 if character.home_location_name:
@@ -959,12 +969,14 @@ class StoryGraphService:
                         entity_type="location",
                         name=character.home_location_name,
                     )
-                canon.create_or_get_character(
+                created_character = canon.create_or_get_character(
                     name=character.name,
                     description=character.description,
                     canonical_summary=character.canonical_summary,
                     home_location_id=home_location_id,
                 )
+                if character.name.strip() and created_character.get("id") is not None:
+                    created_character_ids_by_name[character.name.strip().lower()] = int(created_character["id"])
 
             for obj in candidate.new_objects:
                 default_location_id = None
@@ -1007,6 +1019,13 @@ class StoryGraphService:
                         relation.notes,
                     ),
                 )
+
+            self._attach_visible_speaking_characters(
+                story_node_id=new_node_id,
+                candidate=candidate,
+                canon=canon,
+                created_character_ids_by_name=created_character_ids_by_name,
+            )
 
             for hook in candidate.new_hooks:
                 self.connection.execute(
@@ -1305,6 +1324,73 @@ class StoryGraphService:
             "next_node": next_node,
             "further_goals": further_goals,
         }
+
+    def _speaker_is_nonvisual(self, speaker: str) -> bool:
+        normalized = (speaker or "").strip()
+        return any(pattern.search(normalized) for pattern in self.NONVISUAL_SPEAKER_PATTERNS)
+
+    def _attach_visible_speaking_characters(
+        self,
+        *,
+        story_node_id: int,
+        candidate: GenerationCandidate,
+        canon: CanonResolver,
+        created_character_ids_by_name: dict[str, int],
+    ) -> None:
+        present_entities = self._list_present_entities(story_node_id)
+        present_character_ids = {
+            int(entity["entity_id"])
+            for entity in present_entities
+            if entity.get("entity_type") == "character"
+        }
+        used_slots = {str(entity["slot"]) for entity in present_entities if entity.get("entity_type") == "character"}
+        referenced_character_ids = {
+            int(row["entity_id"])
+            for row in fetch_all(
+                self.connection,
+                "SELECT entity_id FROM node_entities WHERE story_node_id = ? AND entity_type = 'character'",
+                (story_node_id,),
+            )
+            if row.get("entity_id") is not None
+        }
+        available_slots = [slot for slot in self.AUTO_STAGE_CHARACTER_SLOTS if slot not in used_slots]
+        seen_speakers: set[str] = set()
+
+        for line in candidate.dialogue_lines:
+            speaker = (line.speaker or "").strip()
+            lowered = speaker.lower()
+            if not speaker or lowered in {"narrator", "you"} or self._speaker_is_nonvisual(speaker):
+                continue
+            if lowered in seen_speakers:
+                continue
+            seen_speakers.add(lowered)
+
+            character_id = created_character_ids_by_name.get(lowered)
+            if character_id is None:
+                existing_character = canon.find_character_by_name(speaker)
+                if existing_character is None or existing_character.get("id") is None:
+                    continue
+                character_id = int(existing_character["id"])
+
+            if character_id not in referenced_character_ids:
+                self.link_entity(
+                    story_node_id=story_node_id,
+                    entity_type="character",
+                    entity_id=character_id,
+                    role="introduced" if lowered in created_character_ids_by_name else "mentioned",
+                )
+                referenced_character_ids.add(character_id)
+            if character_id in present_character_ids or not available_slots:
+                continue
+            slot = available_slots.pop(0)
+            self.link_present_entity(
+                story_node_id=story_node_id,
+                entity_type="character",
+                entity_id=character_id,
+                slot=slot,
+                focus=False,
+            )
+            present_character_ids.add(character_id)
 
     def _score_frontier_item(
         self,

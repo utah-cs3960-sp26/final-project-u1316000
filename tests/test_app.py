@@ -1109,6 +1109,110 @@ def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_a
     assert result["valid"] is True
 
 
+def test_generation_validation_rejects_visible_generic_speaker_without_named_character(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "A patrol member shouts from nearby.",
+            "scene_text": "A brass patrol member steps into view and points toward the seam.",
+            "dialogue_lines": [
+                {"speaker": "Brass Patrol Member", "text": "Hold still and keep your hands where I can count them."},
+            ],
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "choices": [
+                {
+                    "choice_text": "Raise your altered hand slowly",
+                    "notes": "NEXT_NODE: face the new pressure directly. FURTHER_GOALS: prove visible generic speaker labels are no longer allowed without a real named character behind them.",
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("Brass Patrol Member" in issue and "named existing character" in issue for issue in result["issues"])
+
+
+def test_generation_validation_rejects_visible_named_existing_speaker_without_art(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed_response = client.post(
+        "/seed-world",
+        json={
+            "characters": [
+                {
+                    "name": "Madam Bei",
+                    "description": "A poised stationmaster frog with a brass ticket punch and careful eyes.",
+                }
+            ]
+        },
+    )
+    assert seed_response.status_code == 200
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "Madam Bei appears without any art coverage.",
+            "scene_text": "Madam Bei steps from behind a mushroom and addresses the gnome directly.",
+            "dialogue_lines": [
+                {"speaker": "Madam Bei", "text": "You are standing where the dawn auditors will not forgive irregularities."},
+            ],
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+                {"entity_type": "character", "entity_id": 2, "role": "introduced"},
+            ],
+            "choices": [
+                {
+                    "choice_text": "Ask Madam Bei what she means",
+                    "notes": "NEXT_NODE: answer the interruption directly. FURTHER_GOALS: prove visible named speakers need portrait or cutout coverage.",
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is False
+    assert any("Madam Bei" in issue and "character art" in issue for issue in result["issues"])
+
+
+def test_generation_validation_allows_offscreen_generic_speaker_without_art(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+
+    validation_response = client.post(
+        "/jobs/validate-generation",
+        json={
+            "branch_key": "default",
+            "scene_summary": "An offscreen patrol voice cuts through the mist.",
+            "scene_text": "Metal footfalls remain hidden by the fog while a command rings across the field.",
+            "dialogue_lines": [
+                {"speaker": "Patrol Leader (O.S.)", "text": "Sector Seven sweep. Report all irregularities at once."},
+            ],
+            "entity_references": [
+                {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
+            ],
+            "choices": [
+                {
+                    "choice_text": "Drop lower behind the mushroom roots",
+                    "notes": "NEXT_NODE: react to the offscreen voice without revealing yourself. FURTHER_GOALS: confirm unseen speakers are still allowed without visible character art.",
+                }
+            ],
+        },
+    )
+
+    assert validation_response.status_code == 200
+    result = validation_response.json()
+    assert result["valid"] is True
+
+
 def test_generation_validation_allows_unlocked_affordance_choice(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     seed_response = client.post("/seed-world", json={"objects": [{"name": "Goose Whistle"}]})
@@ -1614,6 +1718,71 @@ def test_apply_generation_creates_new_entity_with_description(tmp_path: Path) ->
 
     assert clerk is not None
     assert clerk["description"] == "A tidy field clerk with a ledger, a careful bow, and an anxious respect for procedures."
+
+
+def test_apply_generation_auto_stages_new_named_speaking_character_for_inferred_art(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Clerk in the Mist",
+                "scene_summary": "A named clerk emerges from the field and speaks before the gnome can retreat.",
+                "scene_text": "A careful little clerk steps out of the mist with a waxed ledger tucked under one arm.",
+                "dialogue_lines": [
+                    {"speaker": "Clerk Sedge", "text": "You are standing exactly where the counting weather said you would."},
+                ],
+                "choices": [
+                    {
+                        "choice_text": "Ask Clerk Sedge how he knew that",
+                        "notes": "NEXT_NODE: meet the new clerk directly. FURTHER_GOALS: prove newly introduced visible speakers get staged for portrait inference.",
+                    }
+                ],
+                "new_characters": [
+                    {
+                        "name": "Clerk Sedge",
+                        "description": "A neat field clerk with a waxed ledger, mist-beaded lashes, and a voice trained by paperwork.",
+                        "canonical_summary": "A recurring clerk who treats strange sightings like administrative weather.",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    node = response.json()["node"]
+
+    with connect(db_path) as connection:
+        canon = CanonResolver(connection)
+        clerk = canon.find_character_by_name("Clerk Sedge")
+
+    assert clerk is not None
+
+    created_node = next(row for row in client.get("/story-nodes").json() if row["id"] == node["id"])
+    assert any(
+        entity["entity_type"] == "character" and int(entity["entity_id"]) == int(clerk["id"])
+        for entity in created_node["present_entities"]
+    )
+
+    inferred = infer_missing_asset_requests(
+        node=created_node,
+        explicit_requests=[],
+        project_root=Path(__file__).resolve().parents[1],
+        client=client,
+    )
+    assert any(
+        request["asset_kind"] == "portrait"
+        and request["entity_type"] == "character"
+        and int(request["entity_id"]) == int(clerk["id"])
+        for request in inferred
+    )
 
 
 def test_refresh_protagonist_assets_creates_latest_cutout(tmp_path: Path, monkeypatch) -> None:

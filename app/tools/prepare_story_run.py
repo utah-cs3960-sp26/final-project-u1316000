@@ -447,6 +447,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Introduce or reintroduce characters frequently. Characters make a story.",
         "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.",
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Hooks, worldbuilding notes, and other behind-the-scenes trackers often name things the player has not learned yet.",
+        "If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like 'Guard' or 'Patrol Member' should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.",
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs happen specifically to make idea usage easier during normal runs like this one.",
         "Prefer clear weird over murky weird. If a line sounds evocative but cannot be paraphrased plainly, rewrite it.",
         "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.",
