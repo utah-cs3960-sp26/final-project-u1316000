@@ -8,9 +8,10 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field, ValidationError
 
@@ -551,6 +552,8 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it in playable text. Hooks, worldbuilding notes, and other behind-the-scenes coherence trackers often name things the player has not learned yet.\n"
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs exist specifically to make idea usage easier during normal runs like this one.\n"
         "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
+        "Frequently introduce new characters or bring in old ones if the context makes sense. New character ideas in IDEAS.md. \n"
+        "Continually introduce new locations or revisit old ones as choices progress and the location changes.\n"
         "Packet:\n"
         f"{json.dumps(packet, indent=2)}"
     )
@@ -847,7 +850,10 @@ def normalize_generation_candidate_payload(raw_payload: dict[str, Any]) -> dict[
     return payload
 
 
-def parse_llm_result(packet: dict[str, Any], raw_text: str) -> GenerationCandidate | PlanningResult | RevivalChoiceResult:
+def parse_llm_result(
+    packet: dict[str, Any],
+    raw_text: str,
+) -> GenerationCandidate | PlanningFollowthroughResult | RevivalChoiceResult:
     json_text = extract_json_text(raw_text)
     if packet["run_mode"] == "planning":
         return PlanningFollowthroughResult.model_validate_json(json_text)
@@ -1800,7 +1806,7 @@ def append_run_failed_log(
     log_path: Path,
     args: argparse.Namespace,
     packet: dict[str, Any] | None,
-    error: Exception | str,
+    error: BaseException | str,
 ) -> None:
     timestamps = build_log_timestamps()
     append_run_log_record(
@@ -1836,7 +1842,8 @@ def infer_missing_asset_requests(
         if request.get("asset_kind") and request.get("entity_type") and request.get("entity_id") is not None
     }
 
-    settings = client.app.state.settings
+    app = cast(FastAPI, client.app)
+    settings = app.state.settings
     from app.database import connect
 
     connection = connect(settings.database_path)
