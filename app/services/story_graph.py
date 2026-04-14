@@ -183,7 +183,9 @@ class StoryGraphService:
                         "resolved": choice["to_node_id"] is not None,
                         "status": choice["status"],
                         "notes": choice.get("notes_data", {}).get("notes") if isinstance(choice.get("notes_data"), dict) else choice.get("notes"),
-                        "intent": (choice.get("planning") or {}).get("intent"),
+                        "next_node": (choice.get("planning") or {}).get("next_node") or (choice.get("planning") or {}).get("goal"),
+                        "further_goals": (choice.get("planning") or {}).get("further_goals") or (choice.get("planning") or {}).get("intent"),
+                        "intent": (choice.get("planning") or {}).get("further_goals") or (choice.get("planning") or {}).get("intent"),
                     }
                 )
 
@@ -1302,8 +1304,6 @@ class StoryGraphService:
         return {
             "next_node": next_node,
             "further_goals": further_goals,
-            "goal": next_node,
-            "intent": further_goals,
         }
 
     def _score_frontier_item(

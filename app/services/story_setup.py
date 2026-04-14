@@ -583,17 +583,17 @@ class StorySetupService:
                 "choices": [
                     {
                         "choice_text": "Trace the counting-wires to the green glass seam under the roots",
-                        "notes": "NEXT_NODE: The wires lead to the green glass seam and the field reveals one more concrete rule before the patrol arrives. FURTHER_GOALS: Open the buried-glass storyline without forcing the deeper backstory too early.",
+                        "notes": "NEXT_NODE: The wires lead to the green glass seam, which answers with one concrete new rule and a first narrow opening beneath the roots before the patrol arrives. FURTHER_GOALS: Open the buried-glass storyline and create real location motion without forcing the deeper backstory too early.",
                         "choice_class": "progress",
                     },
                     {
                         "choice_text": "Search the striped hat for a clue about who left it on you",
-                        "notes": "NEXT_NODE: You find one small personal trace inside the hat that narrows who left it on you. FURTHER_GOALS: Let the hat become the first backstory breadcrumb without forcing larger answers too early.",
+                        "notes": "NEXT_NODE: You find one small personal trace hidden in the hat band that narrows the kind of person who left it on you. FURTHER_GOALS: Let the hat become the first personal breadcrumb while keeping the larger shared past event deferred.",
                         "choice_class": "inspection",
                     },
                     {
-                        "choice_text": "Climb the tallest mushroom and watch what the survey patrol is dragging through the mist",
-                        "notes": "NEXT_NODE: You get a clearer look at the immediate danger moving through the field and glimpse one strange patrol detail. FURTHER_GOALS: Bring outside pressure onstage early without explaining the larger power behind it yet.",
+                        "choice_text": "Climb the tallest mushroom and look out across the misty field",
+                        "notes": "NEXT_NODE: From the mushroom top, you spot the approaching brass patrol and also catch sight of one frightened stranger hiding from it nearby, close enough to hail or follow. FURTHER_GOALS: Bring outside pressure onstage early, introduce a new character into the branch, and keep the larger power behind the patrol only partially seen for now.",
                         "choice_class": "progress",
                     },
                 ],

@@ -660,7 +660,8 @@ button {
     position: absolute;
     inset: 0;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     justify-content: center;
     padding: 1rem 1.1rem;
     border-radius: 1rem;
@@ -673,6 +674,14 @@ button {
     opacity: 0;
     pointer-events: none;
     transition: opacity 140ms ease;
+}
+
+.choice-plan-line {
+    display: block;
+}
+
+.choice-plan-line + .choice-plan-line {
+    margin-top: 0.5rem;
 }
 
 body.choice-intent-debug-visible .choice-intent-overlay {

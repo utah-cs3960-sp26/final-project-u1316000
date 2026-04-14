@@ -962,7 +962,7 @@ def test_generation_validation_blocks_early_major_hook_payoff(tmp_path: Path) ->
             "branch_key": "default",
             "scene_summary": "The hat reveals everything immediately.",
             "scene_text": "The hat tells you the entire truth far too early.",
-            "choices": [{"choice_text": "Keep going", "notes": "Goal: continue after the reveal. Intent: move the branch onward after a supposed payoff."}],
+            "choices": [{"choice_text": "Keep going", "notes": "NEXT_NODE: continue after the reveal. FURTHER_GOALS: move the branch onward after a supposed payoff."}],
             "hook_updates": [
                 {
                     "hook_id": hook_id,
@@ -1006,7 +1006,7 @@ def test_generation_validation_blocks_hook_development_during_cooldown(tmp_path:
             "choices": [
                 {
                     "choice_text": "Keep tugging at the seam",
-                    "notes": "Goal: immediately press the same clue again. Intent: force another development before the cooldown expires.",
+                    "notes": "NEXT_NODE: immediately press the same clue again. FURTHER_GOALS: force another development before the cooldown expires.",
                 }
             ],
             "hook_updates": [
@@ -1043,7 +1043,7 @@ def test_generation_validation_requires_hook_for_placeholder_mystery_entity(tmp_
             "entity_references": [
                 {"entity_type": "location", "entity_id": 1, "role": "current_scene"},
             ],
-            "choices": [{"choice_text": "Step closer", "notes": "Goal: approach the speaker. Intent: deepen the new stalk-side mystery."}],
+            "choices": [{"choice_text": "Step closer", "notes": "NEXT_NODE: approach the speaker. FURTHER_GOALS: deepen the new stalk-side mystery."}],
         },
     )
 
@@ -1100,7 +1100,7 @@ def test_generation_validation_allows_placeholder_mystery_when_hook_is_created_a
                     "min_distance_to_payoff": 1,
                 }
             ],
-            "choices": [{"choice_text": "Step closer", "notes": "Goal: approach the speaker. Intent: keep the voice mystery alive as a true hook."}],
+            "choices": [{"choice_text": "Step closer", "notes": "NEXT_NODE: approach the speaker. FURTHER_GOALS: keep the voice mystery alive as a true hook."}],
         },
     )
 
@@ -1135,7 +1135,7 @@ def test_generation_validation_allows_unlocked_affordance_choice(tmp_path: Path)
             "choices": [
                 {
                     "choice_text": "Blow the goose whistle",
-                    "notes": "Goal: call an emergency ride. Intent: use an unlocked affordance to open a traversal branch.",
+                    "notes": "NEXT_NODE: call an emergency ride. FURTHER_GOALS: use an unlocked affordance to open a traversal branch.",
                     "required_affordances": ["Call the Goose"],
                 }
             ],
@@ -1158,7 +1158,7 @@ def test_generation_validation_rejects_missing_affordance_choice(tmp_path: Path)
             "choices": [
                 {
                     "choice_text": "Blow the goose whistle",
-                    "notes": "Goal: call a goose from nowhere. Intent: shortcut the story with an unavailable affordance.",
+                    "notes": "NEXT_NODE: call a goose from nowhere. FURTHER_GOALS: shortcut the story with an unavailable affordance.",
                     "required_affordances": ["Call the Goose"],
                 }
             ],
@@ -1266,7 +1266,7 @@ def test_generation_validation_blocks_merge_only_scene_when_branch_needs_diverge
             "choices": [
                 {
                     "choice_text": "Return to the silver tracks",
-                    "notes": "Goal: fold back into the main clue trail. Intent: test whether over-merged branches are forced to diverge.",
+                    "notes": "NEXT_NODE: fold back into the main clue trail. FURTHER_GOALS: test whether over-merged branches are forced to diverge.",
                     "target_node_id": 2,
                 }
             ],
@@ -1305,11 +1305,11 @@ def test_apply_generation_writes_node_and_branch_state_atomically(tmp_path: Path
                 "choices": [
                     {
                         "choice_text": "Knock on the mushroom stem",
-                        "notes": "Goal: test whether the mushroom answers. Intent: open a fresh mystery path at the marked stem.",
+                        "notes": "NEXT_NODE: test whether the mushroom answers. FURTHER_GOALS: open a fresh mystery path at the marked stem.",
                     },
                     {
                         "choice_text": "Circle around the velvet knot",
-                        "notes": "Goal: inspect the marker from another angle. Intent: widen the local branch with a clue-focused alternative.",
+                        "notes": "NEXT_NODE: inspect the marker from another angle. FURTHER_GOALS: widen the local branch with a clue-focused alternative.",
                     },
                 ],
                 "global_direction_notes": [
@@ -1363,7 +1363,7 @@ def test_apply_generation_inherits_scene_location_and_present_entities_when_omit
                 "choices": [
                     {
                         "choice_text": "Keep going",
-                        "notes": "Goal: keep the same scene moving. Intent: confirm inherited staging keeps the same visual context when metadata is omitted.",
+                        "notes": "NEXT_NODE: keep the same scene moving. FURTHER_GOALS: confirm inherited staging keeps the same visual context when metadata is omitted.",
                     }
                 ],
             },
@@ -1460,7 +1460,7 @@ def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> No
                 "choices": [
                     {
                         "choice_text": "Follow the grooves after all",
-                        "notes": "Goal: return to the main clue trail. Intent: quick-merge this minor omen back into the silver-track line.",
+                        "notes": "NEXT_NODE: return to the main clue trail. FURTHER_GOALS: quick-merge this minor omen back into the silver-track line.",
                         "target_node_id": velvet_node["id"],
                     }
                 ],
@@ -1519,7 +1519,7 @@ def test_apply_generation_rejects_missing_affordance_choice_write(tmp_path: Path
                 "choices": [
                     {
                         "choice_text": "Blow the goose whistle",
-                        "notes": "Goal: summon a nonexistent goose. Intent: force a branch through an unavailable affordance.",
+                        "notes": "NEXT_NODE: summon a nonexistent goose. FURTHER_GOALS: force a branch through an unavailable affordance.",
                         "required_affordances": ["Call the Goose"],
                     }
                 ],
@@ -1544,7 +1544,7 @@ def test_validate_generation_requires_new_entity_descriptions(tmp_path: Path) ->
             "choices": [
                 {
                     "choice_text": "Hear the clerk out",
-                    "notes": "Goal: listen to the new clerk. Intent: open a fresh recurring bureaucratic character thread.",
+                    "notes": "NEXT_NODE: listen to the new clerk. FURTHER_GOALS: open a fresh recurring bureaucratic character thread.",
                 }
             ],
             "relation_updates": [
@@ -1583,7 +1583,7 @@ def test_apply_generation_creates_new_entity_with_description(tmp_path: Path) ->
                 "choices": [
                     {
                         "choice_text": "Ask the clerk what he wants",
-                        "notes": "Goal: meet the new clerk. Intent: open a fresh recurring character thread with a bureaucratic angle.",
+                        "notes": "NEXT_NODE: meet the new clerk. FURTHER_GOALS: open a fresh recurring character thread with a bureaucratic angle.",
                     }
                 ],
                 "new_characters": [
@@ -1725,7 +1725,7 @@ def test_play_scene_query_sets_start_scene_permalink(tmp_path: Path) -> None:
     assert story_data["start_scene"] == target_scene_id
 
 
-def test_play_story_payload_exposes_choice_intent(tmp_path: Path) -> None:
+def test_play_story_payload_exposes_choice_planning(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/seed-opening-story")
     frontier_item = client.get("/frontier").json()[0]
@@ -1738,13 +1738,13 @@ def test_play_story_payload_exposes_choice_intent(tmp_path: Path) -> None:
             "choice_id": frontier_item["choice_id"],
             "candidate": {
                 "branch_key": "default",
-                "scene_title": "Intent Test Scene",
-                "scene_summary": "A scene used to confirm intent text reaches the player payload.",
+                "scene_title": "Planning Test Scene",
+                "scene_summary": "A scene used to confirm planning text reaches the player payload.",
                 "scene_text": "A clear little branch for testing.",
                 "choices": [
                     {
                         "choice_text": "Take the careful route",
-                        "notes": "Goal: choose the safer branch. Intent: keep the mushroom-field thread alive while opening a cautious follow-up path.",
+                        "notes": "NEXT_NODE: choose the safer branch. FURTHER_GOALS: keep the mushroom-field thread alive while opening a cautious follow-up path.",
                     }
                 ],
             },
@@ -1763,7 +1763,8 @@ def test_play_story_payload_exposes_choice_intent(tmp_path: Path) -> None:
     assert match is not None
     story_data = json.loads(match.group(1))
     choice = story_data["scenes"][created_node_id]["choices"][0]
-    assert choice["intent"] == "keep the mushroom-field thread alive while opening a cautious follow-up path."
+    assert choice["next_node"] == "choose the safer branch."
+    assert choice["further_goals"] == "keep the mushroom-field thread alive while opening a cautious follow-up path."
 
 
 def test_snapshot_db_tool_creates_manual_backup(tmp_path: Path) -> None:
@@ -2053,7 +2054,7 @@ def test_prepare_story_run_outputs_revival_packet_when_frontier_empty(tmp_path: 
                 "choices": [
                     {
                         "choice_text": "Accept the dead end",
-                        "notes": "Goal: finish this doomed side path cleanly. Intent: close the branch so revival logic has something to reopen later.",
+                        "notes": "NEXT_NODE: finish this doomed side path cleanly. FURTHER_GOALS: close the branch so revival logic has something to reopen later.",
                         "choice_class": "ending",
                         "ending_category": "dead_end",
                     }
@@ -2160,6 +2161,8 @@ def test_generation_prompt_includes_bold_character_and_location_guidance(tmp_pat
     assert "Feel free to act creatively. Make bold choices as long as they fit in the story." in prompt
     assert "Introduce or reintroduce characters frequently. Characters make a story." in prompt
     assert "Introduce new locations frequently when appropriate" in prompt
+    assert "Always evaluate whether the player is actually familiar" in prompt
+    assert "Frequently use ideas from IDEAS.md" in prompt
 
 
 def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
@@ -2174,6 +2177,8 @@ def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
 
     assert any("Feel free to act creatively" in item for item in checklist)
     assert any("Characters make a story" in item for item in checklist)
+    assert any("player is actually familiar" in item for item in checklist)
+    assert any("Frequently use ideas from IDEAS.md" in item for item in checklist)
     assert any("Introduce new locations frequently" in item for item in checklist)
     assert any("gone several scenes without enough character pressure" in item for item in checklist)
     assert any("lingered in one place too long" in item for item in checklist)
@@ -2200,7 +2205,7 @@ def test_branch_shape_tracks_location_actor_and_action_pressure(tmp_path: Path) 
             story.create_choice(
                 from_node_id=int(node["id"]),
                 choice_text="Follow the humming seam deeper",
-                notes='{"notes":"Goal: keep following the seam. Intent: continue the same investigation.","choice_class":"progress"}',
+                notes='{"notes":"NEXT_NODE: keep following the seam. FURTHER_GOALS: continue the same investigation.","choice_class":"progress"}',
             )
             previous_id = int(node["id"])
 
@@ -2222,12 +2227,12 @@ def test_collect_branch_pressure_issues_rejects_static_same_location_all_inspect
                 "choices": [
                     {
                         "choice_text": "Inspect the seam more closely",
-                        "notes": "Goal: inspect the seam more closely. Intent: continue the same inspection loop.",
+                        "notes": "NEXT_NODE: inspect the seam more closely. FURTHER_GOALS: continue the same inspection loop.",
                         "choice_class": "inspection",
                     },
                     {
                         "choice_text": "Listen to the seam carefully",
-                        "notes": "Goal: listen to the seam carefully. Intent: continue the same inspection loop.",
+                        "notes": "NEXT_NODE: listen to the seam carefully. FURTHER_GOALS: continue the same inspection loop.",
                         "choice_class": "inspection",
                     },
                 ],
@@ -2267,7 +2272,7 @@ def test_rebalance_frontier_parks_excess_choices_and_can_unpark(tmp_path: Path) 
                 "from_node_id": 1,
                 "choice_text": f"Extra backlog choice {index + 1}",
                 "status": "open",
-                "notes": json.dumps({"notes": "Goal: create backlog. Intent: stress the frontier rebalance tool."}),
+                "notes": json.dumps({"notes": "NEXT_NODE: create backlog. FURTHER_GOALS: stress the frontier rebalance tool."}),
             },
         )
         assert create_response.status_code == 200
@@ -2338,7 +2343,7 @@ def test_generation_validation_rejects_inspection_fresh_branching_under_frontier
                 from_node_id=1,
                 choice_text=f"Pressure seed {index + 1}",
                 status="open",
-                notes=json.dumps({"notes": "Goal: widen the frontier. Intent: trigger soft frontier pressure."}),
+                notes=json.dumps({"notes": "NEXT_NODE: widen the frontier. FURTHER_GOALS: trigger soft frontier pressure."}),
             )
 
     validation_response = client.post(
@@ -2353,12 +2358,12 @@ def test_generation_validation_rejects_inspection_fresh_branching_under_frontier
             "choices": [
                 {
                     "choice_text": "Inspect the placard lettering",
-                    "notes": "Goal: inspect a tiny local detail for flavor. Intent: open a minor side look that should not become a durable branch under pressure.",
+                    "notes": "NEXT_NODE: inspect a tiny local detail for flavor. FURTHER_GOALS: open a minor side look that should not become a durable branch under pressure.",
                     "choice_class": "inspection",
                 },
                 {
                     "choice_text": "Listen at the bell housing",
-                    "notes": "Goal: inspect another tiny local detail for flavor. Intent: open a second minor side look that should reconverge quickly instead of widening the frontier.",
+                    "notes": "NEXT_NODE: inspect another tiny local detail for flavor. FURTHER_GOALS: open a second minor side look that should reconverge quickly instead of widening the frontier.",
                     "choice_class": "inspection",
                 },
             ],
@@ -2411,7 +2416,7 @@ def test_floating_character_introduction_allows_recurring_character_and_marks_pa
                 "choices": [
                     {
                         "choice_text": "Ask Madam Bei what she heard",
-                        "notes": "Goal: respond to the new arrival directly. Intent: unlock a reusable recurring character on this branch without pretending an earlier meeting happened.",
+                        "notes": "NEXT_NODE: respond to the new arrival directly. FURTHER_GOALS: unlock a reusable recurring character on this branch without pretending an earlier meeting happened.",
                     }
                 ],
                 "floating_character_introductions": [
@@ -2478,11 +2483,11 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
                     "choices": [
                         {
                             "choice_text": "Take the mocked path",
-                            "notes": "Goal: confirm the local runner can validate a mocked scene. Intent: prove the CLI works before real model calls.",
+                            "notes": "NEXT_NODE: confirm the local runner can validate a mocked scene. FURTHER_GOALS: prove the CLI works before real model calls.",
                         },
                         {
                                 "choice_text": "Climb down and head for the lantern gate",
-                                "notes": "Goal: leave the current perch before the patrol closes in. Intent: prove the runner accepts a consequential location-moving option.",
+                                "notes": "NEXT_NODE: leave the current perch before the patrol closes in. FURTHER_GOALS: prove the runner accepts a consequential location-moving option.",
                             },
                     ],
                     "global_direction_notes": [
@@ -2565,7 +2570,7 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
                     "choice_note_updates": [
                         {
                             "choice_id": target_choice_id,
-                            "notes": "Goal: push the branch toward a reusable tram-side mystery. Intent: set up a later reed-marsh detour or a careful merge back if the beat stays small.",
+                            "notes": "NEXT_NODE: push the branch toward a reusable tram-side mystery. FURTHER_GOALS: set up a later reed-marsh detour or a careful merge back if the beat stays small.",
                             "bound_idea": {
                                 "title": "Needle Marsh Depot",
                                 "category": "location",
@@ -2623,13 +2628,13 @@ def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: 
     assert payload["story_notes_added"] == 1
     assert payload["ideas_appended"][0]["category"] == "object"
     assert payload["choice_note_updates"][0]["choice_id"] == target_choice_id
-    assert "Goal:" in payload["choice_note_updates"][0]["notes"]
+    assert "NEXT_NODE:" in payload["choice_note_updates"][0]["notes"]
     assert payload["choice_note_updates"][0]["bound_idea"]["title"] == "Needle Marsh Depot"
     assert payload["story_notes_created"][0]["title"] == "Needle Marsh Seed"
 
     updated_choice = client.get("/choices").json()
     matching = next(choice for choice in updated_choice if choice["id"] == target_choice_id)
-    assert "Goal:" in matching["notes"]
+    assert "NEXT_NODE:" in matching["notes"]
     assert matching["idea_binding"]["title"] == "Needle Marsh Depot"
     ideas_text = ideas_file.read_text(encoding="utf-8")
     assert "[Location] Needle Marsh Depot" in ideas_text
@@ -2814,7 +2819,7 @@ def test_prepare_story_run_surfaces_bound_idea_on_selected_frontier_item(tmp_pat
     update = client.post(
         f"/choices/{choice_id}",
         json={
-            "notes": "Goal: inspect the route marker. Intent: widen this branch toward a strange depot encounter.",
+            "notes": "NEXT_NODE: inspect the route marker. FURTHER_GOALS: widen this branch toward a strange depot encounter.",
             "idea_binding": {
                 "title": "Porcelain Switchyard",
                 "category": "location",
@@ -2856,7 +2861,7 @@ def test_normalize_generation_candidate_payload_repairs_common_local_model_shape
         "choices": [
             {
                 "choice_text": "Continue",
-                "notes": "Goal: continue the scene. Intent: keep the branch moving.",
+                "notes": "NEXT_NODE: continue the scene. FURTHER_GOALS: keep the branch moving.",
             }
         ],
         "entity_references": [
@@ -2909,7 +2914,7 @@ def test_parse_llm_result_uses_generation_candidate_normalizer_for_common_shape_
             "choices": [
                 {
                     "choice_text": "Continue",
-                    "notes": "Goal: continue the scene. Intent: keep the branch moving.",
+                    "notes": "NEXT_NODE: continue the scene. FURTHER_GOALS: keep the branch moving.",
                 }
             ],
             "entity_references": [
@@ -3026,7 +3031,7 @@ def test_validate_generation_rejects_duplicate_existing_asset_request(tmp_path: 
             "choices": [
                 {
                     "choice_text": "Keep walking",
-                    "notes": "Goal: keep the scene valid. Intent: test duplicate asset rejection without changing branch shape.",
+                    "notes": "NEXT_NODE: keep the scene valid. FURTHER_GOALS: test duplicate asset rejection without changing branch shape.",
                 }
             ],
             "asset_requests": [
@@ -3068,7 +3073,7 @@ def test_validate_generation_rejects_background_prompt_with_character_or_object_
             "choices": [
                 {
                     "choice_text": "Wait for a better prompt",
-                    "notes": "Goal: keep the scene valid. Intent: prove background prompts cannot absorb separate actor and object assets.",
+                    "notes": "NEXT_NODE: keep the scene valid. FURTHER_GOALS: prove background prompts cannot absorb separate actor and object assets.",
                 }
             ],
             "new_characters": [
@@ -3207,7 +3212,7 @@ def test_collect_scene_anchor_art_issues_flags_object_art_for_travel_scene() -> 
                 "choices": [
                     {
                         "choice_text": "Keep going",
-                        "notes": "Goal: continue through the portal. Intent: reach the next place cleanly.",
+                        "notes": "NEXT_NODE: continue through the portal. FURTHER_GOALS: reach the next place cleanly.",
                     }
                 ],
                 "asset_requests": [
@@ -3246,7 +3251,7 @@ def test_collect_redundant_progression_issues_flags_repeated_parent_choice_and_s
                 "choices": [
                     {
                         "choice_text": "Trace the counting-wires to the green glass seam",
-                        "notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+                        "notes": "NEXT_NODE: find where the wires lead before patrol arrives. FURTHER_GOALS: open buried-glass registry storyline and test altered hand.",
                     }
                 ],
             }
@@ -3257,7 +3262,7 @@ def test_collect_redundant_progression_issues_flags_repeated_parent_choice_and_s
         packet={
             "selected_frontier_item": {
                 "choice_text": "Trace the counting-wires to the green glass seam",
-                "existing_choice_notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+                "existing_choice_notes": "NEXT_NODE: find where the wires lead before patrol arrives. FURTHER_GOALS: open buried-glass registry storyline and test altered hand.",
             },
             "context_summary": {
                 "current_node": {
@@ -3283,7 +3288,7 @@ def test_collect_ungrounded_local_prop_issues_flags_menu_only_prop() -> None:
                 "choices": [
                     {
                         "choice_text": "Step around the velvet knot",
-                        "notes": "Goal: inspect the marker from another angle. Intent: widen the local branch with a clue-first alternative.",
+                        "notes": "NEXT_NODE: inspect the marker from another angle. FURTHER_GOALS: widen the local branch with a clue-first alternative.",
                     }
                 ],
             }
@@ -3294,7 +3299,7 @@ def test_collect_ungrounded_local_prop_issues_flags_menu_only_prop() -> None:
         packet={
             "selected_frontier_item": {
                 "choice_text": "Trace the counting-wires to the green glass seam",
-                "existing_choice_notes": "Goal: find where the wires lead before patrol arrives. Intent: open buried-glass registry storyline and test altered hand.",
+                "existing_choice_notes": "NEXT_NODE: find where the wires lead before patrol arrives. FURTHER_GOALS: open buried-glass registry storyline and test altered hand.",
             },
             "context_summary": {
                 "current_node": {
@@ -3320,7 +3325,7 @@ def test_collect_ungrounded_local_prop_issues_allows_grounded_seam_phrase() -> N
                 "choices": [
                     {
                         "choice_text": "Examine the cracked seam for clues.",
-                        "notes": "Goal: inspect the damaged seam closely. Intent: gather a clue without changing location or inventing a new prop.",
+                        "notes": "NEXT_NODE: inspect the damaged seam closely. FURTHER_GOALS: gather a clue without changing location or inventing a new prop.",
                     }
                 ],
             }
@@ -3331,7 +3336,7 @@ def test_collect_ungrounded_local_prop_issues_allows_grounded_seam_phrase() -> N
         packet={
             "selected_frontier_item": {
                 "choice_text": "Follow the pulse toward the humming wires",
-                "existing_choice_notes": "Goal: trace the glowing seam to understand its pattern. Intent: open a route-discovery path that may lead to hidden glyphs.",
+                "existing_choice_notes": "NEXT_NODE: trace the glowing seam to understand its pattern. FURTHER_GOALS: open a route-discovery path that may lead to hidden glyphs.",
             },
             "context_summary": {
                 "current_node": {
@@ -3357,7 +3362,7 @@ def test_prune_existing_asset_requests_drops_already_available_art() -> None:
                 "choices": [
                     {
                         "choice_text": "Keep going",
-                        "notes": "Goal: continue the branch. Intent: prove duplicate art requests can be ignored safely.",
+                        "notes": "NEXT_NODE: continue the branch. FURTHER_GOALS: prove duplicate art requests can be ignored safely.",
                     }
                 ],
                 "asset_requests": [
@@ -3405,7 +3410,7 @@ def test_generation_validation_rejects_non_location_current_scene(tmp_path: Path
             "choices": [
                 {
                     "choice_text": "Step around the tram",
-                    "notes": "Goal: inspect the mistaken scene anchor. Intent: prove object assets must not drive the background layer.",
+                    "notes": "NEXT_NODE: inspect the mistaken scene anchor. FURTHER_GOALS: prove object assets must not drive the background layer.",
                 }
             ],
         },
@@ -3438,7 +3443,7 @@ def test_apply_generation_rejects_non_location_current_scene(tmp_path: Path) -> 
                 "choices": [
                     {
                         "choice_text": "Keep walking",
-                        "notes": "Goal: continue through the malformed scene. Intent: confirm parent location inheritance stays safe.",
+                        "notes": "NEXT_NODE: continue through the malformed scene. FURTHER_GOALS: confirm parent location inheritance stays safe.",
                     }
                 ],
             },

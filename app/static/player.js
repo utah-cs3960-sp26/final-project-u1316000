@@ -208,13 +208,17 @@ function renderChoices() {
             button.classList.add("choice-pending");
             button.disabled = true;
         }
-        const intentText = choice.intent || "No intent note recorded.";
+        const nextNodeText = choice.next_node || "No NEXT_NODE recorded.";
+        const furtherGoalsText = choice.further_goals || choice.intent || "No FURTHER_GOALS recorded.";
         button.innerHTML = `
             <span class="choice-number">${index + 1}</span>
             <span class="choice-id">id ${choice.id}</span>
             <span class="choice-label">${escapeHtml(choice.label)}</span>
             ${!isResolved ? '<span class="choice-status">Still being woven</span>' : ""}
-            <span class="choice-intent-overlay">${escapeHtml(intentText)}</span>
+            <span class="choice-intent-overlay">
+                <span class="choice-plan-line"><strong>NEXT_NODE:</strong> ${escapeHtml(nextNodeText)}</span>
+                <span class="choice-plan-line"><strong>FURTHER_GOALS:</strong> ${escapeHtml(furtherGoalsText)}</span>
+            </span>
         `;
         button.addEventListener("click", () => {
             if (!isResolved) {

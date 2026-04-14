@@ -21,7 +21,7 @@ This file is the human-readable story bible for the current prototype. The machi
 
 ## Branching Shape
 - Default to `2` or `3` meaningful choices, not a rigid `3` every scene.
-- Every generated choice should carry internal planning notes in the form `Goal: ... Intent: ...` so future workers can see why the option exists and what broader direction it is meant to support.
+- Every generated choice should carry internal planning notes in the form `NEXT_NODE: ... FURTHER_GOALS: ...` so future workers can see the immediate intended result and the broader direction it is meant to support.
 - A single forced continuation is acceptable when a scene is tight and transition-driven.
 - More than `3` choices should be rare and should happen only when the scene truly opens outward.
 - Cycles and revisits are desirable when they reinforce continuity.
@@ -54,7 +54,7 @@ This file is the human-readable story bible for the current prototype. The machi
 - A planning run should not write a new story scene.
 - Instead it should:
   - add a few fun future-facing categorized ideas to [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md)
-  - strengthen the `Goal: ... Intent: ...` notes on several frontier choices
+  - strengthen the `NEXT_NODE: ... FURTHER_GOALS: ...` notes on several frontier choices
   - leave behind any structured `story_direction_notes` needed to keep longer arcs from drifting
 - Planning runs help counter the natural one-scene conservatism of the normal worker loop.
 - [IDEAS.md](D:/Documents/CS/CS%203960/adventure-test/IDEAS.md) is the informal human-editable scratchpad for fun possibilities, half-formed ideas, and future scene/location/character concepts.

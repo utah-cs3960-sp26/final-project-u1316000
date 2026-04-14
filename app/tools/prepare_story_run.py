@@ -429,12 +429,12 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Include at least one choice.",
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
         "Do not create more than 5 choices on any scene node.",
-        "Every choice must include planning notes. Prefer `NEXT_NODE: ... FURTHER_GOALS: ...`; older `Goal: ... Intent: ...` is still accepted for compatibility.",
+        "Every choice must include planning notes in the form `NEXT_NODE: ... FURTHER_GOALS: ...`.",
         "Use choice_class when helpful: inspection, progress, commitment, or ending.",
         "Inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.",
         "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
         "If you need to use a recurring canonical character who has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.",
-        "In choice notes, NEXT_NODE should state the specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader direction, later pressure, or branch shape that should continue beyond that. Older Goal/Intent notes mean roughly the same thing.",
+        "In choice notes, NEXT_NODE should state the specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader direction, later pressure, or branch shape that should continue beyond that.",
         "If you introduce a brand-new canonical location, character, or object, declare it in new_locations, new_characters, or new_objects with a short readable description.",
         "Do not put existing canon entities into new_locations, new_characters, or new_objects. Existing canon should use entity_references and scene_present_entities.",
         "Persistent objects are exceptional. Ordinary props, vehicles, and local scenery should usually stay in scene text instead of becoming new_objects.",
@@ -446,6 +446,8 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Feel free to act creatively. Make bold choices as long as they fit in the story.",
         "Introduce or reintroduce characters frequently. Characters make a story.",
         "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.",
+        "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Hooks, worldbuilding notes, and other behind-the-scenes trackers often name things the player has not learned yet.",
+        "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs happen specifically to make idea usage easier during normal runs like this one.",
         "Prefer clear weird over murky weird. If a line sounds evocative but cannot be paraphrased plainly, rewrite it.",
         "Be especially clear when a line introduces a clue, a rule, a system behavior, or a consequence.",
         "Do not simply restate the just-taken choice as another option in the next scene. Advance the situation first.",
@@ -1002,6 +1004,8 @@ def build_normal_packet(
             "Feel free to act creatively. Make bold choices as long as they fit in the story. "
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
+            "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Worldbuilding files, hooks, and other behind-the-scenes coherence trackers often name things the player is not aware of yet. "
+            "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
             "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "

@@ -12,6 +12,8 @@ This is the single per-run entrypoint for the story-expansion loop.
 - Feel free to act creatively. Make bold choices as long as they fit in the story.
 - Introduce or reintroduce characters frequently. Characters make a story.
 - Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.
+- Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Behind-the-scenes hooks, worldbuilding notes, and coherence trackers often name things the player has not learned yet.
+- Frequently use ideas from `IDEAS.md` when the current branch genuinely supports them. Planning runs happen specifically to make idea usage easier during normal runs.
 
 ## What This Repo Does
 - Stores global canon in SQLite.
@@ -66,7 +68,7 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
   - do not generate or apply a new story scene
   - do not call validation/apply for a `GenerationCandidate`
   - append new categorized ideas to `IDEAS.md`
-  - strengthen returned frontier choice notes in `Goal: ... Intent: ...` format
+  - strengthen returned frontier choice notes in `NEXT_NODE: ... FURTHER_GOALS: ...` format
   - bind at least one frontier choice to a specific idea so later normal runs have a concrete direction signal
   - add structured `story_direction_notes` when useful
 - Planning mode exists to reduce over-incremental one-scene thinking and keep medium-range direction alive.
@@ -229,7 +231,7 @@ Planning runs are a particularly good time to use:
 - Usually return `2` or `3` player choices.
 - `1` is okay for a forced transition or tightly framed beat.
 - More than `3` should be uncommon and justified.
-- Every generated choice must include planning notes in the form `Goal: ... Intent: ...`.
+- Every generated choice must include planning notes in the form `NEXT_NODE: ... FURTHER_GOALS: ...`.
 - In choice notes:
   - `Goal` = immediate purpose of taking the option
   - `Intent` = broader direction, future possibility, branch shape, or likely payoff lane
@@ -416,7 +418,7 @@ Each `choice_note_updates` item may also bind the leaf to a concrete idea:
 ```json
 {
   "choice_id": 42,
-  "notes": "Goal: follow the glass tracks into stranger territory. Intent: steer this branch toward a future depot reveal without forcing it immediately.",
+  "notes": "NEXT_NODE: follow the glass tracks into stranger territory. FURTHER_GOALS: steer this branch toward a future depot reveal without forcing it immediately.",
   "bound_idea": {
     "title": "Porcelain Switchyard",
     "category": "location",
@@ -534,11 +536,11 @@ Each `choice_note_updates` item may also bind the leaf to a concrete idea:
     "choices": [
       {
         "choice_text": "Knock on the mushroom stem",
-        "notes": "Goal: test whether the marked mushroom responds. Intent: open a fresh mystery path around the marker."
+        "notes": "NEXT_NODE: test whether the marked mushroom responds. FURTHER_GOALS: open a fresh mystery path around the marker."
       },
       {
         "choice_text": "Step around the velvet knot",
-        "notes": "Goal: inspect the departure marker from another angle. Intent: widen the branch with a clue-first alternative."
+        "notes": "NEXT_NODE: inspect the departure marker from another angle. FURTHER_GOALS: widen the branch with a clue-first alternative."
       }
     ],
     "discovered_clue_tags": ["velvet-mushroom-found"]
