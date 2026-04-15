@@ -16,6 +16,8 @@ from app.services.story_notes import StoryDirectionService
 class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
 
+    SAME_LOCATION_PRESSURE_THRESHOLD = 6
+
     NONVISUAL_SPEAKER_PATTERNS = (
         re.compile(r"\bunseen\b", re.IGNORECASE),
         re.compile(r"\bunknown\b", re.IGNORECASE),
@@ -1518,7 +1520,7 @@ class StoryGraphService:
             score += 1.0
         if branch_shape.get("single_actor_scene_streak", 0) >= 2:
             score += 2.5
-        if branch_shape.get("same_location_streak", 0) >= 3:
+        if branch_shape.get("same_location_streak", 0) >= self.SAME_LOCATION_PRESSURE_THRESHOLD:
             score += 2.5
         if branch_shape.get("should_prefer_divergence"):
             score += 8.0
@@ -1542,7 +1544,7 @@ class StoryGraphService:
             reason = "High-priority continuity target: this leaf carries a bound medium-range idea and should be revisited."
         elif branch_shape.get("should_prefer_divergence"):
             reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."
-        elif branch_shape.get("same_location_streak", 0) >= 3:
+        elif branch_shape.get("same_location_streak", 0) >= self.SAME_LOCATION_PRESSURE_THRESHOLD:
             reason = "Location-motion target: this branch has lingered in one place and should move, return somewhere meaningful, or transition."
         elif branch_shape.get("single_actor_scene_streak", 0) >= 2:
             reason = "Character-pressure target: this branch needs another person or faction pressure onstage soon."

@@ -41,3 +41,12 @@ lms load qwen/qwen3.5-35b-a3b --identifier story-qwen --ttl 60 --gpu max --conte
 
 
 lms load qwen/qwen3.5-35b-a3b --identifier story-qwen --ttl 60 --gpu max --context-length 100000 -y; try { if ($?) { python -m app.tools.run_story_worker_local --model story-qwen --request-timeout 1800 } } finally { lms unload story-qwen }
+
+
+Nw ox stuff:
+python -m app.tools.run_story_worker_codex_human --codex-model gpt-5.4-mini
+python -m app.tools.run_story_worker_codex_human --codex-model gpt-5.4-mini --dry-run --choice-id 73
+
+
+GOAT:
+python -m app.tools.run_story_worker_local --model google/gemma-4-e4b --max-retries 4 --request-timeout 1800 --context-run-limit 1 --reset-context

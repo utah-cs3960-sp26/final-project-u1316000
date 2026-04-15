@@ -489,7 +489,6 @@ class StorySetupService:
         ]
         for table_name in tables:
             self.connection.execute(f"DELETE FROM {table_name}")
-        self.connection.execute("DELETE FROM sqlite_sequence")
         self.connection.execute(
             """
             INSERT INTO loop_runtime_state (id, normal_runs_since_plan, last_run_mode)

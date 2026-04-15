@@ -19,6 +19,8 @@ from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 from app.services.worldbuilding import WorldbuildingService
 
+SAME_LOCATION_PRESSURE_THRESHOLD = 6
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -487,7 +489,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         checklist.append(
             "This branch has gone several scenes without enough character pressure. Reintroduce or introduce a character, or put an external faction/patrol/courier pressure onstage."
         )
-    if branch_shape and (branch_shape.get("same_location_streak") or 0) >= 3:
+    if branch_shape and (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD:
         checklist.append(
             "This branch has lingered in one place too long. Move to a new location or route back to an existing one soon."
         )
@@ -496,6 +498,54 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
             f"This branch has been repeating the '{branch_shape.get('repeated_action_family')}' action family. Break the pattern with a social turn, location shift, merge, closure, or immediate external pressure."
         )
     return checklist
+
+
+def build_author_warnings(
+    *,
+    frontier_budget_state: dict[str, Any],
+    frontier_choice_constraints: dict[str, Any],
+    actor_pressure: dict[str, Any],
+    location_motion_pressure: dict[str, Any],
+    recent_action_family_summary: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    pressure_level = str(frontier_budget_state.get("pressure_level") or "normal").strip()
+    if pressure_level in {"soft", "hard"}:
+        warnings.append(
+            f"Frontier pressure is {pressure_level}. Treat merge/closure and fresh-branch limits as hard constraints for this run."
+        )
+    if frontier_choice_constraints.get("must_include_merge_or_closure"):
+        warnings.append("This scene must include at least one merge or closure path.")
+        warnings.append(
+            "This run will ONLY validate if at least one choice uses TARGET_EXISTING_NODE to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure."
+        )
+        warnings.append(
+            "You will be able to apply that merge/closure requirement during the choice creation phase."
+        )
+    max_fresh_choices = frontier_choice_constraints.get("max_fresh_choices_under_pressure")
+    if pressure_level in {"soft", "hard"} and max_fresh_choices is not None:
+        warnings.append(f"This scene may open at most {int(max_fresh_choices)} fresh branch choice(s) under current pressure.")
+    if frontier_choice_constraints.get("inspection_choices_should_reconverge_under_pressure"):
+        warnings.append("Inspection choices should reconverge quickly here instead of creating durable fresh leaves.")
+    if actor_pressure.get("needs_more_people"):
+        warnings.append("Character pressure is active: bring another person or faction pressure onstage soon.")
+    if location_motion_pressure.get("should_move"):
+        warnings.append("Location pressure is active: move to a new or meaningful known location soon.")
+    repeated_action_family = recent_action_family_summary.get("repeated_action_family")
+    if repeated_action_family:
+        warnings.append(
+            f"Recent scenes have overused the '{repeated_action_family}' action family. Break that pattern in this run."
+        )
+    return warnings
+
+
+def build_author_warning_banner(author_warnings: list[str]) -> str:
+    if not author_warnings:
+        return ""
+    return (
+        "WARNING: YOUR RUN WILL FAIL if you do not follow these warning constraints as you create your scene. "
+        + " ".join(author_warnings)
+    )
 
 
 def build_reveal_guardrails(*, act_phase: str | None = None) -> dict[str, Any]:
@@ -610,7 +660,7 @@ def build_candidate_template(branch_key: str, *, context: dict[str, Any]) -> dic
 
 def build_planning_policy(story_bible: dict[str, Any]) -> dict[str, Any]:
     defaults = {
-        "chance": 0.25,
+        "chance": 0.125,
         "min_normal_runs_between_plans": 2,
         "frontier_count": 4,
         "ideas_per_run": 3,
@@ -863,6 +913,7 @@ def build_normal_packet(
     story: StoryGraphService,
     ideas_file: dict[str, Any],
     asset_availability: list[dict[str, Any]],
+    branching_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     path_character_continuity = build_path_character_continuity_summary(
         selected=selected,
@@ -887,7 +938,24 @@ def build_normal_packet(
     }
     selected_choice = story.get_choice(int(selected["choice_id"])) or {}
     frontier_budget_state = context.get("frontier_budget_state") or {}
+    budget_config = (branching_policy or {}).get("frontier_budget") or {}
     branch_shape = context.get("branch_shape") or {}
+    frontier_choice_constraints = {
+        "pressure_level": frontier_budget_state.get("pressure_level"),
+        "must_include_merge_or_closure": bool(frontier_budget_state.get("pressure_level") in {"soft", "hard"}),
+        "max_fresh_choices_under_pressure": int(budget_config.get("default_max_fresh_choices_per_scene", 1)),
+        "allow_second_fresh_choice_only_for_bloom_scenes": bool(
+            budget_config.get("allow_second_fresh_choice_only_for_bloom_scenes", True)
+        ),
+        "inspection_choices_should_reconverge_under_pressure": bool(
+            frontier_budget_state.get("pressure_level") in {"soft", "hard"}
+        ),
+        "guidance": (
+            "Under soft or hard frontier pressure, include at least one merge or closure path, keep fresh branching narrow, and do not use inspection choices to open durable new leaves."
+            if frontier_budget_state.get("pressure_level") in {"soft", "hard"}
+            else "Frontier pressure is normal; ordinary branching rules apply."
+        ),
+    }
     required_scene_delta = {
         "rule": "The next accepted scene must materially change something important instead of merely inspecting the same object again.",
         "allowed_axes": [
@@ -910,10 +978,10 @@ def build_normal_packet(
     }
     location_motion_pressure = {
         "streak": branch_shape.get("same_location_streak", 0),
-        "should_move": bool((branch_shape.get("same_location_streak") or 0) >= 3),
+        "should_move": bool((branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD),
         "guidance": (
             "Move the branch to a new location or route back to an old one soon."
-            if (branch_shape.get("same_location_streak") or 0) >= 3
+            if (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD
             else "Location motion is optional right now, but new places or meaningful returns are welcome."
         ),
     }
@@ -922,10 +990,18 @@ def build_normal_packet(
         "recent_action_family_counts": branch_shape.get("recent_action_family_counts", {}),
         "guidance": "If one action family dominates recent scenes, break the pattern with a social turn, location shift, merge, closure, or immediate external pressure.",
     }
+    author_warnings = build_author_warnings(
+        frontier_budget_state=frontier_budget_state,
+        frontier_choice_constraints=frontier_choice_constraints,
+        actor_pressure=actor_pressure,
+        location_motion_pressure=location_motion_pressure,
+        recent_action_family_summary=recent_action_family_summary,
+    )
+    author_warning_banner = build_author_warning_banner(author_warnings)
     consequential_choice_requirement = {
         "required": bool(
             (frontier_budget_state.get("pressure_level") in {"soft", "hard"})
-            or (branch_shape.get("same_location_streak") or 0) >= 3
+            or (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD
             or (branch_shape.get("single_actor_scene_streak") or 0) >= 2
             or branch_shape.get("repeated_action_family") in {"inspect", "follow", "touch", "step_back"}
         ),
@@ -938,11 +1014,15 @@ def build_normal_packet(
     return {
         "run_mode": "normal",
         "message": (
+            ((author_warning_banner + " ") if author_warning_banner else "")
+            +
             "Everything is already wired through. Your job is to continue the story, not inspect the repo. "
-            "Use this packet, continue the worker loop immediately, return one GenerationCandidate JSON, "
-            "validate it, apply it if valid, generate any required art, and stop. "
+            "Use this packet and continue the worker loop immediately through the conversational scene-builder steps. "
+            "Fill the requested forms step by step, let the local worker assemble and validate the final candidate, apply it if valid, generate any required art, and stop. "
             "Do not summarize this packet and wait for permission unless the human explicitly asked for discussion only."
         ),
+        "author_warnings": author_warnings,
+        "author_warning_banner": author_warning_banner,
         "pre_change_url": (
             f"{args.play_base_url.rstrip('/')}/play?branch_key={selected['branch_key']}"
             f"&scene={selected['from_node_id']}"
@@ -950,6 +1030,7 @@ def build_normal_packet(
         "path_character_continuity": path_character_continuity,
         "global_open_choice_count": frontier_budget_state.get("open_choice_count"),
         "frontier_budget_state": frontier_budget_state,
+        "frontier_choice_constraints": frontier_choice_constraints,
         "required_scene_delta": required_scene_delta,
         "reveal_guardrails": reveal_guardrails,
         "actor_pressure": actor_pressure,
@@ -988,30 +1069,18 @@ def build_normal_packet(
             "open_ideas": ideas_file.get("open_ideas", [])[:5],
         },
         "validation_checklist": build_validation_checklist(branch_shape=context.get("branch_shape")),
-        "candidate_template": build_candidate_template(selected["branch_key"], context=context),
-        "endpoint_contract": {
-            "validate_generation": "POST /jobs/validate-generation with the GenerationCandidate JSON as the request body.",
-            "apply_generation": (
-                "POST /jobs/apply-generation with branch_key, parent_node_id, choice_id, and candidate."
-            ),
-            "story_notes": (
-                "Use global_direction_notes inside the GenerationCandidate for new planning memory, or POST /story-notes directly to add/update out-of-world direction notes."
-            ),
-            "generate_assets_after_apply": (
-                "POST /assets/generate after apply when new recurring characters, linked locations, or reusable important objects need art."
-            ),
-        },
         "manual_commands": {
             "prepare": "python -m app.tools.prepare_story_run",
             "validate": "POST /jobs/validate-generation",
             "apply": "POST /jobs/apply-generation",
         },
         "next_action": (
-            "Run now. Do not ask the human for permission. Return one GenerationCandidate JSON only, "
+            "Run now. Do not ask the human for permission. Use the conversational scene-builder steps and answer only the requested form at each step. "
             "You may steer the current leaf toward one of the active IDEAS.md ideas when it genuinely fits the branch, hooks, and current scene, "
             "but do not force a mismatch just to use an idea. "
             "If selected_frontier_item.bound_idea is present, treat it as the strongest current medium-range steering signal for this leaf unless continuity strongly argues otherwise. "
             "Use frontier_budget_state to understand current branch pressure. If pressure is soft or hard, prefer merges, closures, and narrow continuation over multiple fresh leaves. "
+            "Treat frontier_choice_constraints as hard validation rules for this run, not just soft advice. "
             "Feel free to act creatively. Make bold choices as long as they fit in the story. "
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
@@ -1019,7 +1088,10 @@ def build_normal_packet(
             "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
             "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
             "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it. "
+            "Answer only the requested form for the current step. Do not emit JSON in normal mode. "
             "If consequential_choice_requirement.required is true and you return multiple choices, make sure at least one option is a commitment, social move, location shift, merge, closure, or immediate-pressure response. "
+            "When frontier_choice_constraints requires a merge or closure path, this run will only validate if at least one choice uses TARGET_EXISTING_NODE to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure. "
+            "You will be able to satisfy that requirement during the choice creation phase. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
@@ -1027,13 +1099,13 @@ def build_normal_packet(
             "If you need that kind of recurring cross-arc appearance, use floating_character_introductions so the branch gains a short reusable first meeting instead of pretending prior familiarity. "
             "Check asset_availability before requesting art. If usable art already exists for a location background, character portrait/cutout, or object render/cutout, reuse it and do not request duplicate generation. "
             "Background prompts must stay static-environment-only and must not name separately rendered characters or reusable props. "
-            "If validation fails, correct the JSON and try again until it passes. "
             "validate it, apply it if valid, generate any required art, report the pre-change URL, "
             "report the concrete choice id(s) a human should click from that state to reach the new content, "
             "and explicitly say whether you added any hooks, global direction notes, or IDEAS.md entries. "
             "Then stop. "
             "Do not browse the repo unless the loop is blocked."
         ),
+        "final_warning": author_warning_banner,
     }
 
 
@@ -1121,6 +1193,7 @@ def build_revival_packet(
         story=story,
         ideas_file=ideas_file,
         asset_availability=asset_availability,
+        branching_policy=None,
     )
     packet["run_mode"] = "revival"
     packet["message"] = (
@@ -1290,6 +1363,7 @@ def main() -> None:
                     canon=canon,
                     assets=assets,
                 ),
+                branching_policy=branching_policy,
             )
             packet["planning_policy"] = planning_policy
             packet["runtime_state_before"] = runtime_before

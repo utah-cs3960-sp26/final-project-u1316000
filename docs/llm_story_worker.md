@@ -20,20 +20,20 @@ This is the single per-run entrypoint for the story-expansion loop.
 ## What This Repo Does
 - Stores global canon in SQLite.
 - Stores branch-local player consequences separately from global world truth.
-- Lets you expand the story one scene at a time through validated structured JSON.
+- Lets you expand the story one scene at a time through a conversational scene-builder that the runner turns into validated structured data.
 - Stores and reuses visual assets so backgrounds, characters, and important objects can recur.
 
 ## What The Runner Already Handles
 - Prepares the current run packet.
 - Chooses normal vs planning mode.
-- Validates your scene JSON.
+- Validates the assembled scene candidate.
 - Applies a valid scene to SQLite.
 - Updates choice notes in planning mode.
 - Writes structured `story_direction_notes`.
 - Appends ideas to `IDEAS.md`.
 - Executes explicit post-apply `asset_requests`.
 
-So your main job is to return the right JSON for the current mode. Do not inspect the repo broadly, write SQL, or rediscover whether the endpoints exist. They do.
+So your main job is to provide the right story content for the current mode. In normal mode, answer the requested labeled forms step by step and let the runner build the schema. Do not inspect the repo broadly, write SQL, or rediscover whether the endpoints exist. They do.
 Pay attention to `asset_availability` in the packet. If usable art already exists, reuse it instead of requesting replacement generation.
 
 ## Core Job
@@ -49,9 +49,10 @@ Pay attention to `asset_availability` in the packet. If usable art already exist
 - Do not ask for permission to begin the loop.
 - Default normal flow:
   - prepare
-  - generate one candidate
+  - fill the requested conversational scene-builder steps
+  - let the runner assemble one candidate
   - validate
-  - if validation fails, correct the candidate and validate again
+  - if a step or candidate fails, correct only that part and continue
   - apply
   - trigger required art
   - report the pre-change URL and what changed

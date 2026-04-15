@@ -21,9 +21,31 @@ from app.services.generation import LLMGenerationService
 from app.services.story_graph import StoryGraphService
 from app.services.story_setup import StorySetupService
 from app.tools.prepare_story_run import build_validation_checklist
+from app.tools.run_story_worker_codex_human import (
+    build_codex_step_prompt,
+    build_worker_command,
+    extract_last_agent_message_from_jsonl,
+    extract_thread_id_from_jsonl,
+    request_nonempty_codex_step,
+    strip_markdown_fences,
+)
 from app.tools.run_story_worker_local import (
+    ScenePlanDraft,
+    SceneBodyDraft,
+    ChoiceDraft,
+    SceneExtrasDraft,
+    SceneHooksDraft,
+    SceneArtDraft,
+    NormalRunConversationState,
     PlanningIdea,
     build_asset_prompt,
+    build_form_template,
+    build_normal_conversation_system_prompt,
+    build_step_prompt,
+    build_forced_choice_draft,
+    call_lm_studio,
+    request_nonempty_ai_step_response,
+    request_human_step,
     collect_branch_pressure_issues,
     collect_character_continuity_issues,
     collect_redundant_progression_issues,
@@ -31,11 +53,26 @@ from app.tools.run_story_worker_local import (
     infer_missing_asset_requests,
     collect_ungrounded_local_prop_issues,
     normalize_generation_candidate_payload,
+    parse_choice_form,
     parse_llm_result,
+    parse_scene_body_form,
+    parse_scene_extras_form,
+    parse_scene_hooks_form,
+    parse_scene_art_form,
+    parse_scene_plan_form,
+    compile_scene_body_draft,
     prune_existing_asset_requests,
     normalize_visible_generic_speakers,
+    resolve_scene_cast_names,
     repair_generation_candidate,
+    validate_choice_draft,
+    validate_scene_body_draft,
     collect_scene_anchor_art_issues,
+    load_or_create_normal_session,
+    append_validation_attempt_log_record,
+    apply_normal_result,
+    is_force_next_override,
+    validate_choice_menu,
 )
 
 
@@ -871,7 +908,6 @@ def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_p
             story_specific_idea_terms=["Clerk Nettle", "Bell Orchard", "Counterfoil Parchment"],
         )
 
-        assert result["start_node_id"] == 1
         assert result["hook_count"] == 2
         assert result["worldbuilding_note_count"] == 4
         assert result["story_direction_note_count"] == 2
@@ -887,6 +923,7 @@ def test_hard_reset_story_reseeds_single_opening_and_clears_old_continuity(tmp_p
     assert [character["name"] for character in characters] == ["The Tall Gnome"]
     assert objects == []
     assert len(nodes) == 1
+    assert result["start_node_id"] == nodes[0]["id"]
     assert nodes[0]["title"] == "Before the Counting Bell"
     assert len(choices) == 3
     assert all(choice["status"] == "open" for choice in choices)
@@ -2044,25 +2081,39 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert any("deferred rulers" in item.lower() or "full regime" in item.lower() or "masterminds" in item.lower() for item in packet["reveal_guardrails"]["avoid_for_now"])
         assert "validation_checklist" in packet
         assert any("Use NEXT_NODE as a base for your scene" in item for item in packet["validation_checklist"])
-        assert "candidate_template" in packet
-        assert "endpoint_contract" in packet
+        assert "candidate_template" not in packet
+        assert "endpoint_contract" not in packet
         assert "full_context" not in packet
         assert "eligible_major_hooks" in packet["context_summary"]
         assert "blocked_major_hooks" in packet["context_summary"]
         assert packet["context_summary"]["global_direction_notes"][0]["title"] == "Transit Trouble Seed"
         assert "branch_shape" in packet["context_summary"]
-        assert "global_direction_notes" in packet["candidate_template"]
-        assert packet["candidate_template"]["floating_character_introductions"] == []
-        assert packet["candidate_template"]["asset_requests"] == []
         assert "choice_handoff" in packet
+        assert "author_warnings" in packet
+        assert "author_warning_banner" in packet
+        assert "final_warning" in packet
+        assert packet["author_warnings"]
+        if packet["frontier_budget_state"]["pressure_level"] in {"soft", "hard"}:
+            assert any("Frontier pressure is" in warning for warning in packet["author_warnings"])
+            assert any("This run will ONLY validate if at least one choice uses TARGET_EXISTING_NODE" in warning for warning in packet["author_warnings"])
+            assert packet["message"].startswith("WARNING:")
+            assert "YOUR RUN WILL FAIL" in packet["message"]
+            assert "TARGET_EXISTING_NODE to merge into an existing node" in packet["message"]
+            assert packet["author_warning_banner"].startswith("WARNING: YOUR RUN WILL FAIL")
+            assert packet["final_warning"].startswith("WARNING: YOUR RUN WILL FAIL")
         assert "consequential_choice_requirement" in packet
         assert packet["next_action"].startswith("Run now. Do not ask the human for permission.")
         assert "choice id" in packet["next_action"].lower()
         assert "Use NEXT_NODE as a base for your scene" in packet["next_action"]
+        assert "Do not emit JSON in normal mode" in packet["next_action"]
         assert "ideas.md" in packet["next_action"].lower()
         assert "asset_availability" in packet["next_action"]
         assert "reveal_guardrails" in packet["next_action"]
-        assert packet["planning_policy"]["chance"] == 0.25
+        assert "frontier_choice_constraints as hard validation rules" in packet["next_action"]
+        assert "this run will only validate if at least one choice uses TARGET_EXISTING_NODE" in packet["next_action"]
+        assert "You will be able to satisfy that requirement during the choice creation phase." in packet["next_action"]
+        assert isinstance(packet["planning_policy"]["chance"], float)
+        assert 0 < packet["planning_policy"]["chance"] <= 1
         assert packet["runtime_state_after"]["normal_runs_since_plan"] == 1
     finally:
         ideas_path.write_text(original_ideas, encoding="utf-8")
@@ -2345,7 +2396,7 @@ def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
         branch_shape={
             "should_prefer_divergence": True,
             "single_actor_scene_streak": 2,
-            "same_location_streak": 3,
+            "same_location_streak": 6,
             "repeated_action_family": "inspect",
         }
     )
@@ -2763,37 +2814,77 @@ def test_floating_character_introduction_allows_recurring_character_and_marks_pa
 def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path) -> None:
     client, db_path = build_client(tmp_path)
     client.post("/story/seed-opening-story")
+    with connect(db_path) as connection:
+        frontier_choice = connection.execute(
+            "SELECT id FROM choices WHERE status = 'open' AND to_node_id IS NULL ORDER BY from_node_id ASC, id ASC LIMIT 1"
+        ).fetchone()
+    assert frontier_choice is not None
+    frontier_choice_id = int(frontier_choice["id"])
     log_file = tmp_path / "worker_log.ndjson"
+    session_file = tmp_path / "normal_session.json"
 
     response_file = tmp_path / "normal_response.json"
     response_file.write_text(
         json.dumps(
-            {
-                "branch_key": "default",
-                "scene_title": "Mock Loop Scene",
-                    "scene_summary": "A valid mocked scene candidate with immediate patrol pressure.",
-                    "scene_text": "The mocked local worker produces a scene without touching the database in dry-run mode while a brass patrol closes in from the edge of the field.",
-                    "choices": [
-                        {
-                            "choice_text": "Take the mocked path",
-                            "notes": "NEXT_NODE: confirm the local runner can validate a mocked scene. FURTHER_GOALS: prove the CLI works before real model calls.",
-                        },
-                        {
-                                "choice_text": "Climb down and head for the lantern gate",
-                                "notes": "NEXT_NODE: leave the current perch before the patrol closes in. FURTHER_GOALS: prove the runner accepts a consequential location-moving option.",
-                            },
-                    ],
-                    "global_direction_notes": [
-                        {
-                            "note_type": "plotline",
-                            "title": "Mock CLI Momentum",
-                            "note_text": "Use this dry-run scene to prove the local worker can carry a concrete next-step direction.",
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
+            [
+                "\n".join(
+                        [
+                            "SCENE_TITLE: Mock Loop Scene",
+                            "SCENE_SUMMARY: A valid mocked scene candidate with immediate patrol pressure as the lantern gate route suddenly matters.",
+                            "MATERIAL_CHANGE: The gnome is no longer just inspecting the seam; the patrol arrives close enough to force a decision about whether to stay or head for the lantern gate.",
+                        "OPENING_BEAT: pressure_escalation",
+                        "LOCATION_STATUS: same_location",
+                        "SCENE_CAST: Brass Patrol Member",
+                        "NEW_CHARACTERS: Brass Patrol Member",
+                        "NEW_LOCATION: NONE",
+                        "NEW_CHARACTER_INTRO: He is no longer just a rumor in the mist; he steps into full view with brass gear rattling at his belt.",
+                        "NEW_LOCATION_INTRO: NONE",
+                    ]
+                ),
+                "\n".join(
+                        [
+                            "SCENE_SETTINGS:",
+                            "visible_when_speaking: true",
+                            "start_show_all_from_last_node: true",
+                            "SCENE_BODY:",
+                            "0: The mocked local worker produces a fuller dry-run scene in the Mushroom Field. Dew slides from the mushroom caps as the seam hums underfoot, but the important change is no longer the seam itself.",
+                            "@show 1n",
+                            "1n: A brass patrol member steps through the mist and raises a dented lantern toward the gnome, forcing the moment out of quiet inspection and into open pressure while the lantern gate at the field's edge stops feeling hypothetical and starts feeling like the next real route out.",
+                            "Hold where you are and show me your hands.",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        "CHOICE_TEXT: Answer the patrol member and keep the scene in the open",
+                        "CHOICE_CLASS: commitment",
+                        "NEXT_NODE: The patrol member demands an explanation and watches for any sign that the hat or hand means trouble.",
+                        "FURTHER_GOALS: Prove the conversational worker can produce a consequential social move instead of another inspection loop.",
+                        "ENDING_CATEGORY: NONE",
+                        "TARGET_EXISTING_NODE: NONE",
+                    ]
+                ),
+                "\n".join(
+                        [
+                            "CHOICE_TEXT: Break for the lantern gate before the patrol seals the route",
+                            "CHOICE_CLASS: progress",
+                            "NEXT_NODE: The gnome reaches the lantern gate path and forces the patrol member to choose between pursuit and holding the field.",
+                            "FURTHER_GOALS: Prove the runner accepts a distinct pressure-response choice with explicit location motion instead of another local inspection beat.",
+                        "ENDING_CATEGORY: NONE",
+                        "TARGET_EXISTING_NODE: NONE",
+                    ]
+                ),
+                "END",
+                "END",
+                "\n".join(
+                    [
+                        "CHARACTER_DETAILS: Brass Patrol Member | A brass-armored survey runner with a dented lantern and a voice trained for public orders.",
+                        "CHARACTER_ART_HINTS: Brass Patrol Member | Narrow brass-armored patrol runner with a dented lantern, soot-dark gloves, a long field coat, and a watchful, suspicious expression.",
+                    ]
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     command = [
         sys.executable,
@@ -2801,6 +2892,8 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
         "app.tools.run_story_worker_local",
         "--model",
         "mock-model",
+        "--choice-id",
+        str(frontier_choice_id),
         "--dry-run",
         "--log-file",
         str(log_file),
@@ -2815,6 +2908,7 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
             **os.environ,
             "CYOA_DB_PATH": str(db_path),
             "CYOA_LOCAL_WORKER_RESPONSE_FILE": str(response_file),
+            "CYOA_LOCAL_WORKER_SESSION_FILE": str(session_file),
             "CYOA_PLANNING_ROLL": "1.0",
         },
     )
@@ -2825,6 +2919,865 @@ def test_run_story_worker_local_normal_dry_run_with_mock_response(tmp_path: Path
     assert payload["dry_run"] is True
     assert payload["expanded_choice_id"] if "expanded_choice_id" in payload else payload["choice_id"]
     assert payload["validation"]["valid"] is True
+    session_payload = json.loads(session_file.read_text(encoding="utf-8"))
+    assert session_payload["run_count"] == 1
+    assert len(session_payload["messages"]) >= 6
+
+
+def test_conversational_scene_builder_form_parsers() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Lantern Stop",
+                "SCENE_SUMMARY: A patrol finally steps into view and forces the issue.",
+                "MATERIAL_CHANGE: The branch shifts from private inspection to open social pressure in the field.",
+                "OPENING_BEAT: pressure_escalation",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: Brass Patrol Member",
+                "NEW_CHARACTERS: Brass Patrol Member",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: He emerges from the mist with a rattling lantern.",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    assert isinstance(scene_plan, ScenePlanDraft)
+    assert scene_plan.scene_cast_mode == "explicit"
+    assert scene_plan.scene_cast_entries == ["Brass Patrol Member"]
+    assert scene_plan.new_character_names == ["Brass Patrol Member"]
+    assert scene_plan.new_location_name is None
+    assert resolve_scene_cast_names(
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"brass patrol member": {"name": "Brass Patrol Member"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}, 2: {"id": 2, "name": "Brass Patrol Member"}},
+            "current_visible_cast_names": [],
+        },
+    ) == ["The Tall Gnome", "Brass Patrol Member"]
+
+    scene_plan_with_ids = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Mirror Junction",
+                "SCENE_SUMMARY: The protagonist spots two familiar figures reflected in the hall glass.",
+                "MATERIAL_CHANGE: The scene turns from solitary exploration into a cast-aware encounter setup.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    assert scene_plan_with_ids.scene_cast_mode == "mc_only"
+    assert scene_plan_with_ids.scene_cast_entries == []
+    assert scene_plan_with_ids.new_character_names == []
+
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS:",
+                "visible_when_speaking: true",
+                "start_show_all_from_last_node: false",
+                "mc_always_visible: true",
+                "SCENE_BODY:",
+                "The field stops feeling private the moment the lantern breaks through the mist.",
+                "@show 1",
+                "1: Hold where you are.",
+                "@show 1",
+                "@show 2",
+                "0: The lantern glare hardens.",
+            ]
+        )
+    )
+    assert isinstance(scene_body, SceneBodyDraft)
+    assert scene_body.settings.visible_when_speaking is True
+    assert scene_body.settings.mc_always_visible is True
+    assert scene_body.textboxes[0].speaker_ref == "0"
+    assert scene_body.textboxes[1].pending_commands[0].action == "show"
+    assert scene_body.textboxes[2].pending_commands[1].targets == ["2"]
+
+    equals_style_scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: visible_when_speaking=true, start_show_all_from_last_node=false, mc_always_visible=true",
+                "SCENE_BODY:",
+                "0: The mirrored hall shivers awake.",
+                "2: Keep moving.",
+            ]
+        )
+    )
+    assert equals_style_scene_body.settings.visible_when_speaking is True
+    assert equals_style_scene_body.settings.start_show_all_from_last_node is False
+    assert equals_style_scene_body.settings.mc_always_visible is True
+    assert equals_style_scene_body.textboxes[1].speaker_ref == "2"
+
+    none_settings_scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY:",
+                "0: The mirrored hall shivers awake.",
+            ]
+        )
+    )
+    assert none_settings_scene_body.settings.visible_when_speaking is True
+    assert none_settings_scene_body.settings.start_show_all_from_last_node is True
+    assert none_settings_scene_body.settings.mc_always_visible is True
+
+    raw_scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "You find a sandwich on the ground. Tentatively, you pick it up.",
+                "1n: go ahead brah, eat up",
+                "1: Who are you????",
+                "1n: I just told you man, name's Spike Jonathan.",
+                "I think you're gonna want to eat that sandwich",
+                "for a craaaaazy trip",
+                "1: is it safe",
+                "1n: only one way to find out",
+            ]
+        )
+    )
+    assert raw_scene_body.settings.visible_when_speaking is True
+    assert raw_scene_body.settings.start_show_all_from_last_node is True
+    assert raw_scene_body.settings.mc_always_visible is True
+    assert raw_scene_body.textboxes[0].speaker_ref == "0"
+    assert raw_scene_body.textboxes[0].text.startswith("You find a sandwich on the ground.")
+    assert raw_scene_body.textboxes[2].speaker_ref == "1"
+    assert "for a craaaaazy trip" in raw_scene_body.textboxes[3].text
+
+    narrator_alias_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "@show narrator",
+                "@show 0",
+                "@show n",
+                "n: this should still be narrator text",
+            ]
+        )
+    )
+    assert narrator_alias_body.textboxes[0].speaker_ref == "n"
+
+    narrator_without_colon_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "Narrator",
+                "This should still be narrator text without requiring a colon.",
+            ]
+        )
+    )
+    assert narrator_without_colon_body.textboxes[0].speaker_ref == "0"
+    assert "without requiring a colon" in narrator_without_colon_body.textboxes[0].text
+
+    scene_body_template = build_form_template("scene_body")
+    assert "This is NOT JSON. Use a simple newline-based labeled input format." in scene_body_template
+    assert "Put each field on its own new line. Newlines are the only valid separator between fields." in scene_body_template
+    assert "Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between top-level fields." in scene_body_template
+    assert "Optional. Omit SCENE_SETTINGS entirely to use the default settings, or write SCENE_SETTINGS: NONE for the same effect." in scene_body_template
+    assert "or write SCENE_SETTINGS: NONE for the same effect." in scene_body_template
+    assert "Optional label. If you omit the words SCENE_BODY and just enter the script text" in scene_body_template
+    assert "You may use either one-per-line 'key: value' syntax or comma-separated 'key=value' syntax." in scene_body_template
+    assert "newlines are the ONLY valid separator for switching speakers, starting a new textbox, or applying visibility commands." in scene_body_template
+    assert "Do not use pipes '|', commas, semicolons, arrows, or any other separator characters" in scene_body_template
+    assert "A numbered speaker line like '1:' means that character is SPEAKING out loud." in scene_body_template
+    assert "Do not put any choices, option lists, or menu text inside SCENE_BODY." in scene_body_template
+    assert "Do not write attribution like 'says the Tall Gnome' inside the dialogue text" in scene_body_template
+
+    scene_body_prompt = build_step_prompt(
+        step_name="scene_body",
+        packet={"branch_key": "default"},
+        state=NormalRunConversationState(scene_plan=scene_plan_with_ids),
+        requested_choice_count=2,
+    )
+    assert "You may omit SCENE_SETTINGS entirely to use the default settings shown above, or write SCENE_SETTINGS: NONE for the same effect." in scene_body_prompt
+    assert "You may also omit the SCENE_BODY label entirely and just write the script itself" in scene_body_prompt
+    assert "When the narrator is speaking about the protagonist, refer to the protagonist as 'you' and 'your', not by name." in scene_body_prompt
+    assert "If you want the protagonist visibly on-screen, the protagonist must be included in SCENE_CAST." in scene_body_prompt
+    assert "Newlines are the ONLY valid separator for switching speakers, starting a new textbox, or applying visibility commands." in scene_body_prompt
+    assert "Do not use pipes '|', commas, semicolons, arrows, or any other separator characters" in scene_body_prompt
+    assert "A numbered speaker line like '1:' means that character is SPEAKING out loud." in scene_body_prompt
+    assert "Do not put any choices, option lists, or menu text inside SCENE_BODY." in scene_body_prompt
+    assert "Visibility commands must each be isolated on their own line, with a newline before and after the command." in scene_body_prompt
+    assert "Dialogue text should be only what the character says." in scene_body_prompt
+    assert "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run." in scene_body_prompt
+
+    scene_plan_template = build_form_template("scene_plan")
+    assert "SCENE_CAST: <write one actual value only: MC_ONLY, SAME, NONE, or comma-separated canonical character ids/names like 1, 2>" in scene_plan_template
+
+    scene_plan_prompt = build_step_prompt(
+        step_name="scene_plan",
+        packet={"branch_key": "default"},
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+    )
+    assert "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list." in scene_plan_prompt
+
+    resolution = {
+        "character_name_map": {},
+        "character_id_map": {},
+        "current_visible_cast_names": [],
+        "protagonist_name": "The Tall Gnome",
+        "encountered_names": {"the tall gnome"},
+    }
+    state_for_compile = type("State", (), {})()
+    state_for_compile.scene_plan = scene_plan_with_ids
+    state_for_compile.scene_body = narrator_alias_body
+    compiled_body, compile_issues = compile_scene_body_draft(
+        state=state_for_compile,
+        draft=narrator_alias_body,
+        resolution=resolution,
+    )
+    assert compile_issues == []
+    assert compiled_body is not None
+    assert compiled_body.dialogue_lines[0].speaker == "Narrator"
+
+    mc_visibility_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Shared Frame",
+                "SCENE_SUMMARY: The protagonist stays on-screen while another voice takes over the beat.",
+                "MATERIAL_CHANGE: The scene proves the main character can remain visible even when another speaker becomes active.",
+                "OPENING_BEAT: dialogue_turn",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY, Brass Patrol Member",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    mc_visibility_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS:",
+                "visible_when_speaking: true",
+                "start_show_all_from_last_node: false",
+                "mc_always_visible: true",
+                "SCENE_BODY:",
+                "1: I don't like this.",
+                "2: Then you should leave.",
+            ]
+        )
+    )
+    state_for_mc_visibility = type("State", (), {})()
+    state_for_mc_visibility.scene_plan = mc_visibility_plan
+    state_for_mc_visibility.scene_body = mc_visibility_body
+    compiled_mc_body, mc_compile_issues = compile_scene_body_draft(
+        state=state_for_mc_visibility,
+        draft=mc_visibility_body,
+        resolution={
+            "character_name_map": {"brass patrol member": {"id": 2, "name": "Brass Patrol Member"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}, 2: {"id": 2, "name": "Brass Patrol Member"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+    assert mc_compile_issues == []
+    assert compiled_mc_body is not None
+
+    body_choice_issues = validate_scene_body_draft(
+        packet={},
+        state=NormalRunConversationState(scene_plan=scene_plan_with_ids),
+        draft=parse_scene_body_form(
+            "\n".join(
+                [
+                    "0: The vault presses in around you.",
+                    "You can choose how to react.",
+                ]
+            )
+        ),
+        resolution={
+            "character_name_map": {},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+    assert any("must not contain menu text" in issue for issue in body_choice_issues)
+    assert compiled_mc_body.hidden_lines_by_character["the tall gnome"] == []
+
+    scene_plan_with_new_character = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: New Arrival",
+                "SCENE_SUMMARY: A stranger steps into the hall.",
+                "MATERIAL_CHANGE: The scene stops being solitary because a new stranger appears and can now speak.",
+                "OPENING_BEAT: arrival",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: Spike Jonathan",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: Spike Jonathan ducks through the doorway with a guilty look.",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    assert scene_plan_with_new_character.new_character_names == ["Spike Jonathan"]
+
+    choice = parse_choice_form(
+        "\n".join(
+            [
+                "CHOICE_TEXT: Answer the patrol member directly",
+                "CHOICE_CLASS: commitment",
+                "NEXT_NODE: The questioning begins in earnest.",
+                "FURTHER_GOALS: Turn this branch into a social confrontation instead of another inspection beat.",
+                "ENDING_CATEGORY: NONE",
+                "TARGET_EXISTING_NODE: NONE",
+            ]
+        )
+    )
+    assert isinstance(choice, ChoiceDraft)
+    assert choice.choice_class == "commitment"
+
+    extras = parse_scene_extras_form(
+        "\n".join(
+            [
+                "CHARACTER_DETAILS: Brass Patrol Member | He emerges from the mist with a rattling lantern.",
+                "CHARACTER_ART_HINTS: Brass Patrol Member | Narrow brass-armored patrol runner with a dented lantern.",
+            ]
+        ),
+        expected_labels=["CHARACTER_DETAILS", "CHARACTER_ART_HINTS"],
+    )
+    assert isinstance(extras, SceneExtrasDraft)
+    assert extras.new_characters[0].name == "Brass Patrol Member"
+
+    hooks = parse_scene_hooks_form(
+        "\n".join(
+            [
+                "HOOK_ACTION: NEW_HOOK",
+                "HOOK_IMPORTANCE: minor",
+                "HOOK_TYPE: patrol-pressure",
+                "HOOK_SUMMARY: Patrol attention now lingers on the branch.",
+                "HOOK_PAYOFF_CONCEPT: The patrol keeps recognizing irregular signs around the protagonist.",
+                "HOOK_ID: NONE",
+                "HOOK_STATUS: NONE",
+                "HOOK_PROGRESS_NOTE: NONE",
+                "CLUE_TAGS: lantern-sighting",
+                "STATE_TAGS: patrol-pressure",
+                "GLOBAL_DIRECTION_NOTES: plotline | Lantern Trouble | Patrol attention now lingers on the branch. | 3",
+            ]
+        )
+    )
+    assert isinstance(hooks, SceneHooksDraft)
+    assert hooks.clue_tags == ["lantern-sighting"]
+
+    hooks_with_annotated_id = parse_scene_hooks_form(
+        "\n".join(
+            [
+                "HOOK_ACTION: UPDATE_HOOK",
+                "HOOK_IMPORTANCE: NONE",
+                "HOOK_TYPE: NONE",
+                "HOOK_SUMMARY: NONE",
+                "HOOK_PAYOFF_CONCEPT: NONE",
+                "HOOK_ID: 1 (The original hook about the hidden past event)",
+                "HOOK_STATUS: active",
+                "HOOK_PROGRESS_NOTE: The hook advances.",
+                "CLUE_TAGS: NONE",
+                "STATE_TAGS: NONE",
+                "GLOBAL_DIRECTION_NOTES: NONE",
+            ]
+        )
+    )
+    assert hooks_with_annotated_id.hook_id == 1
+
+    art = parse_scene_art_form(
+        "CHARACTER_ART_HINTS: Brass Patrol Member | Narrow brass-armored patrol runner with a dented lantern.\n"
+        "LOCATION_ART_HINTS: NONE",
+        expected_labels=["CHARACTER_ART_HINTS", "LOCATION_ART_HINTS"],
+    )
+    assert isinstance(art, SceneArtDraft)
+    assert art.character_art_hints["Brass Patrol Member"].startswith("Narrow brass-armored")
+
+    choice_with_annotated_target = parse_choice_form(
+        "\n".join(
+            [
+                "CHOICE_TEXT: Return to the prior hub",
+                "CHOICE_CLASS: progress",
+                "NEXT_NODE: You retrace your steps toward the familiar junction.",
+                "FURTHER_GOALS: Use a deliberate merge to keep the frontier narrow under pressure.",
+                "ENDING_CATEGORY: NONE",
+                "TARGET_EXISTING_NODE: 7 (Hub Return)",
+            ]
+        )
+    )
+    assert choice_with_annotated_target.target_existing_node == 7
+
+
+def test_normal_worker_session_resets_on_limit_or_model_change(tmp_path: Path) -> None:
+    session_path = tmp_path / "session.json"
+    system_prompt = build_normal_conversation_system_prompt("guide text")
+    assert "Place the final answer in normal assistant content. Do not put the real answer only in hidden reasoning_content." in system_prompt
+
+    first = load_or_create_normal_session(
+        session_path=session_path,
+        model="model-a",
+        system_prompt=system_prompt,
+        context_run_limit=3,
+        reset_context=False,
+    )
+    assert first.run_count == 0
+    assert first.messages[0].role == "system"
+    session_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mode": "normal",
+                "model": "model-a",
+                "run_count": 3,
+                "messages": [{"role": "system", "content": system_prompt}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reset_for_limit = load_or_create_normal_session(
+        session_path=session_path,
+        model="model-a",
+        system_prompt=system_prompt,
+        context_run_limit=3,
+        reset_context=False,
+    )
+    assert reset_for_limit.run_count == 0
+
+    session_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mode": "normal",
+                "model": "model-a",
+                "run_count": 1,
+                "messages": [{"role": "system", "content": "old"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reset_for_model = load_or_create_normal_session(
+        session_path=session_path,
+        model="model-b",
+        system_prompt=system_prompt,
+        context_run_limit=3,
+        reset_context=False,
+    )
+    assert reset_for_model.model == "model-b"
+    assert reset_for_model.run_count == 0
+    assert reset_for_model.messages[0].content == system_prompt
+
+
+def test_call_lm_studio_returns_blank_when_model_emits_no_content(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+
+    def fake_post(*args, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr("app.tools.run_story_worker_local.httpx.post", fake_post)
+
+    assert call_lm_studio(
+        api_base="http://127.0.0.1:1234/v1",
+        model="test-model",
+        system_prompt="system",
+        user_prompt="user",
+        messages=None,
+        response_format=None,
+        temperature=0.2,
+        max_tokens=256,
+        request_timeout=30.0,
+    ) == ""
+
+
+def test_request_nonempty_ai_step_response_retries_blank_outputs(monkeypatch) -> None:
+    responses = ["", "", "SCENE_TITLE: Recovered"]
+
+    def fake_call_lm_studio(**kwargs) -> str:
+        return responses.pop(0)
+
+    monkeypatch.setattr("app.tools.run_story_worker_local.call_lm_studio", fake_call_lm_studio)
+
+    assert request_nonempty_ai_step_response(
+        api_base="http://127.0.0.1:1234/v1",
+        model="test-model",
+        messages=[{"role": "user", "content": "prompt"}],
+        temperature=0.2,
+        max_tokens=256,
+        request_timeout=30.0,
+        empty_retry_limit=3,
+    ) == "SCENE_TITLE: Recovered"
+
+
+def test_validation_attempt_log_rolls_over_after_1000_lines(tmp_path: Path) -> None:
+    log_path = tmp_path / "validation_attempts.md"
+    for index in range(1000):
+        append_validation_attempt_log_record(
+            log_path=log_path,
+            record={
+                "timestamp": "2026-04-15 03:00:00 AM",
+                "model": "test-model",
+                "step": "scene_body",
+                "issues": [f"issue {index}"],
+                "attempted_output": f"line {index}",
+            },
+        )
+    append_validation_attempt_log_record(
+        log_path=log_path,
+        record={
+            "timestamp": "2026-04-15 03:00:01 AM",
+            "model": "test-model",
+            "step": "scene_body",
+            "issues": ["fresh issue"],
+            "attempted_output": "first line\\nsecond line",
+        },
+    )
+
+    text = log_path.read_text(encoding="utf-8")
+    assert "fresh issue" in text
+    assert "first line\nsecond line" in text
+    assert "```text" in text
+    assert "issue 999" not in text
+
+
+def test_validation_attempt_log_includes_retry_index(tmp_path: Path) -> None:
+    log_path = tmp_path / "validation_attempts.md"
+    append_validation_attempt_log_record(
+        log_path=log_path,
+        record={
+            "timestamp": "2026-04-15 03:00:01 AM",
+            "model": "test-model",
+            "step": "scene_body",
+            "retry_index": 2,
+            "issues": ["still bad"],
+            "attempted_output": "SCENE_BODY: NONE",
+        },
+    )
+
+    text = log_path.read_text(encoding="utf-8")
+    assert "retry=2" in text
+
+
+def test_build_step_prompt_includes_retry_line_on_retry() -> None:
+    prompt = build_step_prompt(
+        step_name="scene_plan",
+        packet={},
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+        issues=["Missing required labels: SCENE_TITLE"],
+        retry_index=2,
+    )
+
+    assert "Step: scene_plan" in prompt
+    assert "Retry: 2" in prompt
+
+
+def test_build_step_prompt_surfaces_frontier_pressure_constraints_up_front() -> None:
+    prompt = build_step_prompt(
+        step_name="choice",
+        packet={
+            "frontier_choice_constraints": {
+                "pressure_level": "soft",
+                "must_include_merge_or_closure": True,
+                "max_fresh_choices_under_pressure": 1,
+                "allow_second_fresh_choice_only_for_bloom_scenes": True,
+                "inspection_choices_should_reconverge_under_pressure": True,
+                "guidance": "Under soft frontier pressure, keep branching narrow.",
+            },
+            "consequential_choice_requirement": {"required": True},
+        },
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+        choice_index=0,
+    )
+
+    assert "Current frontier pressure rules:" in prompt
+    assert "include at least one merge or closure path in this scene" in prompt
+    assert "THIS RUN WILL ONLY VALIDATE if at least one choice uses TARGET_EXISTING_NODE" in prompt
+    assert "allow at most 1 fresh branch choice(s)" in prompt
+    assert "inspection choices should reconverge quickly" in prompt
+    assert "MAKE this choice either a merge or a closure." in prompt
+    assert "Fix that here in this choice-writing phase" in prompt
+
+
+def test_build_step_prompt_repeats_merge_closure_requirement_in_hooks_step() -> None:
+    prompt = build_step_prompt(
+        step_name="hooks",
+        packet={
+            "frontier_choice_constraints": {
+                "pressure_level": "soft",
+                "must_include_merge_or_closure": True,
+                "max_fresh_choices_under_pressure": 1,
+                "inspection_choices_should_reconverge_under_pressure": True,
+            },
+        },
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+    )
+
+    assert "Current frontier pressure rules:" in prompt
+    assert "Reminder: if frontier pressure required a merge or closure path" in prompt
+    assert "TARGET_EXISTING_NODE for a deliberate merge" in prompt
+    assert "non-NONE ENDING_CATEGORY for a real closure" in prompt
+
+
+def test_validate_choice_draft_requires_choice_one_to_handle_merge_or_closure_under_pressure() -> None:
+    issues = validate_choice_draft(
+        packet={
+            "frontier_choice_constraints": {
+                "must_include_merge_or_closure": True,
+            }
+        },
+        state=NormalRunConversationState(),
+        draft=ChoiceDraft(
+            choice_text="Ask what they want",
+            choice_class="commitment",
+            next_node="The patrol answers cautiously while keeping the vault sealed.",
+            further_goals="Learn more about the patrol and the vault pressure.",
+            ending_category=None,
+            target_existing_node=None,
+        ),
+        resolution={},
+        choice_index=0,
+    )
+
+    assert any("choice_1 must either use TARGET_EXISTING_NODE" in issue for issue in issues)
+
+
+def test_is_force_next_override_accepts_secret_spellings() -> None:
+    assert is_force_next_override("FORCE NEXT")
+    assert is_force_next_override("force_next")
+    assert is_force_next_override("FORce NXT")
+    assert not is_force_next_override("END")
+
+
+def test_request_human_step_returns_immediately_for_force_next(monkeypatch, capsys) -> None:
+    inputs = iter(["FORCE NEXT"])
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
+
+    response = request_human_step("Step: scene_body")
+
+    assert response == "FORCE NEXT"
+
+
+def test_build_forced_choice_draft_prefers_merge_under_frontier_pressure() -> None:
+    draft = build_forced_choice_draft(
+        packet={
+            "frontier_choice_constraints": {
+                "must_include_merge_or_closure": True,
+            },
+            "context_summary": {
+                "merge_candidates": [
+                    {"node_id": 7, "title": "Before the Counting Bell"},
+                ]
+            },
+        },
+        choice_index=0,
+    )
+
+    assert draft.target_existing_node == 7
+    assert draft.ending_category is None
+    assert "Merge back into Before the Counting Bell" == draft.choice_text
+
+
+def test_apply_normal_result_returns_preview_only_when_force_next_used(tmp_path: Path) -> None:
+    client, _db_path = build_client(tmp_path)
+    candidate = parse_llm_result(
+        {"run_mode": "normal"},
+        json.dumps(
+            {
+                "branch_key": "default",
+                "scene_title": "Preview",
+                "scene_summary": "Preview only.",
+                "scene_text": "You pause here.",
+                "dialogue_lines": [],
+                "choices": [
+                    {
+                        "choice_text": "Merge back into Before the Counting Bell",
+                        "notes": "NEXT_NODE: The branch reconverges. FURTHER_GOALS: Keep frontier pressure down.",
+                        "choice_class": "progress",
+                        "target_node_id": 1,
+                    }
+                ],
+            }
+        ),
+    )
+
+    result = apply_normal_result(
+        packet={
+            "pre_change_url": "http://127.0.0.1:8001/play?branch_key=default&scene=1",
+            "selected_frontier_item": {"choice_id": 42},
+            "preview_payload": {"branch_key": "default", "current_node_id": 1, "choice_id": 42},
+        },
+        candidate=candidate,
+        client=client,
+        dry_run=False,
+        project_root=tmp_path,
+        validation_payload={
+            "valid": True,
+            "forced_preview_only": True,
+            "issues": ["FORCE NEXT was used in human mode."],
+            "force_next_steps": ["scene_plan"],
+        },
+    )
+
+    assert result["dry_run"] is True
+    assert result["forced_preview_only"] is True
+    assert "nothing was validated or applied" in result["message"].lower()
+
+
+def test_compile_scene_body_splits_long_same_speaker_block_into_multiple_textboxes() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Split Test",
+                "SCENE_SUMMARY: You enter the passage and keep moving.",
+                "MATERIAL_CHANGE: The passage becomes an active route and the pressure keeps building.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "1: You step into the narrow passage and the damp stone closes around you. The lantern glow flickers against the wall.",
+                "The air smells like wet metal. Somewhere below, a door shuts hard.",
+            ]
+        )
+    )
+    state = NormalRunConversationState(scene_plan=scene_plan, scene_body=scene_body)
+    compiled, issues = compile_scene_body_draft(
+        state=state,
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert issues == []
+    assert compiled is not None
+    assert [line.speaker for line in compiled.dialogue_lines] == ["You", "You"]
+    assert len(compiled.dialogue_lines) == 2
+    assert compiled.dialogue_lines[0].text.endswith("The lantern glow flickers against the wall.")
+    assert compiled.dialogue_lines[1].text == "The air smells like wet metal. Somewhere below, a door shuts hard."
+
+
+def test_parse_scene_body_does_not_treat_mid_sentence_colon_as_speaker_switch() -> None:
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You instinctively flatten yourself against the fungi, using the shadows for cover.",
+                "The patrol sweeps across the field, their attention focused on measuring and recording everything: the precise spacing of the fungi, the discoloration in the soil, and the subtle shifts in light.",
+            ]
+        )
+    )
+
+    assert len(scene_body.textboxes) == 1
+    assert scene_body.textboxes[0].speaker_ref == "0"
+    assert "everything: the precise spacing" in scene_body.textboxes[0].text
+
+
+def test_validate_choice_menu_allows_distinct_progress_choices_when_one_has_real_motion() -> None:
+    packet = {
+        "consequential_choice_requirement": {"required": True},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Study the mirrored tram door for a route marker",
+            choice_class="progress",
+            next_node="The reflected door shows a route sigil and a safer angle of approach.",
+            further_goals="Keep the branch moving while preserving the eerie transit setup.",
+        ),
+        ChoiceDraft(
+            choice_text="Break for the side passage before the brass patrol closes it",
+            choice_class="progress",
+            next_node="You reach the side passage and force the patrol to choose whether to follow.",
+            further_goals="Create real location motion and immediate pressure instead of another static inspection beat.",
+        ),
+    ]
+
+    assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_does_not_block_two_inspection_choices_when_strength_rule_is_off() -> None:
+    packet = {
+        "consequential_choice_requirement": {"required": False},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Inspect the frost on the wall",
+            choice_class="inspection",
+            next_node="The frost reveals a faint mark when you breathe on it.",
+            further_goals="Gather a clue without forcing the branch onward yet.",
+        ),
+        ChoiceDraft(
+            choice_text="Listen at the tram door for a hidden rhythm",
+            choice_class="inspection",
+            next_node="A second hum answers from the far side of the door.",
+            further_goals="Let the scene stay investigatory without collapsing into duplicate wording.",
+        ),
+    ]
+
+    assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_rejects_repeated_touch_family_with_specific_fix() -> None:
+    packet = {
+        "recent_action_family_summary": {
+            "repeated_action_family": "touch",
+            "recent_action_family_counts": {"touch": 3},
+        },
+        "consequential_choice_requirement": {"required": False},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Touch the humming hat again",
+            choice_class="inspection",
+            next_node="Your fingers brush the hat and the pulse returns in a stronger rhythm.",
+            further_goals="Probe the same local mystery for another immediate clue.",
+        ),
+        ChoiceDraft(
+            choice_text="Touch the seam to compare its vibration",
+            choice_class="inspection",
+            next_node="The seam answers your hand with a second, sharper pulse of light.",
+            further_goals="Keep testing the same touch-based route through the vault mystery.",
+        ),
+    ]
+
+    issues = validate_choice_menu(packet=packet, choices=choices)
+
+    assert any("overusing the 'touch' action family" in issue for issue in issues)
+    assert any("merge using TARGET_EXISTING_NODE" in issue for issue in issues)
 
 
 def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: Path) -> None:
@@ -3860,4 +4813,75 @@ def test_apply_generation_rejects_non_location_current_scene(tmp_path: Path) -> 
     validation = detail.get("validation", {}) if isinstance(detail, dict) else {}
     issues = validation.get("issues", []) if isinstance(validation, dict) else []
     assert any("current_scene must always reference a location" in issue for issue in issues)
+
+
+def test_codex_human_strip_markdown_fences_handles_code_block() -> None:
+    assert strip_markdown_fences("```text\nSCENE_TITLE: Hello\n```") == "SCENE_TITLE: Hello"
+
+
+def test_codex_human_extract_thread_id_from_jsonl_finds_started_thread() -> None:
+    stdout_text = '\n'.join(
+        [
+            '{"type":"thread.started","thread_id":"thread_abc123"}',
+            '{"type":"item.completed","item":{"type":"agent_message","text":"SCENE_TITLE: Hello"}}',
+        ]
+    )
+
+    assert extract_thread_id_from_jsonl(stdout_text) == "thread_abc123"
+
+
+def test_codex_human_extract_last_agent_message_from_jsonl_reads_latest_agent_message() -> None:
+    stdout_text = '\n'.join(
+        [
+            '{"type":"thread.started","thread_id":"thread_abc123"}',
+            '{"type":"item.completed","item":{"type":"agent_message","text":"SCENE_TITLE: First"}}',
+            '{"type":"item.completed","item":{"type":"tool_result","text":"ignore me"}}',
+            '{"type":"item.completed","item":{"type":"agent_message","text":"SCENE_TITLE: Final"}}',
+        ]
+    )
+
+    assert extract_last_agent_message_from_jsonl(stdout_text) == "SCENE_TITLE: Final"
+
+
+def test_codex_human_build_prompt_warns_not_json() -> None:
+    prompt = build_codex_step_prompt("SCENE_TITLE: <string>")
+
+    assert "This is NOT JSON." in prompt
+    assert "Return only the exact fields" in prompt
+
+
+def test_codex_human_build_worker_command_forces_human_mode() -> None:
+    command = build_worker_command(worker_model="placeholder-model", passthrough_args=["--dry-run"])
+
+    assert command[:7] == [
+        sys.executable,
+        "-m",
+        "app.tools.run_story_worker_local",
+        "--author-mode",
+        "human",
+        "--model",
+        "placeholder-model",
+    ]
+    assert command[-1] == "--dry-run"
+
+
+def test_codex_human_request_nonempty_step_retries_blank_outputs(monkeypatch, tmp_path: Path) -> None:
+    responses = [("", "thread_1"), ("", "thread_1"), ("SCENE_TITLE: Recovered", "thread_1")]
+
+    def fake_run_codex_step(**kwargs):
+        return responses.pop(0)
+
+    monkeypatch.setattr("app.tools.run_story_worker_codex_human.run_codex_step", fake_run_codex_step)
+
+    response_text, thread_id = request_nonempty_codex_step(
+        codex_command="codex.cmd",
+        codex_model=None,
+        project_root=tmp_path,
+        prompt_text="SCENE_TITLE: <string>",
+        thread_id=None,
+        empty_retry_limit=3,
+    )
+
+    assert response_text == "SCENE_TITLE: Recovered"
+    assert thread_id == "thread_1"
 
