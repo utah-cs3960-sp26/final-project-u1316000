@@ -167,3 +167,40 @@ Suggested format:
 - [Character] The Clockwork Sigher Who Unravels Time by Breathing in Reverse: A being composed of living clock gears that inhales time backward, causing moments to dissolve into vapor. Their breath erases memories of future events, leaving only echoes of what might have been.
 - [Location] The Garden of Unasked Questions: A field where every unspoken question sprouts as a translucent vine that whispers the answer only to those who have forgotten how to ask. The soil is made of polished silence.
 - [Event] The Festival of Unmade Choices: Once per lunar cycle, all possible futures collide into a single moment where every character experiences the same choice they never made. Time does not skip—it simply forgets to move forward.
+
+- [Character] The Frog Who Remembers the Rain That Never Fell: A frog who has forgotten his own name but remembers every rain that never happened, each one a silent song of lost skies. He carries a hollow bell made from frozen silence and only rings when someone dares to ask why they are crying.
+- [Location] The Library Beneath the Unwritten: A subterranean city built inside a book that was never printed, its shelves stretching into impossible angles. The books do not contain stories but blank spaces where memories of things that might have been are stored. Visitors must write their regrets on the margins before they can read.
+- [Event] The Day the Sun Forgot How to Shine: For one hour, the sun does not rise but instead sinks backward into a mirror lake that reflects only what was never said. During this time, all frogs stop hopping and begin speaking in perfect iambic pentameter about hypothetical futures. The event ends when someone laughs so hard their voice cracks into a new constellation.
+
+- [Character] The Luminous Cartographer Who Maps Emotions Instead of Land: A frog with iridescent skin who navigates the underground glass villages by tracing emotional currents, turning sorrow into blue rivers and joy into golden staircases. Their maps dissolve when unwatched.
+- [Location] The Library of Unfinished Lullabies: A cavernous underground vault where lullabies are stored as solidified glass shards that hum only to those who have forgotten their own names. The walls breathe when the moon forgets to rise.
+- [Event] The Great Unfolding of Silence: Once a year, all communication ceases for 72 hours as reality temporarily collapses into pure sound. Frog tram operators must navigate the void by feeling vibrations through their bones; those who fail become temporary statues of echo.
+
+- [Character] The Gravity-Weary Sparrow: A bird whose feathers are made of folded silence; it cannot fly straight, only spirals downward into its own shadow. It carries a single feather from a forgotten clock that ticks backward when the sun is upside down.
+- [Location] The Clockwork Garden of Unspun Threads: A floating meadow where time is woven like thread; each bloom is a moment that never happened, and the grass grows in spirals that reverse when stepped on. The air hums with the sound of knots being untied.
+- [Object] The Lantern That Breathes Memory: A lantern filled with liquid starlight; it exhales memories as vapor, which condense into tiny birds that fly away only when the holder remembers a lie they once told.
+- [Event] The Day the Seasons Forgot Their Names: All four seasons collapse into a single colorless state for one hour, and during that time, plants grow upside down from the sky while gravity briefly forgets its direction. Those who survive emerge speaking in the language of lost weather patterns.
+
+- [Character] The Fractured Cartographer: A cartographer whose maps are made of living moss that rewrites themselves when viewed from different angles, causing travelers to see alternate realities. The map only shows the path if you step on it.
+- [Location] The Library of Unwritten Things: A vast underground vault where books grow like trees and each leaf is a sentence that has never been written but could be. Reading them aloud causes the reader to briefly experience the moment as if it had happened.
+- [Event] The Day the Air Turned to Taffy: When the sky’s breath solidified into sticky, translucent taffy that clings to everything, gravity becomes optional. People float on currents of air like balloons, but stepping down risks dissolving into syrup.
+
+- [Character] The Librarian of Unwritten Apologies: A librarian who catalogs apologies that were never spoken, each entry a single sentence folded into a book that only opens when the reader has forgotten how to feel remorse.
+- [Location] The Bazaar of Unfinished Oaths: A floating market where merchants sell vows that were never completed, each stall shaped like a broken promise and staffed by wind that carries the scent of salt and static.
+- [Event] The Day the Rain Forgot How to Fall: Once every century, rain ceases midair, forming slow-motion droplets that hover like glass beads. Those who touch them hear the last words of people who died before their time.
+
+- [Character] The Gloomwarden of Unlit Streets: A sentient fog that forms at night, it carries the weight of forgotten footsteps and hums lullabies in dead languages. Only those who have lost a memory can part its mist.
+- [Location] The Library That Breathes Between Cities: A vast underground archive suspended between two mountain ranges, it inhales at dusk and exhales pages that flutter upward like startled birds. The walls are made of skin stretched over bone.
+- [Event] The Day the Rain Painted Its Own Name: Once a year, when the sky weeps liquid silver, every surface in the world becomes a canvas for its own name. The event lasts only while someone is looking directly at it.
+
+- [Character] The Gravity-Weaver's Blindfold: A blindfolded weaver who stitches time into fabric using threads of forgotten lullabies. Each knot creates a localized pocket where gravity reverses direction for 13 heartbeats, causing floating dust motes to sing in reverse.
+- [Location] The Clockwork Garden of Unanswered Questions: A garden where every flower is a question that has never been asked. Petals bloom only when someone hesitates before speaking, and the roots grow toward silence rather than soil.
+- [Event] The Silence That Remembers Your Name: Once per century, all spoken language dissolves into a single shared memory that replays every unsaid sentence from the last 87 years. Those who listen gain temporary access to their own future regrets.
+
+- [Character] The Taste of Unremembered Seasons: A being who exists between seasons that never occurred, tasting the flavor of a winter that was canceled and a summer that was never born. Their breath carries the scent of rain that fell on empty calendars.
+- [Location] The Library of Unopened Envelopes: A vast archive where every book is sealed in an envelope that has not been opened, yet each page inside writes its own story. The librarians are made of folded paper and cannot speak without unrolling a memory.
+- [Event] The Last Laugh of the World: A global event where laughter is not heard but felt as vibrations in the bones, causing everyone to laugh simultaneously at the exact moment their shadow forgets its shape. The effect ends when a single person stops laughing because they remember.
+
+- [Character] The Hollow Clockmaker: A being made of ticking gears that forgets its own name each time it completes a cycle, existing only in the space between ticks.
+- [Location] The Bloom That Grows Backwards: A desert flower whose petals unfurl from the center outward, blooming only when the sun sets before it rises.
+- [Event] The Silence of Unheard Names: When a person speaks their true name aloud for the first time, all sound in the world stops for exactly 13 seconds, and no one remembers why.
