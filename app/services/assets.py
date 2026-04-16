@@ -28,7 +28,9 @@ DEFAULT_ASSET_DIMENSIONS: dict[str, tuple[int, int]] = {
 
 SUBJECT_ONLY_SUFFIX = (
     "Plain white background. Styling applies to the subject only. Make sure subject is centered and the "
-    "subject is the only thing visible besides the background. Make sure the full body is in view."
+    "subject is the only thing visible besides the background. Make sure the full body is in view. "
+    "Show the subject once only. Not a character sheet, model sheet, turnaround, reference lineup, or "
+    "multiple-angle composition."
 )
 
 BACKGROUND_ENVIRONMENT_SUFFIX = (
@@ -47,7 +49,14 @@ BACKGROUND_NEGATIVE_SUFFIX = (
 PORTRAIT_FRAME_SUFFIX = (
     "Single character only. Full-body framing required (head-to-toe fully visible). "
     "Do not crop off feet, hat, hands, or any body parts. Keep the character centered with generous margins "
-    "on all sides so background removal and normalization work cleanly."
+    "on all sides so background removal and normalization work cleanly. Use one single pose from one camera "
+    "angle only. No front/side/back views, no duplicate figures, no extra poses, no inset heads, no "
+    "expression sheet, and no design callouts."
+)
+PORTRAIT_NEGATIVE_SUFFIX = (
+    "character sheet, model sheet, turnaround, reference sheet, lineup, multiple views, multiple angles, "
+    "front view, side view, back view, split panel, collage, duplicate person, extra body, extra pose, "
+    "expression sheet, design callouts, pose sheet"
 )
 
 OBJECT_ISOLATION_SUFFIX = (
@@ -419,6 +428,8 @@ class AssetService:
         parts = [part.strip() for part in [user_negative_prompt] if part and part.strip()]
         if asset_kind == "background":
             parts.append(BACKGROUND_NEGATIVE_SUFFIX)
+        elif asset_kind == "portrait":
+            parts.append(PORTRAIT_NEGATIVE_SUFFIX)
         if not parts:
             return None
         return ", ".join(parts)

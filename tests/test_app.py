@@ -432,6 +432,29 @@ def test_background_generation_prompt_enforces_environment_only_rules(tmp_path: 
     assert "isolated object" in negative_prompt
 
 
+def test_portrait_generation_prompt_forbids_model_sheet_layouts(tmp_path: Path) -> None:
+    from app.services.assets import AssetService
+
+    with connect(tmp_path / "portrait_prompt_test.db") as connection:
+        service = AssetService(connection, tmp_path)
+        prompt = service.compose_generation_prompt(
+            asset_kind="portrait",
+            user_prompt="Single full-body portrait of Archivist Elara in layered ink-blue robes.",
+        )
+        negative_prompt = service.compose_negative_prompt(
+            asset_kind="portrait",
+            user_negative_prompt=None,
+        )
+
+    assert "Show the subject once only." in prompt
+    assert "Not a character sheet" in prompt
+    assert "one single pose from one camera angle only" in prompt
+    assert negative_prompt is not None
+    assert "character sheet" in negative_prompt
+    assert "multiple views" in negative_prompt
+    assert "front view" in negative_prompt
+
+
 def test_background_generation_defaults_to_landscape_dimensions(tmp_path: Path, monkeypatch) -> None:
     output_dir = tmp_path / "comfy_output" / "background"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2583,6 +2606,9 @@ def test_generation_prompt_includes_bold_character_and_location_guidance(tmp_pat
     assert "Introduce new locations frequently when appropriate" in prompt
     assert "Always evaluate whether the player is actually familiar" in prompt
     assert "Frequently use ideas from IDEAS.md" in prompt
+    assert "This world is fantasy first." in prompt
+    assert "Madam Bei the frog tram conductor" in prompt
+    assert "Pipkin the elf magic librarian" in prompt
 
 
 def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
@@ -2601,6 +2627,8 @@ def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
     assert any("player is actually familiar" in item for item in checklist)
     assert any("Frequently use ideas from IDEAS.md" in item for item in checklist)
     assert any("Introduce new locations frequently" in item for item in checklist)
+    assert any("This world is fantasy first." in item for item in checklist)
+    assert any("Madam Bei the frog tram conductor" in item for item in checklist)
     assert any("stayed protagonist-only too long" in item for item in checklist)
     assert any("gone too long without a brand-new character" in item for item in checklist)
     assert any("lingered in one place too long" in item for item in checklist)

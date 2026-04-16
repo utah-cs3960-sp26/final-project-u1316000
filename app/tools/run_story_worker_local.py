@@ -3908,6 +3908,9 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it in playable text. Hooks, worldbuilding notes, and other behind-the-scenes coherence trackers often name things the player has not learned yet.\n"
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs exist specifically to make idea usage easier during normal runs like this one.\n"
         "Treat IDEAS.md as a main source of fresh people, places, and whimsical turns when the branch is getting stale.\n"
+        "This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
+        "Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
+        "For fit only, not as automatic canon for the current scene, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
         "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
         "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
         "Frequently introduce new characters or bring in old ones if the context makes sense. New character ideas in IDEAS.md. \n"
@@ -4295,6 +4298,9 @@ def build_validation_retry_user_prompt(
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
         "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
+        "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
+        "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
         "- If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like 'Guard' or 'Patrol Member' should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.\n"
         "- Frequently use ideas from IDEAS.md when the branch genuinely supports them. Planning runs exist to make this easier.\n"
         "- Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
@@ -4362,6 +4368,9 @@ def build_schema_retry_user_prompt(
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
         "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
+        "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
+        "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
         "- If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like 'Guard' or 'Patrol Member' should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.\n"
         "- Frequently use ideas from IDEAS.md when the branch genuinely supports them. Planning runs exist to make this easier.\n"
         "- Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.\n"
@@ -6055,7 +6064,7 @@ def build_asset_prompt(
     fragments = [fragment for fragment in [description, canonical_summary, scene_hint] if fragment]
     joined = ". ".join(fragments[:3]).strip()
     if entity_type == "character":
-        return f"Full-body portrait of {name}. {joined}".strip()
+        return f"Single full-body portrait of {name} in one pose and from one camera angle only. {joined}".strip()
     return f"{name}. {joined}".strip()
 
 

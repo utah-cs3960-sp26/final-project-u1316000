@@ -478,6 +478,9 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Feel free to act creatively. Make bold choices as long as they fit in the story.",
         "Introduce or reintroduce characters frequently. Characters make a story.",
         "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.",
+        "This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.",
+        "Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.",
+        "For fit only, not as automatic permission to use these exact canon elements in the current run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.",
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Hooks, worldbuilding notes, and other behind-the-scenes trackers often name things the player has not learned yet.",
         "If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like 'Guard' or 'Patrol Member' should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.",
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs happen specifically to make idea usage easier during normal runs like this one.",
@@ -581,6 +584,12 @@ def build_author_warnings(
         warnings.append(
             "This selected frontier choice already promised a location transition. THIS RUN WILL ONLY VALIDATE if the child scene changes location now with LOCATION_STATUS: new_location or LOCATION_STATUS: return_location."
         )
+    warnings.append(
+        "Tone reminder: this world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, keep ordinary scenes magical, folkloric, handmade, organic, and mostly preindustrial rather than broadly high-tech."
+    )
+    warnings.append(
+        "Examples of fit only, not automatic canon for this run: Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages."
+    )
     repeated_action_family = recent_action_family_summary.get("repeated_action_family")
     if repeated_action_family:
         warnings.append(
