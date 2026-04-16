@@ -2565,25 +2565,32 @@ def collect_narrator_owned_dialogue_issues(
             continue
         text = textbox.text or ""
         lowered_text = text.lower()
-        if '"' not in text and "“" not in text:
+        has_raw_straight_quotes = bool(re.search(r'(?<!\\)"', text))
+        has_curly_quotes = "“" in text or "”" in text
+        if not has_raw_straight_quotes and not has_curly_quotes:
             continue
         if not SPEECH_VERB_PATTERN.search(text):
+            issues.append(
+                'SCENE_BODY uses raw quotes inside Narrator text. If an in-world character is speaking, write them as a speaker line like \'<id>: ...\' or \'<name>: ...\'. If you need literal quote marks in narration prose, escape them as \\"like this\\".'
+            )
             continue
 
         mentions_cast_name = any(name in lowered_text for name in cast_names if name and name != "narrator")
         mentions_generic_in_world_role = IN_WORLD_ROLE_PATTERN.search(lowered_text) is not None
-        if not mentions_cast_name and not mentions_generic_in_world_role:
-            continue
-
         base_issue = (
             "SCENE_BODY gives spoken dialogue to an in-world character through Narrator text rather than the correct format of the character speaking directly like '<id>: ...' or '<name>: ...'."
         )
         if mentions_cast_name:
             issues.append(base_issue + " Rewrite that line so the character themselves speaks the dialogue.")
-        else:
+        elif mentions_generic_in_world_role:
             issues.append(
                 base_issue
                 + " This appears to use a character who is not currently in SCENE_CAST. Return to scene_plan and either add the proper casting or declare a new character before retrying SCENE_BODY."
+            )
+        else:
+            issues.append(
+                base_issue
+                + ' If this is truly narration prose rather than speech, remove the raw quotes or escape them as \\"like this\\".'
             )
     return issues
 

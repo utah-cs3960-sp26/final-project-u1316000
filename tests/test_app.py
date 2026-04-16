@@ -4069,6 +4069,93 @@ def test_validate_scene_body_draft_requests_scene_plan_rewind_for_uncast_speakin
     assert scene_body_issues_require_scene_plan_rewind(issues)
 
 
+def test_validate_scene_body_draft_rejects_raw_quotes_in_narrator_text() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Raw Quotes",
+                "SCENE_SUMMARY: The narrator should not carry raw quoted speech.",
+                "MATERIAL_CHANGE: The formatting rule becomes explicit before choices.",
+                "OPENING_BEAT: consequence",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "\"Anomaly detected. Source: Unregistered temporal signature.\"",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("uses raw quotes inside Narrator text" in issue for issue in issues)
+    assert not scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_validate_scene_body_draft_allows_escaped_quotes_in_narrator_text() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Escaped Quotes",
+                "SCENE_SUMMARY: Escaped quote marks can remain in narration prose.",
+                "MATERIAL_CHANGE: The narrator can still mention quoted words as prose when escaped.",
+                "OPENING_BEAT: quiet_aftermath",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "The word \\\"anomaly\\\" hangs in your mind long after the patrol passes.",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert not any("uses raw quotes inside Narrator text" in issue for issue in issues)
+
+
 def test_validate_choice_menu_allows_distinct_progress_choices_when_one_has_real_motion() -> None:
     packet = {
         "consequential_choice_requirement": {"required": True},
