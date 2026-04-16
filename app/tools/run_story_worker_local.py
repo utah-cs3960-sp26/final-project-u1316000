@@ -35,6 +35,7 @@ from app.models import (
     WorldbuildingNoteProposal,
 )
 from app.services.assets import AssetService, default_dimensions_for_asset_kind
+from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
 from app.services.story_graph import StoryGraphService
 
@@ -400,6 +401,47 @@ CHOICE_GENERIC_TOKENS = {
     "wires",
 }
 
+MYSTERY_MARKER_PATTERNS = [
+    re.compile(r"\bunseen voice\b", re.IGNORECASE),
+    re.compile(r"\bunknown voice\b", re.IGNORECASE),
+    re.compile(r"\bmysterious voice\b", re.IGNORECASE),
+    re.compile(r"\bunseen figure\b", re.IGNORECASE),
+    re.compile(r"\bunknown figure\b", re.IGNORECASE),
+    re.compile(r"\bunknown speaker\b", re.IGNORECASE),
+    re.compile(r"\bsomeone\b.*\b(from inside|in the dark|behind|inside the stalk)\b", re.IGNORECASE),
+]
+CONSEQUENCE_TEXT_PATTERNS = [
+    re.compile(r"\bfollow\b", re.IGNORECASE),
+    re.compile(r"\bboard\b", re.IGNORECASE),
+    re.compile(r"\bride\b", re.IGNORECASE),
+    re.compile(r"\benter\b", re.IGNORECASE),
+    re.compile(r"\bdescend\b", re.IGNORECASE),
+    re.compile(r"\bclimb\b", re.IGNORECASE),
+    re.compile(r"\bhide\b", re.IGNORECASE),
+    re.compile(r"\bsurrender\b", re.IGNORECASE),
+    re.compile(r"\brun\b", re.IGNORECASE),
+    re.compile(r"\breturn\b", re.IGNORECASE),
+    re.compile(r"\bcall out\b", re.IGNORECASE),
+    re.compile(r"\bwarn\b", re.IGNORECASE),
+    re.compile(r"\bspeak\b", re.IGNORECASE),
+    re.compile(r"\bask\b", re.IGNORECASE),
+    re.compile(r"\bapproach\b", re.IGNORECASE),
+    re.compile(r"\bhead for\b", re.IGNORECASE),
+    re.compile(r"\bescape\b", re.IGNORECASE),
+    re.compile(r"\bflee\b", re.IGNORECASE),
+    re.compile(r"\bnegotiate\b", re.IGNORECASE),
+    re.compile(r"\baddress(?:ing)?\b", re.IGNORECASE),
+    re.compile(r"\bdiffuse\b", re.IGNORECASE),
+]
+SPEECH_VERB_PATTERN = re.compile(
+    r"\b(says|said|asks|asked|replies|replied|calls|called|shouts|shouted|whispers|whispered|mutters|muttered|barks|barked|speaks|spoke|tells|told|cries|cried|answers|answered|demands|demanded|calls out|called out|clears his throat)\b",
+    re.IGNORECASE,
+)
+IN_WORLD_ROLE_PATTERN = re.compile(
+    r"\b(enumerator|surveyors?|patrol(?: member)?|guard|officer|courier|clerk|rival|auditor|witness|stranger|figure)\b",
+    re.IGNORECASE,
+)
+
 LOCAL_PROP_CHOICE_PATTERNS = [
     re.compile(r"\b(?:inspect|examine|read|touch|press|study|step around|circle around|go around|look at|pick up|lift)\s+(?:the|a|an)\s+([a-z][a-z0-9' -]{2,60})", re.IGNORECASE),
 ]
@@ -454,9 +496,9 @@ def extract_grounding_phrase(value: str) -> str:
 
 def classify_choice_action_family(choice_text: str) -> str:
     text = (choice_text or "").lower()
-    if any(token in text for token in ("ask", "speak", "call", "answer", "warn", "bargain")):
+    if any(token in text for token in ("ask", "speak", "call", "answer", "warn", "bargain", "address", "negotiate", "diffuse", "appeal", "explain", "bluff", "persuade")):
         return "social"
-    if any(token in text for token in ("board", "ride", "enter", "arrive", "return", "climb", "descend", "cross", "head for", "go to")):
+    if any(token in text for token in ("board", "ride", "enter", "arrive", "return", "climb", "descend", "cross", "head for", "go to", "run", "escape", "flee", "hide", "slip past", "dash", "retreat")):
         return "travel"
     if any(token in text for token in ("follow", "trace", "deeper")):
         return "follow"
@@ -484,27 +526,19 @@ def infer_choice_class_from_text(choice_text: str, notes: str | None) -> str:
 
 def choice_text_implies_consequence(value: str) -> bool:
     text = (value or "").lower()
-    return any(
-        marker in text
-        for marker in (
-            "follow ",
-            "board",
-            "ride",
-            "enter",
-            "descend",
-            "climb",
-            "hide",
-            "surrender",
-            "run",
-            "return",
-            "call out",
-            "warn",
-            "speak",
-            "ask ",
-            "approach",
-            "head for",
-        )
+    return any(pattern.search(text) for pattern in CONSEQUENCE_TEXT_PATTERNS)
+
+
+def choice_breaks_repeated_action_pattern(choice: ChoiceDraft) -> bool:
+    if choice.target_existing_node is not None or choice.ending_category is not None:
+        return True
+    action_family = classify_choice_action_family(choice.choice_text)
+    if action_family in {"social", "travel"}:
+        return True
+    combined_text = " ".join(
+        filter(None, [choice.choice_text, choice.next_node, choice.further_goals])
     )
+    return choice_text_implies_consequence(combined_text)
 
 
 def candidate_adds_actor_pressure(candidate: GenerationCandidate) -> bool:
@@ -983,7 +1017,7 @@ def build_form_template(step: str) -> str:
             "OPENING_BEAT: <string; examples: pressure_escalation, discovery, arrival, confrontation, consequence, transition, dialogue_turn, quiet_aftermath> | What kind of beat opens the scene?\n"
             "LOCATION_STATUS: <one of: same_location, new_location, return_location>\n"
             "SCENE_CAST: <write one actual value only: MC_ONLY, SAME, NONE, or comma-separated canonical character ids/names like 1, 2> | Choose one syntax and write only that value. Do not copy the option list itself.\n"
-            "NEW_CHARACTERS: <comma-separated names or NONE> | Brand-new characters introduced by this scene. If listed here but missing from SCENE_CAST, they will be appended automatically.\n"
+            "NEW_CHARACTERS: <comma-separated character NAMES only, or NONE> | Brand-new characters introduced by this scene. Write names only, not ids, not parentheses, and not name-plus-number formats like 'Bob (2)'. New characters do not need to be listed in SCENE_CAST; they will be appended automatically.\n"
             "NEW_LOCATION: <string or NONE> | Brand-new location name introduced by this scene.\n"
             "NEW_CHARACTER_INTRO: <string or NONE> | Use for a first-meeting beat if a newly visible person matters now.\n"
             "NEW_LOCATION_INTRO: <string or NONE> | Use for an arrival/transition beat if the location changes."
@@ -1812,6 +1846,44 @@ def resolve_scene_cast_names(
     return deduped
 
 
+def validate_scene_cast_entries(
+    *,
+    draft: ScenePlanDraft,
+    resolution: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    if draft.scene_cast_mode != "explicit":
+        return issues
+
+    character_name_map = resolution.get("character_name_map") or {}
+    character_id_map = resolution.get("character_id_map") or {}
+    declared_new_names = {
+        name.strip().lower()
+        for name in draft.new_character_names
+        if name.strip()
+    }
+
+    for entry in draft.scene_cast_entries:
+        token = (entry or "").strip()
+        if not token or token.upper() == "MC_ONLY":
+            continue
+        if token.isdigit():
+            if int(token) not in character_id_map:
+                issues.append(
+                    f"SCENE_CAST uses numeric id '{token}', but no existing canonical character has that id."
+                )
+            continue
+        lowered = token.lower()
+        if lowered in character_name_map:
+            continue
+        if lowered in declared_new_names:
+            continue
+        issues.append(
+            f"SCENE_CAST includes '{token}', but that name is neither an existing canonical character nor a declared NEW_CHARACTER."
+        )
+    return issues
+
+
 def format_scene_cast_summary(
     *,
     draft: ScenePlanDraft,
@@ -1838,7 +1910,9 @@ def build_scene_cast_index_map(
     ref_to_name = {"0": "Narrator"}
     exact_name_lookup = {"narrator": "Narrator", "n": "Narrator"}
     character_name_map = resolution.get("character_name_map") or {}
+    character_id_map = resolution.get("character_id_map") or {}
     protagonist_name = (resolution.get("protagonist_name") or "").strip()
+    protagonist_id = resolution.get("protagonist_id")
     for index, name in enumerate(cast_names, start=1):
         cleaned = name.strip()
         if not cleaned:
@@ -1859,6 +1933,15 @@ def build_scene_cast_index_map(
         exact_name_lookup[cleaned.strip().lower()] = cleaned
     if protagonist_name:
         exact_name_lookup[protagonist_name.strip().lower()] = protagonist_name
+    if draft.scene_cast_mode == "mc_only":
+        protagonist_label = protagonist_name
+        if not protagonist_label and protagonist_id is not None:
+            protagonist_label = str((character_id_map.get(int(protagonist_id)) or {}).get("name") or "").strip()
+        if protagonist_label:
+            ref_to_name.setdefault("1", protagonist_label)
+            exact_name_lookup[protagonist_label.strip().lower()] = protagonist_label
+            if protagonist_id is not None:
+                ref_to_name.setdefault(str(int(protagonist_id)), protagonist_label)
     return cast_names, ref_to_name, exact_name_lookup
 
 
@@ -1973,6 +2056,8 @@ def build_step_prompt(
             "The scene plan must materially advance the branch, not restate the parent beat.\n"
             "SCENE_CAST lists the characters available to appear in this scene. It does not force immediate visibility.\n"
             "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list.\n"
+            "For NEW_CHARACTERS, write only the new characters' names, comma-separated if needed. Do not invent ids, slot numbers, or parenthetical numbers there. Any actual ids are assigned later by the system at apply time.\n"
+            "New characters do not need to be repeated in SCENE_CAST. If you declare them in NEW_CHARACTERS, they will be added to the accepted scene cast automatically.\n"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
             f"{scene_plan_template}"
         )
@@ -2371,6 +2456,7 @@ def validate_scene_plan_draft(
     resolution: dict[str, Any],
 ) -> list[str]:
     issues: list[str] = []
+    issues.extend(validate_scene_cast_entries(draft=draft, resolution=resolution))
     if not draft.scene_title.strip() or draft.scene_title.strip().upper() == "NONE":
         issues.append("SCENE_TITLE is required and cannot be NONE.")
     if not draft.scene_summary.strip():
@@ -2455,7 +2541,270 @@ def validate_scene_body_draft(
         )
     ):
         issues.append("SCENE_BODY must not contain menu text or explicit choice prompts. Only write what happens in the scene; choices come later.")
+    issues.extend(collect_narrator_owned_dialogue_issues(state=state, draft=draft, resolution=resolution))
     return issues
+
+
+def collect_narrator_owned_dialogue_issues(
+    *,
+    state: NormalRunConversationState,
+    draft: SceneBodyDraft,
+    resolution: dict[str, Any],
+) -> list[str]:
+    if state.scene_plan is None:
+        return []
+    cast_names = {
+        name.strip().lower()
+        for name in resolve_scene_cast_names(draft=state.scene_plan, resolution=resolution)
+        if name.strip()
+    }
+    issues: list[str] = []
+    for textbox in draft.textboxes:
+        speaker_ref = textbox.speaker_ref.strip().lower()
+        if speaker_ref not in {"0", "n", "narrator"}:
+            continue
+        text = textbox.text or ""
+        lowered_text = text.lower()
+        if '"' not in text and "“" not in text:
+            continue
+        if not SPEECH_VERB_PATTERN.search(text):
+            continue
+
+        mentions_cast_name = any(name in lowered_text for name in cast_names if name and name != "narrator")
+        mentions_generic_in_world_role = IN_WORLD_ROLE_PATTERN.search(lowered_text) is not None
+        if not mentions_cast_name and not mentions_generic_in_world_role:
+            continue
+
+        base_issue = (
+            "SCENE_BODY gives spoken dialogue to an in-world character through Narrator text rather than the correct format of the character speaking directly like '<id>: ...' or '<name>: ...'."
+        )
+        if mentions_cast_name:
+            issues.append(base_issue + " Rewrite that line so the character themselves speaks the dialogue.")
+        else:
+            issues.append(
+                base_issue
+                + " This appears to use a character who is not currently in SCENE_CAST. Return to scene_plan and either add the proper casting or declare a new character before retrying SCENE_BODY."
+            )
+    return issues
+
+
+def scene_body_issues_require_scene_plan_rewind(issues: list[str] | None) -> bool:
+    return any(
+        "Return to scene_plan and either add the proper casting or declare a new character" in issue
+        for issue in (issues or [])
+    )
+
+
+def collect_choice_grounding_issues(
+    *,
+    packet: dict[str, Any],
+    state: NormalRunConversationState,
+    draft: ChoiceDraft,
+) -> list[str]:
+    support_text = "\n".join(
+        filter(
+            None,
+            [
+                ((packet.get("selected_frontier_item") or {}).get("choice_text") or "").strip(),
+                ((packet.get("selected_frontier_item") or {}).get("existing_choice_notes") or "").strip(),
+                (((packet.get("context_summary") or {}).get("current_node") or {}).get("title") or "").strip(),
+                (((packet.get("context_summary") or {}).get("current_node") or {}).get("summary") or "").strip(),
+                state.scene_plan.scene_summary if state.scene_plan else "",
+                state.scene_body.raw_body if state.scene_body else "",
+            ],
+        )
+    )
+    support_tokens = similarity_tokens(support_text, extra_stopwords=CHOICE_GENERIC_TOKENS)
+    issues: list[str] = []
+    for pattern in LOCAL_PROP_CHOICE_PATTERNS:
+        match = pattern.search(draft.choice_text or "")
+        if match is None:
+            continue
+        phrase = extract_grounding_phrase(match.group(1))
+        phrase_tokens = similarity_tokens(phrase, extra_stopwords=CHOICE_GENERIC_TOKENS)
+        if len(phrase_tokens) < 2:
+            continue
+        if len(phrase_tokens - support_tokens) >= 2:
+            issues.append(
+                f"Choice '{draft.choice_text}' introduces a new focal prop or marker ('{phrase}') that the scene does not establish. "
+                "If that object matters, establish it clearly in the scene text first or rename the choice to match grounded scene details."
+            )
+            break
+    return issues
+
+
+def collect_choice_target_issues(
+    *,
+    packet: dict[str, Any],
+    draft: ChoiceDraft,
+) -> list[str]:
+    issues: list[str] = []
+    if draft.target_existing_node is None:
+        return issues
+    merge_candidates = ((packet.get("context_summary") or {}).get("merge_candidates") or [])
+    allowed_target_ids = {
+        int(candidate["node_id"])
+        for candidate in merge_candidates
+        if candidate.get("node_id") is not None
+    }
+    if int(draft.target_existing_node) not in allowed_target_ids:
+        issues.append(
+            f"TARGET_EXISTING_NODE {draft.target_existing_node} is not a valid merge candidate for this branch right now. "
+            "Use one of the listed merge candidate node ids or set TARGET_EXISTING_NODE to NONE."
+        )
+    return issues
+
+
+def collect_frontier_choice_shape_issues(
+    *,
+    packet: dict[str, Any],
+    choices: list[ChoiceDraft],
+) -> list[str]:
+    issues: list[str] = []
+    frontier_budget = packet.get("frontier_budget_state") or {}
+    pressure_level = frontier_budget.get("pressure_level")
+    if pressure_level not in {"soft", "hard"}:
+        return issues
+
+    constraints = packet.get("frontier_choice_constraints") or {}
+    default_max_fresh = int(constraints.get("max_fresh_choices_under_pressure") or 1)
+    allow_second_fresh = bool(constraints.get("allow_second_fresh_choice_only_for_bloom_scenes"))
+    bloom_scene_candidate = bool(packet.get("is_bloom_scene_candidate"))
+
+    fresh_choices = [choice for choice in choices if choice.target_existing_node is None and choice.ending_category is None]
+    if len(fresh_choices) > default_max_fresh and not (
+        allow_second_fresh and bloom_scene_candidate and len(fresh_choices) == default_max_fresh + 1
+    ):
+        issues.append(
+            f"Frontier pressure only allows {default_max_fresh} fresh branch choice(s) in this run. "
+            "Use TARGET_EXISTING_NODE for a merge or a non-NONE ENDING_CATEGORY for a closure instead of opening another fresh leaf."
+        )
+
+    inspection_fresh_choices = []
+    for choice in choices:
+        inferred_class = choice.choice_class or infer_choice_class_from_text(
+            choice.choice_text,
+            f"NEXT_NODE: {choice.next_node} FURTHER_GOALS: {choice.further_goals}",
+        )
+        if inferred_class == "inspection" and choice.target_existing_node is None and choice.ending_category is None:
+            inspection_fresh_choices.append(choice)
+    if inspection_fresh_choices:
+        choice_labels = ", ".join(f"'{choice.choice_text}'" for choice in inspection_fresh_choices[:3])
+        issues.append(
+            "Inspection choices cannot open durable fresh leaves under frontier pressure. "
+            f"Make {choice_labels} reconverge with TARGET_EXISTING_NODE, turn it into a closure, or rewrite it as a materially different move."
+        )
+    return issues
+
+
+def build_partial_candidate_for_stage_validation(
+    *,
+    packet: dict[str, Any],
+    state: NormalRunConversationState,
+    resolution: dict[str, Any],
+    hooks_override: SceneHooksDraft | None = None,
+) -> GenerationCandidate | None:
+    if state.scene_plan is None or state.scene_body is None or not state.choices:
+        return None
+    temp_state = state.model_copy(deep=True)
+    if hooks_override is not None:
+        temp_state.hooks = hooks_override
+    candidate_packet = dict(packet)
+    if "preview_payload" not in candidate_packet:
+        candidate_packet["preview_payload"] = {"branch_key": packet.get("branch_key") or "default"}
+    try:
+        return assemble_generation_candidate_from_state(packet=candidate_packet, state=temp_state, resolution=resolution)
+    except ValueError:
+        return None
+
+
+def collect_partial_branch_pressure_issues(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> list[str]:
+    actor_pressure = packet.get("actor_pressure") or {}
+    location_motion_pressure = packet.get("location_motion_pressure") or {}
+    action_summary = packet.get("recent_action_family_summary") or {}
+    repeated_action_family = action_summary.get("repeated_action_family")
+    repeated_action_count = int((action_summary.get("recent_action_family_counts") or {}).get(repeated_action_family or "", 0))
+    issues: list[str] = []
+
+    if actor_pressure.get("needs_more_people") and not candidate_adds_actor_pressure(candidate):
+        issues.append(
+            "This branch has gone too many scenes without another actor materially affecting events. "
+            "Reintroduce or introduce a character, or bring external faction pressure onstage."
+        )
+
+    if location_motion_pressure.get("should_move") and not candidate_adds_location_motion(candidate):
+        issues.append(
+            "This branch has lingered in the same location for too long. Move to a new place, return to a meaningful known place, or otherwise make location motion explicit."
+        )
+
+    if (
+        actor_pressure.get("needs_more_people")
+        or location_motion_pressure.get("should_move")
+        or repeated_action_count >= 3
+        or (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
+    ) and not candidate_has_material_delta(candidate):
+        issues.append(
+            "The scene does not appear to create a material delta. Advance danger, cast, location access, hook pressure, merge/closure state, or world pressure becoming immediate."
+        )
+    return issues
+
+
+def detect_unresolved_mystery_markers(candidate: GenerationCandidate) -> list[str]:
+    markers: set[str] = set()
+    texts = [
+        candidate.scene_summary,
+        candidate.scene_text,
+        *(line.text for line in candidate.dialogue_lines),
+    ]
+    for text in texts:
+        lower_text = (text or "").lower()
+        for pattern in MYSTERY_MARKER_PATTERNS:
+            if pattern.search(lower_text):
+                markers.add(pattern.pattern.replace("\\b", "").replace("\\", ""))
+    return sorted(markers)
+
+
+def mystery_marker_is_covered(
+    *,
+    marker: str,
+    active_hooks: list[dict[str, Any]],
+    draft: SceneHooksDraft,
+) -> bool:
+    marker_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", marker.lower())
+        if token not in {"a", "an", "the", "of", "from", "inside"}
+    }
+    for hook in active_hooks:
+        hook_text = " ".join(
+            [
+                str(hook.get("summary") or ""),
+                str(hook.get("notes") or ""),
+                str(hook.get("resolution_text") or ""),
+            ]
+        ).lower()
+        hook_tokens = set(re.findall(r"[a-z0-9]+", hook_text))
+        if marker_tokens and marker_tokens.issubset(hook_tokens):
+            return True
+    draft_hook_text = " ".join(
+        filter(
+            None,
+            [
+                draft.hook_summary or "",
+                draft.hook_progress_note or "",
+                draft.hook_type or "",
+            ],
+        )
+    ).lower()
+    if draft_hook_text:
+        draft_hook_tokens = set(re.findall(r"[a-z0-9]+", draft_hook_text))
+        if marker_tokens and marker_tokens.issubset(draft_hook_tokens):
+            return True
+    return False
 
 
 def validate_choice_draft(
@@ -2491,12 +2840,28 @@ def validate_choice_draft(
         issues.append("ENDING_CATEGORY is required when CHOICE_CLASS is ending.")
     if draft.choice_class != "ending" and draft.ending_category is not None:
         issues.append("ENDING_CATEGORY should be NONE unless CHOICE_CLASS is ending.")
+    issues.extend(collect_choice_grounding_issues(packet=packet, state=state, draft=draft))
+    issues.extend(collect_choice_target_issues(packet=packet, draft=draft))
     merge_or_closure_required_now = bool(
         choice_index == 0 and ((packet.get("frontier_choice_constraints") or {}).get("must_include_merge_or_closure"))
     )
     if merge_or_closure_required_now and draft.target_existing_node is None and draft.ending_category is None:
         issues.append(
             "Frontier pressure is active. choice_1 must either use TARGET_EXISTING_NODE for a deliberate merge into an existing node or use a non-NONE ENDING_CATEGORY for a real closure."
+        )
+    inferred_choice_class = draft.choice_class or infer_choice_class_from_text(
+        draft.choice_text,
+        f"NEXT_NODE: {draft.next_node} FURTHER_GOALS: {draft.further_goals}",
+    )
+    if (
+        (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
+        and inferred_choice_class == "inspection"
+        and draft.target_existing_node is None
+        and draft.ending_category is None
+    ):
+        issues.append(
+            "Under frontier pressure, an inspection choice cannot open a durable fresh leaf. "
+            "Use TARGET_EXISTING_NODE to merge it, give it a real ENDING_CATEGORY closure, or rewrite it as a materially different move."
         )
     return issues
 
@@ -2515,6 +2880,8 @@ def validate_choice_menu(
     *,
     packet: dict[str, Any],
     choices: list[ChoiceDraft],
+    state: NormalRunConversationState | None = None,
+    resolution: dict[str, Any] | None = None,
 ) -> list[str]:
     issues: list[str] = []
     action_summary = packet.get("recent_action_family_summary") or {}
@@ -2522,21 +2889,26 @@ def validate_choice_menu(
     repeated_action_count = int((action_summary.get("recent_action_family_counts") or {}).get(repeated_action_family or "", 0))
 
     if repeated_action_family in {"inspect", "follow", "touch", "step_back"} and repeated_action_count >= 3:
-        choice_families = [classify_choice_action_family(choice.choice_text) for choice in choices]
-        if choice_families and all(family in {repeated_action_family, "other"} for family in choice_families):
+        if choices and not any(choice_breaks_repeated_action_pattern(choice) for choice in choices):
             issues.append(
                 f"This branch has been overusing the '{repeated_action_family}' action family. At least one choice in this menu must break that pattern with a social turn, location shift, merge using TARGET_EXISTING_NODE, closure using ENDING_CATEGORY, or another materially different move."
             )
 
-    if len(choices) < 2:
-        return issues
-    if not ((packet.get("consequential_choice_requirement") or {}).get("required")):
-        return issues
-    if any(choice_draft_counts_as_consequential(choice) for choice in choices):
-        return issues
-    issues.append(
-        "At least one choice in this menu must be a commitment, social move, location shift, merge, closure, or immediate-pressure response."
-    )
+    if len(choices) >= 2 and ((packet.get("consequential_choice_requirement") or {}).get("required")):
+        if not any(choice_draft_counts_as_consequential(choice) for choice in choices):
+            issues.append(
+                "At least one choice in this menu must be a commitment, social move, location shift, merge, closure, or immediate-pressure response."
+            )
+
+    issues.extend(collect_frontier_choice_shape_issues(packet=packet, choices=choices))
+
+    if state is not None and resolution is not None:
+        temp_state = state.model_copy(deep=True)
+        temp_state.choices = list(choices)
+        candidate = build_partial_candidate_for_stage_validation(packet=packet, state=temp_state, resolution=resolution)
+        if candidate is not None:
+            issues.extend(collect_redundant_progression_issues(packet=packet, candidate=candidate))
+            issues.extend(collect_partial_branch_pressure_issues(packet=packet, candidate=candidate))
     return issues
 
 
@@ -2577,6 +2949,66 @@ def validate_scene_hooks_draft(
     else:
         if any([draft.hook_importance, draft.hook_type, draft.hook_summary, draft.hook_payoff_concept, draft.hook_id, draft.hook_status, draft.hook_progress_note]):
             issues.append("When HOOK_ACTION is NONE, leave the hook-specific fields as NONE.")
+
+    candidate = build_partial_candidate_for_stage_validation(
+        packet=packet,
+        state=state,
+        resolution=resolution,
+        hooks_override=draft,
+    )
+    if candidate is not None:
+        markers = detect_unresolved_mystery_markers(candidate)
+        if markers:
+            settings = Settings.from_env()
+            connection = connect(settings.database_path)
+            try:
+                branch_state = BranchStateService(
+                    connection,
+                    act_phase_ranges={"early": {"start": 0, "end": 999999}},
+                )
+                active_hooks = branch_state.list_hooks(
+                    candidate.branch_key,
+                    statuses=["active", "payoff_ready", "blocked"],
+                )
+                uncovered_markers = [
+                    marker
+                    for marker in markers
+                    if not mystery_marker_is_covered(marker=marker, active_hooks=active_hooks, draft=draft)
+                ]
+                if uncovered_markers:
+                    issues.append(
+                        "This scene introduces an unresolved mystery/question without creating or extending a hook: "
+                        + ", ".join(sorted(uncovered_markers))
+                        + ". Use the hooks step to create or update the relevant hook now."
+                    )
+
+                if draft.hook_action == "update_hook" and draft.hook_id is not None:
+                    hook = branch_state.get_hook(draft.hook_id)
+                    if hook is None:
+                        issues.append(f"HOOK_ID {draft.hook_id} does not exist.")
+                    else:
+                        projected_depth = int(((packet.get("context_summary") or {}).get("branch_depth")) or 0) + 1
+                        state_tags = {row["tag"] for row in branch_state.list_branch_tags(candidate.branch_key, tag_type="state")}
+                        clue_tags = {row["tag"] for row in branch_state.list_branch_tags(candidate.branch_key, tag_type="clue")}
+                        readiness = branch_state._hook_readiness(hook, projected_depth, state_tags, clue_tags)
+                        if not readiness["development_eligible"]:
+                            issues.append(
+                                f"HOOK_ID {draft.hook_id} is still on development cooldown and cannot be advanced yet."
+                            )
+                        if draft.hook_status == "resolved":
+                            min_payoff_depth = int(hook["introduced_at_depth"]) + int(hook["min_distance_to_payoff"])
+                            if projected_depth < min_payoff_depth:
+                                issues.append(
+                                    f"HOOK_ID {draft.hook_id} cannot resolve yet because it has not reached min_distance_to_payoff."
+                                )
+                            required_clues = set(hook["required_clue_tags"])
+                            required_states = set(hook["required_state_tags"])
+                            if not required_clues.issubset(set(candidate.discovered_clue_tags)):
+                                issues.append(f"HOOK_ID {draft.hook_id} cannot resolve yet because required clue tags are still missing.")
+                            if not required_states.issubset(set(candidate.discovered_state_tags)):
+                                issues.append(f"HOOK_ID {draft.hook_id} cannot resolve yet because required state tags are still missing.")
+            finally:
+                connection.close()
     return issues
 
 
@@ -3475,90 +3907,110 @@ def run_normal_conversational_builder(
     raw_scene_body = ""
 
     scene_plan_issues: list[str] | None = None
-    for attempt in range(step_retry_limit):
-        raw_scene_plan = get_step_response(
-            prompt_text=build_step_prompt(
-                step_name="scene_plan",
-                packet=packet,
-                state=state,
-                requested_choice_count=args.requested_choice_count,
-                issues=scene_plan_issues,
-                retry_index=attempt,
-            )
-        )
-        if args.author_mode == "human" and is_force_next_override(raw_scene_plan):
-            state.scene_plan = build_forced_scene_plan_draft(packet=packet, resolution=resolution)
-            mark_force_next_step(state, "scene_plan")
-            break
-        try:
-            draft = parse_scene_plan_form(raw_scene_plan)
-            scene_plan_issues = validate_scene_plan_draft(packet=packet, draft=draft, resolution=resolution)
-            if not scene_plan_issues:
-                state.scene_plan = draft
-                break
-            log_validation_attempt(
-                step_name="scene_plan",
-                attempted_output=raw_scene_plan,
-                issues=scene_plan_issues,
-                retry_index=attempt + 1,
-            )
-        except (ValidationError, ValueError) as exc:
-            scene_plan_issues = [str(exc)]
-            log_validation_attempt(
-                step_name="scene_plan",
-                attempted_output=raw_scene_plan,
-                issues=scene_plan_issues,
-                retry_index=attempt + 1,
-            )
-    if state.scene_plan is None:
-        raise RuntimeError("Failed to produce a valid scene_plan form.")
-
     scene_body_issues: list[str] | None = None
-    for attempt in range(step_retry_limit):
-        raw_scene_body = get_step_response(
-            prompt_text=build_step_prompt(
-                step_name="scene_body",
-                packet=packet,
-                state=state,
-                requested_choice_count=args.requested_choice_count,
-                issues=scene_body_issues,
-                retry_index=attempt,
-            )
-        )
-        if args.author_mode == "human" and is_force_next_override(raw_scene_body):
-            state.scene_body = build_forced_scene_body_draft()
-            mark_force_next_step(state, "scene_body")
-            break
-        try:
-            draft = parse_scene_body_form(raw_scene_body)
-            scene_body_issues = validate_scene_body_draft(packet=packet, state=state, draft=draft, resolution=resolution)
-            if not scene_body_issues:
-                state.scene_body = draft
-                break
-            log_validation_attempt(
-                step_name="scene_body",
-                attempted_output=raw_scene_body,
-                issues=scene_body_issues,
-                retry_index=attempt + 1,
-            )
-        except (ValidationError, ValueError) as exc:
-            scene_body_issues = [str(exc)]
-            log_validation_attempt(
-                step_name="scene_body",
-                attempted_output=raw_scene_body,
-                issues=scene_body_issues,
-                retry_index=attempt + 1,
-            )
-    if state.scene_body is None:
-        raise RuntimeError("Failed to produce a valid scene_body form.")
+    while True:
+        if state.scene_plan is None:
+            for attempt in range(step_retry_limit):
+                raw_scene_plan = get_step_response(
+                    prompt_text=build_step_prompt(
+                        step_name="scene_plan",
+                        packet=packet,
+                        state=state,
+                        requested_choice_count=args.requested_choice_count,
+                        issues=scene_plan_issues,
+                        retry_index=attempt,
+                    )
+                )
+                if args.author_mode == "human" and is_force_next_override(raw_scene_plan):
+                    state.scene_plan = build_forced_scene_plan_draft(packet=packet, resolution=resolution)
+                    mark_force_next_step(state, "scene_plan")
+                    break
+                try:
+                    draft = parse_scene_plan_form(raw_scene_plan)
+                    scene_plan_issues = validate_scene_plan_draft(packet=packet, draft=draft, resolution=resolution)
+                    if not scene_plan_issues:
+                        state.scene_plan = draft
+                        break
+                    log_validation_attempt(
+                        step_name="scene_plan",
+                        attempted_output=raw_scene_plan,
+                        issues=scene_plan_issues,
+                        retry_index=attempt + 1,
+                    )
+                except (ValidationError, ValueError) as exc:
+                    scene_plan_issues = [str(exc)]
+                    log_validation_attempt(
+                        step_name="scene_plan",
+                        attempted_output=raw_scene_plan,
+                        issues=scene_plan_issues,
+                        retry_index=attempt + 1,
+                    )
+            if state.scene_plan is None:
+                raise RuntimeError("Failed to produce a valid scene_plan form.")
+
+        rewind_to_scene_plan = False
+        rewind_scene_plan_issues: list[str] | None = None
+        if state.scene_body is None:
+            for attempt in range(step_retry_limit):
+                raw_scene_body = get_step_response(
+                    prompt_text=build_step_prompt(
+                        step_name="scene_body",
+                        packet=packet,
+                        state=state,
+                        requested_choice_count=args.requested_choice_count,
+                        issues=scene_body_issues,
+                        retry_index=attempt,
+                    )
+                )
+                if args.author_mode == "human" and is_force_next_override(raw_scene_body):
+                    state.scene_body = build_forced_scene_body_draft()
+                    mark_force_next_step(state, "scene_body")
+                    break
+                try:
+                    draft = parse_scene_body_form(raw_scene_body)
+                    scene_body_issues = validate_scene_body_draft(packet=packet, state=state, draft=draft, resolution=resolution)
+                    if not scene_body_issues:
+                        state.scene_body = draft
+                        break
+                    log_validation_attempt(
+                        step_name="scene_body",
+                        attempted_output=raw_scene_body,
+                        issues=scene_body_issues,
+                        retry_index=attempt + 1,
+                    )
+                    if scene_body_issues_require_scene_plan_rewind(scene_body_issues):
+                        rewind_to_scene_plan = True
+                        rewind_scene_plan_issues = [
+                            "The previous SCENE_BODY introduced or used an in-world speaking character through Narrator text without proper casting. "
+                            "Fix SCENE_CAST and/or NEW_CHARACTERS now, add NEW_CHARACTER_INTRO if needed, then retry SCENE_BODY."
+                        ]
+                        break
+                except (ValidationError, ValueError) as exc:
+                    scene_body_issues = [str(exc)]
+                    log_validation_attempt(
+                        step_name="scene_body",
+                        attempted_output=raw_scene_body,
+                        issues=scene_body_issues,
+                        retry_index=attempt + 1,
+                    )
+            if rewind_to_scene_plan:
+                state.scene_plan = None
+                state.scene_body = None
+                scene_plan_issues = rewind_scene_plan_issues
+                scene_body_issues = None
+                continue
+            if state.scene_body is None:
+                raise RuntimeError("Failed to produce a valid scene_body form.")
+        break
 
     def collect_choice(
         *,
         choice_index: int,
         requested_count: int,
         optional: bool = False,
+        prompt_issues: list[str] | None = None,
     ) -> ChoiceDraft | None:
-        issues: list[str] | None = None
+        issues: list[str] | None = list(prompt_issues) if prompt_issues else None
         for attempt in range(step_retry_limit):
             raw_choice = get_step_response(
                 prompt_text=build_step_prompt(
@@ -3620,39 +4072,43 @@ def run_normal_conversational_builder(
         if second_choice is not None:
             state.choices.append(second_choice)
 
-        menu_issues = validate_choice_menu(packet=packet, choices=state.choices)
+        menu_issues = validate_choice_menu(packet=packet, choices=state.choices, state=state, resolution=resolution)
+        menu_retry_count = 0
+        while menu_issues and menu_retry_count < step_retry_limit:
+            menu_retry_count += 1
+            log_validation_attempt(
+                step_name="choice_menu",
+                attempted_output=json.dumps([choice.model_dump(mode="json") for choice in state.choices], ensure_ascii=False),
+                issues=menu_issues,
+                retry_index=menu_retry_count,
+            )
+            replacement = collect_choice(
+                choice_index=1,
+                requested_count=2,
+                optional=False,
+                prompt_issues=menu_issues,
+            )
+            if replacement is None:
+                raise RuntimeError("Failed to produce a strong enough choice menu.")
+            if len(state.choices) == 1:
+                state.choices.append(replacement)
+            else:
+                state.choices[-1] = replacement
+            menu_issues = validate_choice_menu(packet=packet, choices=state.choices, state=state, resolution=resolution)
         if menu_issues:
             log_validation_attempt(
                 step_name="choice_menu",
                 attempted_output=json.dumps([choice.model_dump(mode="json") for choice in state.choices], ensure_ascii=False),
                 issues=menu_issues,
+                retry_index=menu_retry_count + 1,
             )
-            if len(state.choices) == 1:
-                replacement = collect_choice(choice_index=1, requested_count=2, optional=False)
-                if replacement is None:
-                    raise RuntimeError("Failed to produce a strong enough choice menu.")
-                state.choices.append(replacement)
-                menu_issues = validate_choice_menu(packet=packet, choices=state.choices)
-            elif len(state.choices) > 1:
-                state.choices.pop()
-                replacement = collect_choice(choice_index=1, requested_count=2, optional=False)
-                if replacement is None:
-                    raise RuntimeError("Failed to produce a strong enough choice menu.")
-                state.choices.append(replacement)
-                menu_issues = validate_choice_menu(packet=packet, choices=state.choices)
-            if menu_issues:
-                log_validation_attempt(
-                    step_name="choice_menu",
-                    attempted_output=json.dumps([choice.model_dump(mode="json") for choice in state.choices], ensure_ascii=False),
-                    issues=menu_issues,
-                )
-                raise RuntimeError("Failed to produce a strong enough choice menu.")
+            raise RuntimeError("Failed to produce a strong enough choice menu.")
 
         if len(state.choices) >= 2:
             third_choice = collect_choice(choice_index=2, requested_count=3, optional=True)
             if third_choice is not None:
                 state.choices.append(third_choice)
-                menu_issues = validate_choice_menu(packet=packet, choices=state.choices)
+                menu_issues = validate_choice_menu(packet=packet, choices=state.choices, state=state, resolution=resolution)
                 if menu_issues:
                     state.choices.pop()
     else:
@@ -3661,12 +4117,13 @@ def run_normal_conversational_builder(
             if accepted_choice is None:
                 raise RuntimeError(f"Failed to produce a valid choice_{choice_index + 1} form.")
             state.choices.append(accepted_choice)
-        menu_issues = validate_choice_menu(packet=packet, choices=state.choices)
+        menu_issues = validate_choice_menu(packet=packet, choices=state.choices, state=state, resolution=resolution)
         if menu_issues:
             log_validation_attempt(
                 step_name="choice_menu",
                 attempted_output=json.dumps([choice.model_dump(mode="json") for choice in state.choices], ensure_ascii=False),
                 issues=menu_issues,
+                retry_index=1,
             )
             raise RuntimeError("Failed to produce a strong enough choice menu.")
 

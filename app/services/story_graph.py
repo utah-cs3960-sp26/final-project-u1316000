@@ -351,6 +351,10 @@ class StoryGraphService:
         lineage.reverse()
         return lineage
 
+    def get_node_depth(self, node_id: int) -> int:
+        lineage = self.list_lineage_node_ids(node_id)
+        return max(len(lineage) - 1, 0)
+
     def list_lineage_entity_ids(self, node_id: int, entity_type: str) -> set[int]:
         lineage_ids = self.list_lineage_node_ids(node_id)
         if not lineage_ids:
@@ -789,23 +793,32 @@ class StoryGraphService:
         rows = fetch_all(self.connection, query, tuple(params))
         items: list[dict[str, Any]] = []
         global_budget = self.build_frontier_budget_state(branch_key=branch_key, branching_policy=branching_policy)
+        distinct_from_node_ids = {int(row["from_node_id"]) for row in rows}
+        node_depths = {
+            node_id: self.get_node_depth(node_id)
+            for node_id in distinct_from_node_ids
+        }
+        max_frontier_depth = max(node_depths.values(), default=0)
         for row in rows:
             branch = branch_state_service.get_branch_state(row["branch_key"])
             branch_shape = self.describe_branch_shape(row["branch_key"], branching_policy=branching_policy)
             choice = self.get_choice(int(row["id"])) or {}
+            node_depth = node_depths.get(int(row["from_node_id"]), 0)
             score, reason = self._score_frontier_item(
                 row=row,
                 branch=branch,
                 branch_shape=branch_shape,
                 global_budget=global_budget,
                 choice=choice,
+                node_depth=node_depth,
+                max_frontier_depth=max_frontier_depth,
             )
             item = {
                 "branch_key": row["branch_key"],
                 "from_node_id": row["from_node_id"],
                 "choice_id": row["id"],
                 "choice_text": row["choice_text"],
-                "depth": branch["branch_depth"],
+                "depth": node_depth,
                 "current_act_phase": branch["act_phase"],
                 "branch_summary": row["from_node_summary"] or row["from_node_title"] or row["from_node_text"][:200],
                 "active_hooks": branch["active_hooks"],
@@ -1488,13 +1501,14 @@ class StoryGraphService:
         branch_shape: dict[str, Any],
         global_budget: dict[str, Any],
         choice: dict[str, Any] | None = None,
+        node_depth: int = 0,
+        max_frontier_depth: int = 0,
     ) -> tuple[float, str]:
         active_hooks = len(branch["active_hooks"])
         eligible_major = len(branch["eligible_major_hooks"])
         blocked_major = len(branch["blocked_major_hooks"])
         affordances = len(branch["affordances"])
         recurring_entities = len(branch["recurring_entities"])
-        depth = int(branch["branch_depth"])
         sibling_open_choices = self.count_open_choices_for_node(int(row["from_node_id"]))
         total_choices = self.count_total_choices_for_node(int(row["from_node_id"]))
         choice = choice or {}
@@ -1507,7 +1521,7 @@ class StoryGraphService:
         score += min(affordances, 3) * 2.5
         score += min(recurring_entities, 5) * 1.5
         score -= min(blocked_major, 3) * 2.0
-        score -= depth * 1.25
+        score -= node_depth * 1.25
         score -= max(sibling_open_choices - 1, 0) * 2.5
         score -= max(total_choices - 2, 0) * 1.25
         if has_bound_idea:
@@ -1532,6 +1546,7 @@ class StoryGraphService:
             score += 5.0
 
         created_at = row.get("created_at")
+        age_hours = 0.0
         if created_at:
             try:
                 created_dt = datetime.strptime(str(created_at), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -1540,7 +1555,16 @@ class StoryGraphService:
             except ValueError:
                 pass
 
-        if has_bound_idea:
+        depth_gap = max(max_frontier_depth - node_depth, 0)
+        rebalance_bonus = 0.0
+        if depth_gap >= 8 and age_hours >= 6.0:
+            rebalance_bonus += min((depth_gap - 7) * 0.5, 12.0)
+            rebalance_bonus += min((age_hours - 6.0) / 12.0, 4.0)
+            score += rebalance_bonus
+
+        if rebalance_bonus >= 6.0:
+            reason = "Rebalance target: this older shallow frontier choice has fallen far behind the branch's deepest active paths and should catch up now."
+        elif has_bound_idea:
             reason = "High-priority continuity target: this leaf carries a bound medium-range idea and should be revisited."
         elif branch_shape.get("should_prefer_divergence"):
             reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."

@@ -64,9 +64,12 @@ from app.tools.run_story_worker_local import (
     prune_existing_asset_requests,
     normalize_visible_generic_speakers,
     resolve_scene_cast_names,
+    validate_scene_plan_draft,
     repair_generation_candidate,
     validate_choice_draft,
     validate_scene_body_draft,
+    validate_scene_hooks_draft,
+    scene_body_issues_require_scene_plan_rewind,
     collect_scene_anchor_art_issues,
     load_or_create_normal_session,
     append_validation_attempt_log_record,
@@ -1362,6 +1365,62 @@ def test_frontier_returns_open_branch_ends(tmp_path: Path) -> None:
     assert all("selection_reason" in item for item in items)
     assert all("branch_shape" in item for item in items)
     assert all("merge_pressure_level" in item["branch_shape"] for item in items)
+
+
+def test_frontier_rebalances_toward_old_shallow_opening_frontier_when_branch_gets_very_deep(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+
+    with connect(db_path) as connection:
+        story = StoryGraphService(connection)
+        branch_state = BranchStateService(connection, client.app.state.llm_generation.story_bible["acts"])
+        connection.execute(
+            "UPDATE choices SET created_at = datetime('now', '-10 days') WHERE from_node_id IN (2, 3, 4)"
+        )
+
+        current_node_id = 2
+        for index in range(12):
+            open_choice = story.create_choice(
+                from_node_id=current_node_id,
+                choice_text=f"Continue deeper {index}",
+                to_node_id=None,
+                status="open",
+                commit=False,
+            )
+            next_node = story.create_story_node(
+                branch_key="default",
+                title=f"Deep Node {index}",
+                scene_text="The branch keeps descending.",
+                summary="A deeper continuation node.",
+                parent_node_id=current_node_id,
+                commit=False,
+            )
+            connection.execute(
+                "UPDATE choices SET to_node_id = ?, status = 'fulfilled' WHERE id = ?",
+                (int(next_node["id"]), int(open_choice["id"])),
+            )
+            current_node_id = int(next_node["id"])
+        story.create_choice(
+            from_node_id=current_node_id,
+            choice_text="Final deep unresolved choice",
+            to_node_id=None,
+            status="open",
+            commit=False,
+        )
+        connection.commit()
+        branch_state.sync_branch_progress("default")
+
+        frontier = story.list_frontier(
+            branch_state_service=branch_state,
+            branch_key="default",
+            limit=20,
+            mode="auto",
+            branching_policy=client.app.state.llm_generation.story_bible.get("branching_policy"),
+        )
+
+    assert frontier
+    assert int(frontier[0]["from_node_id"]) in {2, 3, 4}
+    assert int(frontier[0]["depth"]) <= 1
 
 
 def test_generation_validation_blocks_merge_only_scene_when_branch_needs_divergence(tmp_path: Path) -> None:
@@ -3012,8 +3071,72 @@ def test_conversational_scene_builder_form_parsers() -> None:
     )
     assert equals_style_scene_body.settings.visible_when_speaking is True
     assert equals_style_scene_body.settings.start_show_all_from_last_node is False
-    assert equals_style_scene_body.settings.mc_always_visible is True
-    assert equals_style_scene_body.textboxes[1].speaker_ref == "2"
+
+
+def test_validate_scene_plan_draft_rejects_unknown_scene_cast_numeric_id_early() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Bad Cast Id",
+                "SCENE_SUMMARY: A bad cast id should fail immediately.",
+                "MATERIAL_CHANGE: The scene plan should reject invalid cast ids during setup.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: 99",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("SCENE_CAST uses numeric id '99'" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_rejects_unknown_scene_cast_name_unless_declared_new() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Bad Cast Name",
+                "SCENE_SUMMARY: An undeclared unknown cast name should fail immediately.",
+                "MATERIAL_CHANGE: The scene plan should reject stray cast names during setup.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: New Witness",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("SCENE_CAST includes 'New Witness'" in issue for issue in issues)
 
     none_settings_scene_body = parse_scene_body_form(
         "\n".join(
@@ -3086,6 +3209,23 @@ def test_conversational_scene_builder_form_parsers() -> None:
     assert "A numbered speaker line like '1:' means that character is SPEAKING out loud." in scene_body_template
     assert "Do not put any choices, option lists, or menu text inside SCENE_BODY." in scene_body_template
     assert "Do not write attribution like 'says the Tall Gnome' inside the dialogue text" in scene_body_template
+
+    scene_plan_with_ids = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Mirror Junction",
+                "SCENE_SUMMARY: The protagonist spots two familiar figures reflected in the hall glass.",
+                "MATERIAL_CHANGE: The scene turns from solitary exploration into a cast-aware encounter setup.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
 
     scene_body_prompt = build_step_prompt(
         step_name="scene_body",
@@ -3517,6 +3657,19 @@ def test_build_step_prompt_surfaces_frontier_pressure_constraints_up_front() -> 
     assert "Fix that here in this choice-writing phase" in prompt
 
 
+def test_scene_plan_prompt_clarifies_new_character_names_only_and_auto_append() -> None:
+    prompt = build_step_prompt(
+        step_name="scene_plan",
+        packet={},
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+    )
+
+    assert "For NEW_CHARACTERS, write only the new characters' names" in prompt
+    assert "Do not invent ids, slot numbers, or parenthetical numbers there." in prompt
+    assert "they will be added to the accepted scene cast automatically" in prompt
+
+
 def test_build_step_prompt_repeats_merge_closure_requirement_in_hooks_step() -> None:
     prompt = build_step_prompt(
         step_name="hooks",
@@ -3559,6 +3712,76 @@ def test_validate_choice_draft_requires_choice_one_to_handle_merge_or_closure_un
     )
 
     assert any("choice_1 must either use TARGET_EXISTING_NODE" in issue for issue in issues)
+
+
+def test_validate_choice_draft_rejects_ungrounded_local_prop_early() -> None:
+    state = NormalRunConversationState(
+        scene_plan=ScenePlanDraft(
+            scene_title="The Seam's Whisper",
+            scene_summary="You watch the humming seam in the vault as the air tightens around it.",
+            material_change="The vault pulse becomes immediate and threatening.",
+            opening_beat="discovery",
+            location_status="same_location",
+            scene_cast_mode="mc_only",
+        ),
+        scene_body=SceneBodyDraft(
+            settings={},
+            raw_body="You steady yourself beside the humming seam while the vault light stutters around your hand.",
+            textboxes=[],
+        ),
+    )
+    issues = validate_choice_draft(
+        packet={
+            "selected_frontier_item": {
+                "choice_text": "Reach for the humming hat to feel its pulse",
+                "existing_choice_notes": "NEXT_NODE: The hat's pulse syncs with your hand. FURTHER_GOALS: Learn why the vault hums.",
+            },
+            "context_summary": {
+                "current_node": {
+                    "title": "The Seam's Whisper",
+                    "summary": "A sealed glass vault pulses with memory-light while a seam hums in the wall.",
+                }
+            },
+        },
+        state=state,
+        draft=ChoiceDraft(
+            choice_text="Examine the stitch and its resonance more closely",
+            choice_class="inspection",
+            next_node="You study the humming wall more carefully and search for a clue in the vibration.",
+            further_goals="Stay with the local mystery and deepen the vault clue trail.",
+            ending_category=None,
+            target_existing_node=None,
+        ),
+        resolution={},
+        choice_index=0,
+    )
+
+    assert any("introduces a new focal prop or marker" in issue for issue in issues)
+
+
+def test_validate_choice_draft_rejects_invalid_merge_target_early() -> None:
+    issues = validate_choice_draft(
+        packet={
+            "context_summary": {
+                "merge_candidates": [
+                    {"node_id": 7, "title": "Before the Counting Bell"},
+                ]
+            }
+        },
+        state=NormalRunConversationState(),
+        draft=ChoiceDraft(
+            choice_text="Merge back into an older thread",
+            choice_class="progress",
+            next_node="The branch reconnects with an earlier scene that still fits the current pressure.",
+            further_goals="Compress the frontier and continue from a stronger shared lane.",
+            ending_category=None,
+            target_existing_node=999,
+        ),
+        resolution={},
+        choice_index=0,
+    )
+
+    assert any("not a valid merge candidate" in issue for issue in issues)
 
 
 def test_is_force_next_override_accepts_secret_spellings() -> None:
@@ -3707,6 +3930,145 @@ def test_parse_scene_body_does_not_treat_mid_sentence_colon_as_speaker_switch() 
     assert "everything: the precise spacing" in scene_body.textboxes[0].text
 
 
+def test_compile_scene_body_allows_show_1_for_mc_only_even_without_protagonist_name() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: MC Only Command",
+                "SCENE_SUMMARY: The protagonist reacts as patrol pressure closes in.",
+                "MATERIAL_CHANGE: The protagonist becomes explicitly visible before the patrol arrives.",
+                "OPENING_BEAT: consequence",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "@show 1",
+                "You snap your head up as the brass patrol rounds the mushroom cluster.",
+            ]
+        )
+    )
+    state = NormalRunConversationState(scene_plan=scene_plan, scene_body=scene_body)
+
+    compiled, issues = compile_scene_body_draft(
+        state=state,
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_id": 1,
+            "protagonist_name": None,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert issues == []
+    assert compiled is not None
+
+
+def test_validate_scene_body_draft_flags_narrator_owned_in_world_dialogue() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Brass Arrival",
+                "SCENE_SUMMARY: A brass patrol corners you near the vault seam.",
+                "MATERIAL_CHANGE: Patrol pressure becomes immediate and verbal.",
+                "OPENING_BEAT: consequence",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY, Brass Patrol Member",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "The brass patrol halts around you.",
+                "Brass Patrol Member clears his throat and says, \"Hold where you are.\"",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"brass patrol member": {"id": 2, "name": "Brass Patrol Member"}},
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+
+    assert any("gives spoken dialogue to an in-world character through Narrator text" in issue for issue in issues)
+    assert not scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_validate_scene_body_draft_requests_scene_plan_rewind_for_uncast_speaking_character() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Unexpected Enumerator",
+                "SCENE_SUMMARY: An enumerator appears and addresses you near the vault.",
+                "MATERIAL_CHANGE: A new in-world speaker forces the cast to expand.",
+                "OPENING_BEAT: consequence",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "The lead enumerator studies your hand.",
+                "He clears his throat and calls out, \"Sir, we detect an anomaly here.\"",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("Return to scene_plan and either add the proper casting or declare a new character" in issue for issue in issues)
+    assert scene_body_issues_require_scene_plan_rewind(issues)
+
+
 def test_validate_choice_menu_allows_distinct_progress_choices_when_one_has_real_motion() -> None:
     packet = {
         "consequential_choice_requirement": {"required": True},
@@ -3778,6 +4140,148 @@ def test_validate_choice_menu_rejects_repeated_touch_family_with_specific_fix() 
 
     assert any("overusing the 'touch' action family" in issue for issue in issues)
     assert any("merge using TARGET_EXISTING_NODE" in issue for issue in issues)
+
+
+def test_validate_choice_menu_allows_merge_to_break_repeated_follow_pattern() -> None:
+    packet = {
+        "recent_action_family_summary": {
+            "repeated_action_family": "follow",
+            "recent_action_family_counts": {"follow": 4},
+        },
+        "consequential_choice_requirement": {"required": False},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Attempt to diffuse the tension by addressing the patrol's perceived anomaly directly.",
+            choice_class="commitment",
+            next_node="You speak up and try to redirect the patrol toward a bureaucratic explanation instead of panic.",
+            further_goals="Turn the pressure into negotiation and learn more about the patrol's procedure.",
+            ending_category=None,
+            target_existing_node=4,
+        ),
+        ChoiceDraft(
+            choice_text="Attempt to ignore the patrol and focus on the seam of green glass in the ground instead.",
+            choice_class="inspection",
+            next_node="You crouch by the seam and force yourself to focus on its vibration despite the patrol pressure.",
+            further_goals="Stay with the local vault mystery a little longer before the scene reconverges.",
+            ending_category=None,
+            target_existing_node=None,
+        ),
+    ]
+
+    assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_allows_travel_or_escape_to_break_repeated_follow_pattern() -> None:
+    packet = {
+        "recent_action_family_summary": {
+            "repeated_action_family": "follow",
+            "recent_action_family_counts": {"follow": 4},
+        },
+        "consequential_choice_requirement": {"required": False},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Attempt to diffuse the tension by addressing the patrol's perceived anomaly directly.",
+            choice_class="commitment",
+            next_node="You try to keep the patrol talking instead of letting them tighten the circle around you.",
+            further_goals="Use social maneuvering to survive the scrutiny and gather procedural clues.",
+        ),
+        ChoiceDraft(
+            choice_text="Turn and run, putting distance between yourself and the patrol's scrutiny.",
+            choice_class="progress",
+            next_node="You break into a desperate run through the damp field before the patrol can close the gap.",
+            further_goals="Gain distance, force location motion, and find temporary cover away from the immediate pressure.",
+        ),
+    ]
+
+    assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_rejects_extra_fresh_branches_under_frontier_pressure_early() -> None:
+    packet = {
+        "frontier_budget_state": {"pressure_level": "soft"},
+        "frontier_choice_constraints": {
+            "max_fresh_choices_under_pressure": 1,
+            "allow_second_fresh_choice_only_for_bloom_scenes": False,
+        },
+        "consequential_choice_requirement": {"required": False},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Appeal to the patrol leader",
+            choice_class="commitment",
+            next_node="The patrol leader pauses and demands a direct explanation for your presence.",
+            further_goals="Turn the pressure into a social lane without opening more stray leaves.",
+        ),
+        ChoiceDraft(
+            choice_text="Slip deeper into the side passage",
+            choice_class="progress",
+            next_node="You dart for the side passage before the patrol can fully close around you.",
+            further_goals="Open another path through the vault infrastructure.",
+        ),
+    ]
+
+    issues = validate_choice_menu(packet=packet, choices=choices)
+
+    assert any("only allows 1 fresh branch" in issue for issue in issues)
+
+
+def test_validate_scene_hooks_draft_rejects_unhooked_new_mystery_early(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "test_world.db"
+    bootstrap_database(db_path)
+    monkeypatch.setenv("CYOA_DB_PATH", str(db_path))
+
+    state = NormalRunConversationState(
+        scene_plan=ScenePlanDraft(
+            scene_title="A Voice in the Vault",
+            scene_summary="You hear an unseen voice answer from inside the sealed chamber.",
+            material_change="A new mystery enters the scene through a disembodied reply.",
+            opening_beat="discovery",
+            location_status="same_location",
+            scene_cast_mode="mc_only",
+        ),
+        scene_body=parse_scene_body_form(
+            "\n".join(
+                [
+                    "SCENE_SETTINGS: NONE",
+                    "SCENE_BODY: Narrator",
+                    "You hold still at the seam.",
+                    "An unseen voice answers from inside the sealed chamber and speaks your missing name.",
+                ]
+            )
+        ),
+        choices=[
+            ChoiceDraft(
+                choice_text="Call back to the unseen voice",
+                choice_class="commitment",
+                next_node="You answer the voice and force the hidden speaker to respond again.",
+                further_goals="Turn the mystery into an immediate social pressure instead of leaving it ambient.",
+            )
+        ],
+    )
+    issues = validate_scene_hooks_draft(
+        packet={
+            "branch_key": "default",
+            "context_summary": {"branch_depth": 3},
+        },
+        state=state,
+        draft=SceneHooksDraft(
+            hook_action="none",
+            clue_tags=[],
+            state_tags=[],
+            global_direction_notes=[],
+        ),
+        resolution={
+            "current_location_id": 1,
+            "character_name_map": {},
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("introduces an unresolved mystery/question without creating or extending a hook" in issue for issue in issues)
 
 
 def test_run_story_worker_local_planning_mode_updates_notes_and_ideas(tmp_path: Path) -> None:
