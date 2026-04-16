@@ -22,6 +22,7 @@ ChoiceStatus = Literal["open", "fulfilled", "parked", "closed"]
 ChoiceClass = Literal["inspection", "progress", "commitment", "ending"]
 EndingCategory = Literal["death", "dead_end", "capture", "transformation", "hub_return"]
 WorldbuildingStatus = Literal["active", "parked", "resolved"]
+StoryNodeKind = Literal["normal", "transition"]
 
 
 class LocationSeed(BaseModel):
@@ -108,6 +109,8 @@ class StoryNodeCreate(BaseModel):
     scene_text: str
     summary: str | None = None
     parent_node_id: int | None = None
+    node_kind: StoryNodeKind = "normal"
+    auto_continue_to_node_id: int | None = None
     dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     referenced_entities: list[EntityReference] = Field(default_factory=list)
     present_entities: list[ScenePresentEntity] = Field(default_factory=list)
@@ -349,6 +352,16 @@ class FloatingCharacterIntroduction(BaseModel):
     intro_text: str = Field(min_length=12)
 
 
+class TransitionNodeSpec(BaseModel):
+    choice_list_index: int = Field(ge=0)
+    scene_title: str | None = None
+    scene_summary: str
+    scene_text: str
+    dialogue_lines: list[DialogueLine] = Field(default_factory=list)
+    entity_references: list[EntityReference] = Field(default_factory=list)
+    scene_present_entities: list[ScenePresentEntity] = Field(default_factory=list)
+
+
 class GenerationCandidate(BaseModel):
     branch_key: str = "default"
     scene_title: str | None = None
@@ -356,6 +369,7 @@ class GenerationCandidate(BaseModel):
     scene_text: str
     dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     choices: list[GeneratedChoice]
+    transition_nodes: list[TransitionNodeSpec] = Field(default_factory=list)
     new_locations: list[LocationSeed] = Field(default_factory=list)
     new_characters: list[CharacterSeed] = Field(default_factory=list)
     new_objects: list[ObjectSeed] = Field(default_factory=list)

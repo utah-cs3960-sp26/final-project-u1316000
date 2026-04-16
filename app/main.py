@@ -543,6 +543,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "branch_key": node.get("branch_key", "default"),
                 "summary": node.get("summary") or (node.get("scene_text") or "")[:120],
                 "parent_node_id": node.get("parent_node_id"),
+                "node_kind": node.get("node_kind") or "normal",
+                "auto_continue_to_node_id": node.get("auto_continue_to_node_id"),
                 "background_url": bg_url,
                 "choice_count": len(node.get("choices", [])),
             })
@@ -555,6 +557,14 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     "to_node_id": int(choice["to_node_id"]),
                     "choice_text": choice["choice_text"],
                     "status": choice.get("status", "open"),
+                })
+        for node in nodes_raw:
+            if node.get("auto_continue_to_node_id") is not None:
+                graph_edges.append({
+                    "from_node_id": int(node["id"]),
+                    "to_node_id": int(node["auto_continue_to_node_id"]),
+                    "choice_text": "auto-continue",
+                    "status": "auto_continue",
                 })
 
         graph_data = {"nodes": graph_nodes, "edges": graph_edges}
@@ -1029,6 +1039,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             scene_text=payload.scene_text,
             summary=payload.summary,
             parent_node_id=payload.parent_node_id,
+            node_kind=payload.node_kind,
+            auto_continue_to_node_id=payload.auto_continue_to_node_id,
             dialogue_lines=[line.model_dump() for line in payload.dialogue_lines],
             referenced_entities=[reference.model_dump() for reference in payload.referenced_entities],
             present_entities=[entity.model_dump() for entity in payload.present_entities],

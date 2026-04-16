@@ -32,6 +32,7 @@ from app.models import (
     HookUpdate,
     LocationSeed,
     ScenePresentEntity,
+    TransitionNodeSpec,
     WorldbuildingNoteProposal,
 )
 from app.services.assets import AssetService, default_dimensions_for_asset_kind
@@ -185,10 +186,19 @@ class SceneArtDraft(BaseModel):
     location_art_hints: dict[str, str] = Field(default_factory=dict)
 
 
+class TransitionNodeDraft(BaseModel):
+    choice_index: int = Field(ge=0)
+    target_existing_node: int = Field(ge=1)
+    scene_title: str | None = None
+    scene_summary: str
+    body: SceneBodyDraft
+
+
 class NormalRunConversationState(BaseModel):
     scene_plan: ScenePlanDraft | None = None
     scene_body: SceneBodyDraft | None = None
     choices: list[ChoiceDraft] = Field(default_factory=list)
+    transition_nodes: list[TransitionNodeDraft] = Field(default_factory=list)
     hooks: SceneHooksDraft | None = None
     extras: SceneExtrasDraft | None = None
     art: SceneArtDraft | None = None
@@ -294,6 +304,12 @@ NORMAL_STEP_LABELS: dict[str, list[str]] = {
         "FURTHER_GOALS",
         "ENDING_CATEGORY",
         "TARGET_EXISTING_NODE",
+    ],
+    "link_nodes": [
+        "TRANSITION_TITLE",
+        "TRANSITION_SUMMARY",
+        "SCENE_SETTINGS",
+        "SCENE_BODY",
     ],
     "hooks": [
         "HOOK_ACTION",
@@ -1055,6 +1071,30 @@ def build_form_template(step: str) -> str:
             "ENDING_CATEGORY: <one of: death, dead_end, capture, transformation, hub_return, NONE> | Use a non-NONE ending category when this choice is a real closure path.\n"
             "TARGET_EXISTING_NODE: <existing node id for a deliberate merge/hub return, or NONE> | Use this when the choice is intentionally merging or routing back into an existing node."
         )
+    if step == "link_nodes":
+        return (
+            "This is NOT JSON. Use a simple newline-based labeled input format.\n"
+            "Put each field on its own new line. Newlines are the only valid separator between fields. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between top-level fields.\n"
+            "SCENE_BODY reminders: Use speaker lines like '0: text', '7: text', or '1n: text', visibility commands like '@show 1' and '@show_only 1n', or plain text which defaults to Narrator.\n"
+            "Important: newlines are the ONLY valid separator for switching speakers, starting a new textbox, or applying visibility commands.\n"
+            "Put every @show/@hide command on its own line. Put every new speaker on its own line. Do not cram multiple speakers or commands onto one line.\n"
+            "Do not use pipes '|', commas, semicolons, arrows, or any other separator characters to separate speakers, textboxes, or visibility changes. Use only newlines.\n"
+            "Speaker lines and plain text create textboxes. Lines continue the current textbox until a new speaker line or command line starts.\n"
+            "A numbered speaker line like '1:' means that character is SPEAKING out loud. Do not use '1:' or '2:' for narration, stage directions, internal thoughts, or menu options.\n"
+            "It is okay if The Tall Gnome talks to himself, but a '1:' line must still be spoken dialogue.\n"
+            "When a character speaks, write only the words they say. Do not write attribution like 'says the Tall Gnome' inside the dialogue text; the speaker label already provides that.\n"
+            "Think of this like a movie script, where there is narration by a narrator, and anybody else who talks is a speaker. This is like that.\n"
+            "Your scene body should usually represent about a page of a movie script overall ~300 words between total narration and character dialogue.\n"
+            "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
+            "Visibility commands must each be on their own line and apply at the same moment the next textbox begins.\n"
+            "1n refers to a NEW CHARACTER. If you are referring about the protagonist use 1: NOT 1n:."
+            "Examples: @show 1 | @show: 1 | @show1 | @show 1,2 | @hide 2 | @show_only 1n | @show_all | @hide_all"
+            "Fill this exact label form:\n"
+            "TRANSITION_TITLE: <string or NONE> | Optional short title for the hidden bridge node.\n"
+            "TRANSITION_SUMMARY: <string> | 1-2 sentence summary of how this merge bridge connects the current choice into the target node.\n"
+            "SCENE_SETTINGS: <setting lines or NONE> | Optional. Omit SCENE_SETTINGS entirely to use default scene-body settings, or write SCENE_SETTINGS: NONE.\n"
+            "SCENE_BODY: <script> | Write the hidden bridge scene here using the same newline-based scene-body format as normal scenes. This transition node must have no choices; it should simply lead smoothly into the target node."
+        )
     if step == "hooks":
         return (
             "This is NOT JSON. Use a simple newline-based labeled input format.\n"
@@ -1274,6 +1314,27 @@ def build_forced_choice_draft(
         further_goals="Continue previewing later authoring steps without committing to final content yet.",
         ending_category=None,
         target_existing_node=None,
+    )
+
+
+def build_forced_transition_node_draft(
+    *,
+    choice_index: int,
+    target_existing_node: int,
+) -> TransitionNodeDraft:
+    body_text = (
+        "You move through the missing connective beat here. FORCE NEXT inserted a hidden bridge so this merge can still preview cleanly."
+    )
+    return TransitionNodeDraft(
+        choice_index=choice_index,
+        target_existing_node=target_existing_node,
+        scene_title="Forced Preview Bridge",
+        scene_summary="A hidden transition node carries the player smoothly into the merge target during preview navigation.",
+        body=SceneBodyDraft(
+            settings=SceneSettingsDraft(),
+            raw_body=body_text,
+            textboxes=[SceneScriptTextbox(speaker_ref="0", text=body_text)],
+        ),
     )
 
 
@@ -1573,6 +1634,22 @@ def parse_scene_body_form(raw_text: str) -> SceneBodyDraft:
         settings=parse_scene_settings(sections["SCENE_SETTINGS"]),
         raw_body=sections["SCENE_BODY"].strip(),
         textboxes=parse_scene_script_textboxes(sections["SCENE_BODY"]),
+    )
+
+
+def parse_transition_node_form(*, raw_text: str, choice_index: int, target_existing_node: int) -> TransitionNodeDraft:
+    sections = parse_labeled_sections(strip_markdown_fences(raw_text).strip(), NORMAL_STEP_LABELS["link_nodes"])
+    body = SceneBodyDraft(
+        settings=parse_scene_settings(sections["SCENE_SETTINGS"]),
+        raw_body=sections["SCENE_BODY"].strip(),
+        textboxes=parse_scene_script_textboxes(sections["SCENE_BODY"]),
+    )
+    return TransitionNodeDraft(
+        choice_index=choice_index,
+        target_existing_node=target_existing_node,
+        scene_title=parse_none_text(sections["TRANSITION_TITLE"]),
+        scene_summary=sections["TRANSITION_SUMMARY"].strip(),
+        body=body,
     )
 
 
@@ -1997,6 +2074,7 @@ def build_step_prompt(
     choice_index: int | None = None,
     optional_choice: bool = False,
     detail_target: tuple[Literal["character", "location"], str] | None = None,
+    transition_target: tuple[int, int] | None = None,
     retry_index: int = 0,
 ) -> str:
     issue_block = ""
@@ -2158,6 +2236,41 @@ def build_step_prompt(
             "Hooks are the larger story threads that should pay off later. Clue tags and state tags are the smaller-scale things this scene newly reveals or makes true.\n"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
             f"{build_form_template('hooks')}"
+        )
+    if step_name == "link_nodes":
+        assert transition_target is not None
+        choice_list_index, target_node_id = transition_target
+        linked_choice = state.choices[choice_list_index]
+        target_node = next(
+            (
+                candidate
+                for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or [])
+                if int(candidate.get("node_id") or 0) == target_node_id
+            ),
+            None,
+        )
+        target_title = str((target_node or {}).get("title") or f"Node {target_node_id}").strip()
+        target_summary = str((target_node or {}).get("summary") or "No target summary available.").strip()
+        return (
+            f"{issue_block}"
+            f"{scene_plan_summary}"
+            f"{scene_body_summary}"
+            f"{accepted_choices_summary}"
+            f"Step: link_nodes for choice_{choice_list_index + 1}\n"
+            f"{retry_block}"
+            "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
+            "Write a hidden transition node that bridges this merge choice into its target existing node.\n"
+            "This bridge node has no choices. The player should experience it as a seamless connective beat and then continue directly into the target node.\n"
+            f"Choice to bridge: {linked_choice.choice_text}\n"
+            f"Choice NEXT_NODE: {linked_choice.next_node}\n"
+            f"Target existing node id: {target_node_id}\n"
+            f"Target title: {target_title}\n"
+            f"Target summary: {target_summary}\n"
+            "Do not teleport abruptly. Show the connective motion, exchange, realization, or arrival that makes the merge feel earned.\n"
+            "Do not add choices here. End at the natural handoff into the target node.\n"
+            "You may use the same scene-body scripting format here, including Narrator, speaker lines, and visibility commands.\n"
+            "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
+            f"{build_form_template('link_nodes')}"
         )
     if step_name == "details":
         target_type, target_name = detail_target if detail_target is not None else ("character", "Unknown")
@@ -2542,6 +2655,53 @@ def validate_scene_body_draft(
     ):
         issues.append("SCENE_BODY must not contain menu text or explicit choice prompts. Only write what happens in the scene; choices come later.")
     issues.extend(collect_narrator_owned_dialogue_issues(state=state, draft=draft, resolution=resolution))
+    return issues
+
+
+def validate_transition_node_draft(
+    *,
+    packet: dict[str, Any],
+    state: NormalRunConversationState,
+    draft: TransitionNodeDraft,
+    resolution: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    if draft.choice_index >= len(state.choices):
+        issues.append(f"Transition bridge references unknown choice index {draft.choice_index + 1}.")
+        return issues
+    attached_choice = state.choices[draft.choice_index]
+    if attached_choice.target_existing_node is None:
+        issues.append("Transition bridges can only be written for choices that already merge into an existing node.")
+        return issues
+    if attached_choice.target_existing_node != draft.target_existing_node:
+        issues.append("Transition bridge target does not match the accepted merge target for this choice.")
+    if not draft.scene_summary.strip():
+        issues.append("TRANSITION_SUMMARY cannot be empty.")
+    if len((draft.scene_summary or "").split()) < 8:
+        issues.append("TRANSITION_SUMMARY should explain how this bridge reaches the target node, not just name it.")
+
+    body_issues = validate_scene_body_draft(
+        packet=packet,
+        state=state,
+        draft=draft.body,
+        resolution=resolution,
+    )
+    issues.extend(
+        issue.replace("SCENE_BODY", "Transition bridge SCENE_BODY")
+        for issue in body_issues
+    )
+
+    target_summary = ""
+    for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or []):
+        if int(candidate.get("node_id") or 0) == draft.target_existing_node:
+            target_summary = str(candidate.get("summary") or "").strip()
+            break
+    compiled, _ = compile_scene_body_draft(state=state, draft=draft.body, resolution=resolution)
+    transition_text = compiled.scene_text if compiled is not None else draft.body.raw_body
+    if target_summary and texts_are_near_duplicates(transition_text, target_summary):
+        issues.append("Transition bridge SCENE_BODY is too close to the merge target summary. Show the connective movement into that node instead of restating it.")
+    if attached_choice.next_node and texts_are_near_duplicates(transition_text, attached_choice.next_node):
+        issues.append("Transition bridge SCENE_BODY is too close to this choice's NEXT_NODE. Dramatize the connective beat instead of paraphrasing the handoff.")
     return issues
 
 
@@ -3213,6 +3373,24 @@ def assemble_generation_candidate_from_state(
         )
         for choice in state.choices
     ]
+    compiled_transition_nodes: list[TransitionNodeSpec] = []
+    for transition in state.transition_nodes:
+        compiled_transition_body, transition_compile_issues = compile_scene_body_draft(
+            state=state,
+            draft=transition.body,
+            resolution=resolution,
+        )
+        if transition_compile_issues or compiled_transition_body is None:
+            raise ValueError(f"Cannot assemble candidate from invalid transition bridge: {transition_compile_issues}")
+        compiled_transition_nodes.append(
+            TransitionNodeSpec(
+                choice_list_index=transition.choice_index,
+                scene_title=transition.scene_title,
+                scene_summary=transition.scene_summary,
+                scene_text=compiled_transition_body.scene_text,
+                dialogue_lines=compiled_transition_body.dialogue_lines,
+            )
+        )
 
     new_hooks: list[HookProposal] = []
     hook_updates: list[HookUpdate] = []
@@ -3241,6 +3419,7 @@ def assemble_generation_candidate_from_state(
         scene_text=compiled_scene_body.scene_text,
         dialogue_lines=compiled_scene_body.dialogue_lines,
         choices=generated_choices,
+        transition_nodes=compiled_transition_nodes,
         new_locations=new_locations,
         new_characters=extras.new_characters,
         new_objects=[],
@@ -4133,6 +4312,66 @@ def run_normal_conversational_builder(
                 retry_index=1,
             )
             raise RuntimeError("Failed to produce a strong enough choice menu.")
+
+    state.transition_nodes = []
+    for merge_choice_index, merge_choice in enumerate(state.choices):
+        if merge_choice.target_existing_node is None:
+            continue
+        transition_issues: list[str] | None = None
+        accepted_transition: TransitionNodeDraft | None = None
+        for attempt in range(step_retry_limit):
+            raw_transition = get_step_response(
+                prompt_text=build_step_prompt(
+                    step_name="link_nodes",
+                    packet=packet,
+                    state=state,
+                    requested_choice_count=args.requested_choice_count,
+                    issues=transition_issues,
+                    transition_target=(merge_choice_index, int(merge_choice.target_existing_node)),
+                    retry_index=attempt,
+                )
+            )
+            if args.author_mode == "human" and is_force_next_override(raw_transition):
+                accepted_transition = build_forced_transition_node_draft(
+                    choice_index=merge_choice_index,
+                    target_existing_node=int(merge_choice.target_existing_node),
+                )
+                mark_force_next_step(state, f"link_nodes:{merge_choice_index + 1}")
+                break
+            try:
+                draft = parse_transition_node_form(
+                    raw_text=raw_transition,
+                    choice_index=merge_choice_index,
+                    target_existing_node=int(merge_choice.target_existing_node),
+                )
+                transition_issues = validate_transition_node_draft(
+                    packet=packet,
+                    state=state,
+                    draft=draft,
+                    resolution=resolution,
+                )
+                if not transition_issues:
+                    accepted_transition = draft
+                    break
+                log_validation_attempt(
+                    step_name="link_nodes",
+                    attempted_output=raw_transition,
+                    issues=transition_issues,
+                    choice_index=merge_choice_index,
+                    retry_index=attempt + 1,
+                )
+            except (ValidationError, ValueError) as exc:
+                transition_issues = [str(exc)]
+                log_validation_attempt(
+                    step_name="link_nodes",
+                    attempted_output=raw_transition,
+                    issues=transition_issues,
+                    choice_index=merge_choice_index,
+                    retry_index=attempt + 1,
+                )
+        if accepted_transition is None:
+            raise RuntimeError(f"Failed to produce a valid transition bridge for choice_{merge_choice_index + 1}.")
+        state.transition_nodes.append(accepted_transition)
 
     if should_request_hooks(packet=packet, state=state):
         raw_hooks = get_step_response(
@@ -5101,13 +5340,36 @@ def append_run_log_record(*, log_path: Path, record: dict[str, Any]) -> None:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def append_validation_attempt_log_record(*, log_path: Path, record: dict[str, Any], max_lines: int = 1000) -> None:
+def ensure_validation_attempt_log_capacity(*, log_path: Path, max_lines: int = 1000) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if log_path.exists():
         with log_path.open("r", encoding="utf-8") as handle:
             line_count = sum(1 for _ in handle)
         if line_count >= max_lines:
             log_path.write_text("", encoding="utf-8")
+
+
+def append_validation_attempt_run_separator(*, log_path: Path, record: dict[str, Any], max_lines: int = 1000) -> None:
+    ensure_validation_attempt_log_capacity(log_path=log_path, max_lines=max_lines)
+    metadata_bits = [str(record.get("timestamp") or "").strip(), str(record.get("model") or "").strip()]
+    run_mode = str(record.get("run_mode") or "").strip()
+    if run_mode:
+        metadata_bits.append(f"run_mode={run_mode}")
+    choice_id = record.get("choice_id")
+    if choice_id is not None:
+        metadata_bits.append(f"choice_id={choice_id}")
+    separator = "-" * 72
+    entry = (
+        f"{separator}\n"
+        f"{' | '.join(bit for bit in metadata_bits if bit)}\n"
+        f"{separator}\n\n"
+    )
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(entry)
+
+
+def append_validation_attempt_log_record(*, log_path: Path, record: dict[str, Any], max_lines: int = 1000) -> None:
+    ensure_validation_attempt_log_capacity(log_path=log_path, max_lines=max_lines)
     attempted_output = str(record.get("attempted_output") or "")
     formatted_output = attempted_output.replace("\\r\\n", "\n").replace("\\n", "\n")
     issues = [str(issue) for issue in (record.get("issues") or [])]
@@ -5354,6 +5616,15 @@ def main() -> None:
     normal_session_path: Path | None = None
     try:
         packet = run_prepare_story_run(args, project_root)
+        append_validation_attempt_run_separator(
+            log_path=get_default_validation_attempt_log_path(project_root),
+            record={
+                **build_log_timestamps(),
+                "model": args.model,
+                "run_mode": packet.get("run_mode"),
+                "choice_id": ((packet.get("selected_frontier_item") or {}).get("choice_id")),
+            },
+        )
         append_run_started_log(log_path=log_path, args=args, packet=packet)
         worker_guide = load_worker_guide(project_root)
         system_prompt = build_system_prompt(worker_guide)

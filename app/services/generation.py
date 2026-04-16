@@ -227,7 +227,7 @@ class LLMGenerationService:
             "Worldbuilding notes describe offscreen pressures like patrols, factions, rumors, automata, or danger escalation. You may use them as a grounded source of surprise and conflict.\n"
             "If a location does not yet have art, give it a distinct whimsical-fantasy identity that stays readable and not overly complicated for image generation.\n"
             "Return structured JSON only with these top-level keys:\n"
-            "scene_summary, scene_text, dialogue_lines, choices, new_locations, new_characters, new_objects, floating_character_introductions, entity_references, scene_present_entities, fact_updates, relation_updates, "
+            "scene_summary, scene_text, dialogue_lines, choices, transition_nodes, new_locations, new_characters, new_objects, floating_character_introductions, entity_references, scene_present_entities, fact_updates, relation_updates, "
             "new_hooks, hook_updates, global_direction_notes, inventory_changes, affordance_changes, relationship_changes, "
             "asset_requests, discovered_clue_tags, discovered_state_tags.\n"
             f"Context:\n{json.dumps(context, indent=2)}"
@@ -304,6 +304,29 @@ class LLMGenerationService:
             if character_name and character_name in new_character_names:
                 issues.append(
                     f"Floating character introduction for '{character.get('name')}' conflicts with new_characters. Use one or the other."
+                )
+
+        seen_transition_choice_indexes: set[int] = set()
+        for transition in candidate.transition_nodes:
+            if transition.choice_list_index >= len(candidate.choices):
+                issues.append(
+                    f"Transition node references choice_list_index {transition.choice_list_index}, but this candidate only has {len(candidate.choices)} choice(s)."
+                )
+                continue
+            if transition.choice_list_index in seen_transition_choice_indexes:
+                issues.append(
+                    f"Only one transition node may be attached to choice_list_index {transition.choice_list_index}."
+                )
+                continue
+            seen_transition_choice_indexes.add(transition.choice_list_index)
+            attached_choice = candidate.choices[transition.choice_list_index]
+            if attached_choice.target_node_id is None:
+                issues.append(
+                    f"Transition node for choice '{attached_choice.choice_text}' is invalid because that choice does not merge into an existing node."
+                )
+            if len((transition.scene_text or "").split()) < 12:
+                issues.append(
+                    f"Transition node for choice '{attached_choice.choice_text}' is too thin. Write a real bridging beat, not a fragment."
                 )
 
         merge_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is not None)

@@ -269,9 +269,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const cpOffset = Math.abs(x2 - x1) * 0.3 + 40;
 
         ctx.save();
-        ctx.strokeStyle = "rgba(107, 97, 84, 0.4)";
+        ctx.strokeStyle = edge.status === "auto_continue" ? "rgba(58, 120, 94, 0.55)" : "rgba(107, 97, 84, 0.4)";
         ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
+        ctx.setLineDash(edge.status === "auto_continue" ? [10, 5] : [6, 4]);
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.bezierCurveTo(x1 + cpOffset, y1 + cpOffset, x2 - cpOffset, y2 - cpOffset, x2, y2);
@@ -291,14 +291,19 @@ document.addEventListener("DOMContentLoaded", () => {
     function drawNode(node) {
         const n = nodeMap[node.id];
         const isLeaf = outgoingEdges[n.id].length === 0;
-        const borderColor = isLeaf ? COLOR_LEAF : COLOR_BRANCH;
+        const isTransition = n.node_kind === "transition";
+        const borderColor = isTransition ? "#3a785e" : (isLeaf ? COLOR_LEAF : COLOR_BRANCH);
 
         ctx.save();
 
         // Draw background image or fill
         ctx.beginPath();
-        ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
-        ctx.closePath();
+        if (isTransition) {
+            ctx.roundRect(n.x - NODE_RADIUS, n.y - NODE_RADIUS, NODE_RADIUS * 2, NODE_RADIUS * 2, 18);
+        } else {
+            ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
+            ctx.closePath();
+        }
         ctx.save();
         ctx.clip();
 
@@ -314,7 +319,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Border
         ctx.beginPath();
-        ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
+        if (isTransition) {
+            ctx.roundRect(n.x - NODE_RADIUS, n.y - NODE_RADIUS, NODE_RADIUS * 2, NODE_RADIUS * 2, 18);
+        } else {
+            ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
+        }
         ctx.strokeStyle = borderColor;
         ctx.lineWidth = BORDER_WIDTH;
         ctx.stroke();
@@ -322,7 +331,11 @@ document.addEventListener("DOMContentLoaded", () => {
         // Hover highlight
         if (hoveredNode && hoveredNode.id === n.id) {
             ctx.beginPath();
-            ctx.arc(n.x, n.y, NODE_RADIUS + 3, 0, Math.PI * 2);
+            if (isTransition) {
+                ctx.roundRect(n.x - NODE_RADIUS - 3, n.y - NODE_RADIUS - 3, (NODE_RADIUS + 3) * 2, (NODE_RADIUS + 3) * 2, 20);
+            } else {
+                ctx.arc(n.x, n.y, NODE_RADIUS + 3, 0, Math.PI * 2);
+            }
             ctx.strokeStyle = "rgba(159, 79, 45, 0.35)";
             ctx.lineWidth = 2;
             ctx.stroke();
@@ -350,6 +363,12 @@ document.addEventListener("DOMContentLoaded", () => {
             ctx.restore();
         } else {
             ctx.fillText(title, n.x, n.y);
+        }
+
+        if (isTransition) {
+            ctx.fillStyle = "#3a785e";
+            ctx.font = "bold 10px " + FONT_FAMILY;
+            ctx.fillText("transition", n.x, n.y - NODE_RADIUS - 12);
         }
 
         // ID below circle

@@ -56,6 +56,7 @@ from app.tools.run_story_worker_local import (
     parse_choice_form,
     parse_llm_result,
     parse_scene_body_form,
+    parse_transition_node_form,
     parse_scene_extras_form,
     parse_scene_hooks_form,
     parse_scene_art_form,
@@ -68,11 +69,13 @@ from app.tools.run_story_worker_local import (
     repair_generation_candidate,
     validate_choice_draft,
     validate_scene_body_draft,
+    validate_transition_node_draft,
     validate_scene_hooks_draft,
     scene_body_issues_require_scene_plan_rewind,
     collect_scene_anchor_art_issues,
     load_or_create_normal_session,
     append_validation_attempt_log_record,
+    append_validation_attempt_run_separator,
     apply_normal_result,
     is_force_next_override,
     validate_choice_menu,
@@ -1678,6 +1681,71 @@ def test_apply_generation_allows_quick_merge_choice_target(tmp_path: Path) -> No
     assert created_choice["status"] == "fulfilled"
 
 
+def test_apply_generation_wraps_merge_choice_in_transition_node_when_requested(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed = client.post("/story/seed-opening-story").json()
+    assert seed["start_node_id"] >= 1
+
+    nodes = client.get("/story-nodes").json()
+    hand_node = next(node for node in nodes if node["title"] == "Five Thumbs")
+    velvet_node = next(node for node in nodes if node["title"] == "Silver Tracks")
+    frontier_item = next(item for item in client.get("/frontier").json() if item["from_node_id"] == hand_node["id"])
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "A Higher Detour",
+                "scene_summary": "The inspection rises briefly into a higher angle before flowing back into the older trail.",
+                "scene_text": "You climb the wet stem and catch the grooves again from above.",
+                "choices": [
+                    {
+                        "choice_text": "Drop back toward the silver tracks",
+                        "notes": "NEXT_NODE: you descend and recover the older trail. FURTHER_GOALS: merge this brief detour back into the silver-track line without teleporting.",
+                        "target_node_id": velvet_node["id"],
+                    }
+                ],
+                "transition_nodes": [
+                    {
+                        "choice_list_index": 0,
+                        "scene_title": "Back Down the Stem",
+                        "scene_summary": "You descend from the mushroom and pick up the older line of grooves again.",
+                        "scene_text": "You slide down the slick stem, cross the mossy roots, and recover the silver grooves just as the older trail opens ahead of you again.",
+                        "dialogue_lines": [
+                            {"speaker": "Narrator", "text": "You slide down the slick stem and recover the silver grooves."}
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["created_transition_nodes"]) == 1
+    transition_node = data["created_transition_nodes"][0]
+    assert transition_node["node_kind"] == "transition"
+    assert transition_node["auto_continue_to_node_id"] == velvet_node["id"]
+
+    created_choice = data["created_choices"][0]
+    assert created_choice["to_node_id"] == transition_node["id"]
+    assert created_choice["to_node_id"] != velvet_node["id"]
+
+    page = client.get(f"/play?branch_key=default&scene={transition_node['id']}")
+    assert page.status_code == 200
+    match = re.search(r'<script id="player-story-data" type="application/json">(.*?)</script>', page.text, re.S)
+    assert match is not None
+    player_data = json.loads(html.unescape(match.group(1)))
+    transition_scene = player_data["scenes"][str(transition_node["id"])]
+    assert transition_scene["node_kind"] == "transition"
+    assert transition_scene["auto_continue_to_scene"] == str(velvet_node["id"])
+    assert transition_scene["choices"] == []
+
+
 def test_apply_generation_rejects_invalid_candidate_without_partial_write(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/seed-opening-story")
@@ -3256,6 +3324,11 @@ def test_validate_scene_plan_draft_rejects_unknown_scene_cast_name_unless_declar
     )
     assert "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list." in scene_plan_prompt
 
+    link_nodes_template = build_form_template("link_nodes")
+    assert "TRANSITION_TITLE" in link_nodes_template
+    assert "TRANSITION_SUMMARY" in link_nodes_template
+    assert "This transition node must have no choices" in link_nodes_template
+
     resolution = {
         "character_name_map": {},
         "character_id_map": {},
@@ -3613,6 +3686,34 @@ def test_validation_attempt_log_includes_retry_index(tmp_path: Path) -> None:
 
     text = log_path.read_text(encoding="utf-8")
     assert "retry=2" in text
+
+
+def test_validation_attempt_log_includes_run_separator(tmp_path: Path) -> None:
+    log_path = tmp_path / "validation_attempts.md"
+    append_validation_attempt_run_separator(
+        log_path=log_path,
+        record={
+            "timestamp": "2026-04-15 07:30:00 PM",
+            "model": "test-model",
+            "run_mode": "normal",
+            "choice_id": 7,
+        },
+    )
+    append_validation_attempt_log_record(
+        log_path=log_path,
+        record={
+            "timestamp": "2026-04-15 07:30:01 PM",
+            "model": "test-model",
+            "step": "scene_body",
+            "issues": ["still bad"],
+            "attempted_output": "SCENE_BODY: NONE",
+        },
+    )
+
+    text = log_path.read_text(encoding="utf-8")
+    assert "-" * 72 in text
+    assert "run_mode=normal" in text
+    assert "choice_id=7" in text
 
 
 def test_build_step_prompt_includes_retry_line_on_retry() -> None:
@@ -5295,6 +5396,83 @@ def test_collect_ungrounded_local_prop_issues_allows_grounded_seam_phrase() -> N
             },
         },
         candidate=candidate,
+    )
+
+    assert issues == []
+
+
+def test_parse_and_validate_transition_node_form() -> None:
+    packet = {
+        "context_summary": {
+            "merge_candidates": [
+                {"node_id": 7, "title": "Silver Tracks", "summary": "The silver grooves lead toward the marked mushroom."}
+            ]
+        }
+    }
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Bridge Setup",
+                "SCENE_SUMMARY: A merge choice needs a bridge beat.",
+                "MATERIAL_CHANGE: The scene now routes back into an older lane through a connective passage.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "Narrator",
+                "You find the turn that will let this branch fold back into the older trail.",
+            ]
+        )
+    )
+    state = NormalRunConversationState(
+        scene_plan=scene_plan,
+        scene_body=scene_body,
+        choices=[
+            ChoiceDraft(
+                choice_text="Rejoin the silver tracks",
+                choice_class="progress",
+                next_node="You slip back toward the marked trail and pick up its older momentum.",
+                further_goals="Reconnect to the established investigation lane without a jarring jump.",
+                target_existing_node=7,
+            )
+        ],
+    )
+    transition = parse_transition_node_form(
+        raw_text="\n".join(
+            [
+                "TRANSITION_TITLE: Back to the Grooves",
+                "TRANSITION_SUMMARY: You climb down and thread through the roots until the old silver grooves come back into view.",
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You climb carefully down the damp stalk, keeping the patrol's attention above you until the ground rises to meet your boots again.",
+                "The silver grooves reappear between the mossy roots, and you angle toward them just as the older trail's pressure closes around you once more.",
+            ]
+        ),
+        choice_index=0,
+        target_existing_node=7,
+    )
+    resolution = {
+        "protagonist_id": 1,
+        "protagonist_name": "The Tall Gnome",
+        "character_name_map": {},
+        "character_id_map": {},
+        "encountered_names": {"the tall gnome"},
+    }
+
+    issues = validate_transition_node_draft(
+        packet=packet,
+        state=state,
+        draft=transition,
+        resolution=resolution,
     )
 
     assert issues == []

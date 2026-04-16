@@ -318,6 +318,8 @@ def bootstrap_database(database_path: str | Path) -> None:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
         _ensure_column(connection, "story_nodes", "dialogue_lines_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "story_nodes", "node_kind", "TEXT NOT NULL DEFAULT 'normal'")
+        _ensure_column(connection, "story_nodes", "auto_continue_to_node_id", "INTEGER")
         _ensure_column(connection, "story_node_present_entities", "offset_x_percent", "REAL NOT NULL DEFAULT 0")
         _ensure_column(connection, "story_node_present_entities", "offset_y_percent", "REAL NOT NULL DEFAULT 0")
         _ensure_column(connection, "assets", "display_class", "TEXT")

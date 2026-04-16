@@ -209,6 +209,12 @@ class StoryGraphService:
                 "node_id": node_id,
                 "title": node.get("title"),
                 "summary": node.get("summary"),
+                "node_kind": node.get("node_kind") or "normal",
+                "auto_continue_to_scene": (
+                    str(node["auto_continue_to_node_id"])
+                    if node.get("auto_continue_to_node_id") is not None
+                    else None
+                ),
                 "location": location_name or "Unknown",
                 "location_entity_id": int(current_location["entity_id"]) if current_location is not None else None,
                 "lines": self._decode_dialogue_lines(node),
@@ -272,6 +278,8 @@ class StoryGraphService:
         scene_text: str,
         summary: str | None,
         parent_node_id: int | None = None,
+        node_kind: str = "normal",
+        auto_continue_to_node_id: int | None = None,
         dialogue_lines: list[dict[str, Any]] | None = None,
         referenced_entities: list[dict[str, Any]] | None = None,
         present_entities: list[dict[str, Any]] | None = None,
@@ -279,10 +287,28 @@ class StoryGraphService:
     ) -> dict[str, Any]:
         cursor = self.connection.execute(
             """
-            INSERT INTO story_nodes (branch_key, parent_node_id, title, scene_text, summary, dialogue_lines_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO story_nodes (
+                branch_key,
+                parent_node_id,
+                title,
+                scene_text,
+                summary,
+                node_kind,
+                auto_continue_to_node_id,
+                dialogue_lines_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (branch_key, parent_node_id, title, scene_text.strip(), summary, json.dumps(dialogue_lines or [])),
+            (
+                branch_key,
+                parent_node_id,
+                title,
+                scene_text.strip(),
+                summary,
+                node_kind,
+                auto_continue_to_node_id,
+                json.dumps(dialogue_lines or []),
+            ),
         )
         node_id = cursor.lastrowid
         for entity in referenced_entities or []:
@@ -331,6 +357,33 @@ class StoryGraphService:
             (node_id,),
         )
         return node
+
+    def _clone_referenced_entities_for_node(self, node_id: int) -> list[dict[str, Any]]:
+        return fetch_all(
+            self.connection,
+            """
+            SELECT entity_type, entity_id, role
+            FROM node_entities
+            WHERE story_node_id = ?
+            ORDER BY id
+            """,
+            (node_id,),
+        )
+
+    def _clone_present_entities_for_node(self, node_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "entity_type": entity["entity_type"],
+                "entity_id": int(entity["entity_id"]),
+                "slot": entity["slot"],
+                "scale": entity.get("scale"),
+                "offset_x_percent": entity.get("offset_x_percent", 0.0),
+                "offset_y_percent": entity.get("offset_y_percent", 0.0),
+                "focus": bool(entity.get("focus", False)),
+                "hidden_on_lines": list(entity.get("hidden_on_lines", [])),
+            }
+            for entity in self._list_present_entities(node_id)
+        ]
 
     def list_lineage_node_ids(self, node_id: int) -> list[int]:
         lineage: list[int] = []
@@ -921,6 +974,10 @@ class StoryGraphService:
                 commit=False,
             )
             new_node_id = int(node["id"])
+            transition_specs_by_choice_index = {
+                int(spec.choice_list_index): spec
+                for spec in candidate.transition_nodes
+            }
 
             if choice_id is not None:
                 self.connection.execute(
@@ -933,7 +990,8 @@ class StoryGraphService:
                 )
 
             created_choices: list[dict[str, Any]] = []
-            for choice in candidate.choices:
+            created_transition_nodes: list[dict[str, Any]] = []
+            for choice_index, choice in enumerate(candidate.choices):
                 target_node_id = choice.target_node_id
                 if target_node_id is not None:
                     target_node = self.get_story_node(target_node_id)
@@ -941,15 +999,41 @@ class StoryGraphService:
                         raise ValueError(f"Unknown merge target node id: {target_node_id}")
                     if target_node["branch_key"] != request_branch_key:
                         raise ValueError("Merged choice target must belong to the same branch.")
+                applied_target_node_id = target_node_id
+                transition_spec = transition_specs_by_choice_index.get(choice_index)
+                if target_node_id is not None and transition_spec is not None:
+                    transition_node = self.create_story_node(
+                        branch_key=request_branch_key,
+                        title=transition_spec.scene_title,
+                        scene_text=transition_spec.scene_text,
+                        summary=transition_spec.scene_summary,
+                        parent_node_id=new_node_id,
+                        node_kind="transition",
+                        auto_continue_to_node_id=target_node_id,
+                        dialogue_lines=[line.model_dump() for line in transition_spec.dialogue_lines],
+                        referenced_entities=(
+                            [reference.model_dump() for reference in transition_spec.entity_references]
+                            if transition_spec.entity_references
+                            else self._clone_referenced_entities_for_node(new_node_id)
+                        ),
+                        present_entities=(
+                            [entity.model_dump() for entity in transition_spec.scene_present_entities]
+                            if transition_spec.scene_present_entities
+                            else self._clone_present_entities_for_node(new_node_id)
+                        ),
+                        commit=False,
+                    )
+                    created_transition_nodes.append(transition_node)
+                    applied_target_node_id = int(transition_node["id"])
                 created_choices.append(
                     self.create_choice(
                         from_node_id=new_node_id,
                         choice_text=choice.choice_text,
-                        to_node_id=target_node_id,
+                        to_node_id=applied_target_node_id,
                         status=(
                             "closed"
-                            if choice.choice_class == "ending" and target_node_id is None
-                            else "fulfilled" if target_node_id is not None else "open"
+                            if choice.choice_class == "ending" and applied_target_node_id is None
+                            else "fulfilled" if applied_target_node_id is not None else "open"
                         ),
                         notes=(
                             json.dumps(
@@ -959,10 +1043,13 @@ class StoryGraphService:
                                     "choice_class": choice.choice_class,
                                     "ending_category": choice.ending_category,
                                     "target_node_id": target_node_id,
+                                    "transition_node_id": (
+                                        applied_target_node_id if transition_spec is not None else None
+                                    ),
                                 }
                             )
                             if choice.required_affordances or choice.notes
-                            or target_node_id is not None
+                            or applied_target_node_id is not None
                             or choice.choice_class is not None
                             or choice.ending_category is not None
                             else None
@@ -1174,6 +1261,7 @@ class StoryGraphService:
         return {
             "node": applied_node,
             "created_choices": created_choices,
+            "created_transition_nodes": [self.get_story_node(int(node["id"])) for node in created_transition_nodes],
             "fulfilled_choice_id": choice_id,
         }
 

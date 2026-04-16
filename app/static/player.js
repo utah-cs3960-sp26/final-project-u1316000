@@ -237,6 +237,10 @@ function finishScene() {
         renderChoices();
         return;
     }
+    if (scene.auto_continue_to_scene) {
+        startScene(scene.auto_continue_to_scene);
+        return;
+    }
 
     continueButton.disabled = true;
     continueButton.textContent = "End";
