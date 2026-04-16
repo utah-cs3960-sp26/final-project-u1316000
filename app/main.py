@@ -545,6 +545,12 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 "parent_node_id": node.get("parent_node_id"),
                 "node_kind": node.get("node_kind") or "normal",
                 "auto_continue_to_node_id": node.get("auto_continue_to_node_id"),
+                "self_merge_transition": (
+                    (node.get("node_kind") or "normal") == "transition"
+                    and node.get("auto_continue_to_node_id") is not None
+                    and node.get("parent_node_id") is not None
+                    and int(node["auto_continue_to_node_id"]) == int(node["parent_node_id"])
+                ),
                 "background_url": bg_url,
                 "choice_count": len(node.get("choices", [])),
             })

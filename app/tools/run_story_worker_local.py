@@ -161,6 +161,7 @@ class ChoiceDraft(BaseModel):
     further_goals: str
     ending_category: EndingCategory | None = None
     target_existing_node: int | None = None
+    target_current_node: bool = False
 
 
 class SceneExtrasDraft(BaseModel):
@@ -189,7 +190,8 @@ class SceneArtDraft(BaseModel):
 
 class TransitionNodeDraft(BaseModel):
     choice_index: int = Field(ge=0)
-    target_existing_node: int = Field(ge=1)
+    target_existing_node: int | None = Field(default=None, ge=1)
+    target_current_node: bool = False
     scene_title: str | None = None
     scene_summary: str
     body: SceneBodyDraft
@@ -304,7 +306,7 @@ NORMAL_STEP_LABELS: dict[str, list[str]] = {
         "NEXT_NODE",
         "FURTHER_GOALS",
         "ENDING_CATEGORY",
-        "TARGET_EXISTING_NODE",
+        "TARGETED_NODE",
     ],
     "link_nodes": [
         "TRANSITION_TITLE",
@@ -543,6 +545,10 @@ def infer_choice_class_from_text(choice_text: str, notes: str | None) -> str:
 
 def choice_is_location_transition(choice: ChoiceDraft) -> bool:
     return choice.choice_class == "location_transition"
+
+
+def choice_targets_current_node(choice: Any) -> bool:
+    return bool(getattr(choice, "target_current_node", False))
 
 
 def choice_text_implies_consequence(value: str) -> bool:
@@ -1269,7 +1275,7 @@ def build_form_template(step: str) -> str:
             "NEXT_NODE: <string> | Specific immediate result the next scene should deliver.\n"
             "FURTHER_GOALS: <string> | Broader medium-range direction for the branch.\n"
             "ENDING_CATEGORY: <one of: death, dead_end, capture, transformation, hub_return, NONE> | Use a non-NONE ending category when this choice is a real closure path.\n"
-            "TARGET_EXISTING_NODE: <existing node id for a deliberate merge/hub return, or NONE> | Use this when the choice is intentionally merging or routing back into an existing node."
+            "TARGETED_NODE: <existing node id for a deliberate merge/hub return, this_node for a self-merge inspection loop, or NONE> | Use an id when the choice intentionally merges into an existing node. Use this_node for a brief inspection elaboration that returns to the same menu node through a hidden transition beat."
         )
     if step == "link_nodes":
         return (
@@ -1291,7 +1297,7 @@ def build_form_template(step: str) -> str:
             "Examples: @show 1 | @show: 1 | @show1 | @show 1,2 | @hide 2 | @show_only 1n | @show_all | @hide_all"
             "Fill this exact label form:\n"
             "TRANSITION_TITLE: <string or NONE> | Optional short title for the hidden bridge node.\n"
-            "TRANSITION_SUMMARY: <string> | 1-2 sentence summary of how this merge bridge connects the current choice into the target node.\n"
+            "TRANSITION_SUMMARY: <string> | 1-2 sentence summary of how this bridge connects the current choice into its target. For self-merges, this should be a local elaboration beat that returns to the same menu node.\n"
             "SCENE_SETTINGS: <setting lines or NONE> | Optional. Omit SCENE_SETTINGS entirely to use default scene-body settings, or write SCENE_SETTINGS: NONE.\n"
             "SCENE_BODY: <script> | Write the hidden bridge scene here using the same newline-based scene-body format as normal scenes. This transition node must have no choices; it should simply lead smoothly into the target node."
         )
@@ -1427,6 +1433,22 @@ def parse_optional_leading_int(value: str) -> int | None:
     return int(match.group(1))
 
 
+def normalize_choice_target_label(raw_text: str) -> str:
+    return re.sub(r"(?m)^TARGET_EXISTING_NODE:\s*", "TARGETED_NODE: ", raw_text)
+
+
+def parse_choice_target(value: str) -> tuple[int | None, bool]:
+    cleaned = parse_none_text(value or "")
+    if cleaned is None:
+        return None, False
+    if cleaned.strip().lower() == "this_node":
+        return None, True
+    match = re.match(r"^\s*(\d+)", cleaned)
+    if match is None:
+        raise ValueError("TARGETED_NODE must be an existing node id, this_node, or NONE.")
+    return int(match.group(1)), False
+
+
 def parse_comma_list(value: str) -> list[str]:
     cleaned = parse_none_text(value)
     if cleaned is None:
@@ -1520,16 +1542,22 @@ def build_forced_choice_draft(
 def build_forced_transition_node_draft(
     *,
     choice_index: int,
-    target_existing_node: int,
+    target_existing_node: int | None,
+    target_current_node: bool = False,
 ) -> TransitionNodeDraft:
     body_text = (
-        "You move through the missing connective beat here. FORCE NEXT inserted a hidden bridge so this merge can still preview cleanly."
+        "You move through the missing connective beat here. FORCE NEXT inserted a hidden bridge so this transition can still preview cleanly."
     )
     return TransitionNodeDraft(
         choice_index=choice_index,
         target_existing_node=target_existing_node,
+        target_current_node=target_current_node,
         scene_title="Forced Preview Bridge",
-        scene_summary="A hidden transition node carries the player smoothly into the merge target during preview navigation.",
+        scene_summary=(
+            "A hidden transition node carries the player smoothly into the target during preview navigation."
+            if not target_current_node
+            else "A hidden transition node briefly elaborates the inspection and then returns to the same menu node during preview navigation."
+        ),
         body=SceneBodyDraft(
             settings=SceneSettingsDraft(),
             raw_body=body_text,
@@ -1839,7 +1867,13 @@ def parse_scene_body_form(raw_text: str) -> SceneBodyDraft:
     )
 
 
-def parse_transition_node_form(*, raw_text: str, choice_index: int, target_existing_node: int) -> TransitionNodeDraft:
+def parse_transition_node_form(
+    *,
+    raw_text: str,
+    choice_index: int,
+    target_existing_node: int | None,
+    target_current_node: bool = False,
+) -> TransitionNodeDraft:
     sections = parse_labeled_sections(strip_markdown_fences(raw_text).strip(), NORMAL_STEP_LABELS["link_nodes"])
     body = SceneBodyDraft(
         settings=parse_scene_settings(sections["SCENE_SETTINGS"]),
@@ -1849,6 +1883,7 @@ def parse_transition_node_form(*, raw_text: str, choice_index: int, target_exist
     return TransitionNodeDraft(
         choice_index=choice_index,
         target_existing_node=target_existing_node,
+        target_current_node=target_current_node,
         scene_title=parse_none_text(sections["TRANSITION_TITLE"]),
         scene_summary=sections["TRANSITION_SUMMARY"].strip(),
         body=body,
@@ -1856,14 +1891,16 @@ def parse_transition_node_form(*, raw_text: str, choice_index: int, target_exist
 
 
 def parse_choice_form(raw_text: str) -> ChoiceDraft:
-    sections = parse_labeled_sections(raw_text, NORMAL_STEP_LABELS["choice"])
+    sections = parse_labeled_sections(normalize_choice_target_label(raw_text), NORMAL_STEP_LABELS["choice"])
+    target_existing_node, target_current_node = parse_choice_target(sections["TARGETED_NODE"])
     return ChoiceDraft(
         choice_text=sections["CHOICE_TEXT"].strip(),
         choice_class=cast(ChoiceClass, sections["CHOICE_CLASS"].strip()),
         next_node=sections["NEXT_NODE"].strip(),
         further_goals=sections["FURTHER_GOALS"].strip(),
         ending_category=cast(EndingCategory | None, parse_none_text(sections["ENDING_CATEGORY"])),
-        target_existing_node=parse_optional_leading_int(sections["TARGET_EXISTING_NODE"]),
+        target_existing_node=target_existing_node,
+        target_current_node=target_current_node,
     )
 
 
@@ -2253,7 +2290,7 @@ def build_frontier_constraint_block(packet: dict[str, Any]) -> str:
     ]
     if constraints.get("must_include_merge_or_closure"):
         lines.append("- include at least one merge or closure path in this scene")
-        lines.append("- THIS RUN WILL ONLY VALIDATE if at least one choice uses TARGET_EXISTING_NODE to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure")
+        lines.append("- THIS RUN WILL ONLY VALIDATE if at least one choice uses TARGETED_NODE with an existing node id to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure")
         lines.append("- you will apply that merge/closure requirement during the choice creation steps")
     lines.append(f"- allow at most {max_fresh_choices} fresh branch choice(s) in this scene under pressure")
     if constraints.get("inspection_choices_should_reconverge_under_pressure"):
@@ -2276,7 +2313,7 @@ def build_step_prompt(
     choice_index: int | None = None,
     optional_choice: bool = False,
     detail_target: tuple[Literal["character", "location"], str] | None = None,
-    transition_target: tuple[int, int] | None = None,
+    transition_target: tuple[int, int | None, bool] | None = None,
     retry_index: int = 0,
 ) -> str:
     issue_block = ""
@@ -2419,10 +2456,10 @@ def build_step_prompt(
                 f"If the scene should stay at {prior_count_text}, reply with only END.\n"
             )
         merge_or_closure_instruction = (
-            "MAKE this choice either a merge or a closure. THIS RUN WILL ONLY VALIDATE if this choice uses TARGET_EXISTING_NODE for a deliberate merge into an existing node or uses a non-NONE ENDING_CATEGORY for a true closure.\n"
+            "MAKE this choice either a merge or a closure. THIS RUN WILL ONLY VALIDATE if this choice uses TARGETED_NODE with an existing node id for a deliberate merge into an existing node or uses a non-NONE ENDING_CATEGORY for a true closure.\n"
             "Fix that here in this choice-writing phase, not earlier and not later.\n"
             if merge_or_closure_required_now
-            else "TARGET_EXISTING_NODE should be NONE unless this is a deliberate merge or hub return.\n"
+            else "TARGETED_NODE should be NONE unless this is a deliberate merge, hub return, or self-merge inspection loop.\n"
         )
         return (
             f"{issue_block}"
@@ -2440,6 +2477,8 @@ def build_step_prompt(
             f"{location_transition_note}"
             "Allowed CHOICE_CLASS values are only: inspection, progress, commitment, location_transition, ending.\n"
             "If the move is socially bold, urgent, or otherwise strongly consequential, usually use CHOICE_CLASS: commitment rather than inventing a new class label.\n"
+            "TARGETED_NODE may be an existing node id for a deliberate merge, this_node for a brief inspection elaboration that loops back to the same menu node, or NONE.\n"
+            "Use this_node only for local inspection elaboration. Do not use it for travel, major commitment, closure, or every choice in the menu. At least one option should still lead outward.\n"
             f"{merge_or_closure_instruction}"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
             f"{build_form_template('choice')}"
@@ -2454,7 +2493,7 @@ def build_step_prompt(
             f"{retry_block}"
             f"{frontier_constraint_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
-            "Reminder: if frontier pressure required a merge or closure path, this run only validates if one of your choices already used TARGET_EXISTING_NODE for a deliberate merge or a non-NONE ENDING_CATEGORY for a real closure.\n"
+            "Reminder: if frontier pressure required a merge or closure path, this run only validates if one of your choices already used TARGETED_NODE with an existing node id for a deliberate merge or a non-NONE ENDING_CATEGORY for a real closure.\n"
             "Has your scene text introduced any new unknowns, mysteries, tensions, or behind-the-scenes threads that should matter later?\n"
             "If yes, fill out the hook or clue fields below. If not, reply with only END to skip this step entirely.\n"
             "Hooks are the larger story threads that should pay off later. Clue tags and state tags are the smaller-scale things this scene newly reveals or makes true.\n"
@@ -2463,18 +2502,38 @@ def build_step_prompt(
         )
     if step_name == "link_nodes":
         assert transition_target is not None
-        choice_list_index, target_node_id = transition_target
+        choice_list_index, target_node_id, target_current_node = transition_target
         linked_choice = state.choices[choice_list_index]
-        target_node = next(
-            (
-                candidate
-                for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or [])
-                if int(candidate.get("node_id") or 0) == target_node_id
-            ),
-            None,
+        target_node = None
+        target_title = "this node"
+        target_summary = "Return to the same newly created menu node after a brief local elaboration."
+        if not target_current_node:
+            target_node = next(
+                (
+                    candidate
+                    for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or [])
+                    if int(candidate.get("node_id") or 0) == target_node_id
+                ),
+                None,
+            )
+            target_title = str((target_node or {}).get("title") or f"Node {target_node_id}").strip()
+            target_summary = str((target_node or {}).get("summary") or "No target summary available.").strip()
+        transition_intro = (
+            "Write a hidden transition node that briefly elaborates this inspection choice and then returns to the same menu node.\n"
+            "This bridge node has no choices. The player should experience it as a seamless connective beat and then continue directly back into the current node.\n"
+            if target_current_node
+            else
+            "Write a hidden transition node that bridges this merge choice into its target existing node.\n"
+            "This bridge node has no choices. The player should experience it as a seamless connective beat and then continue directly into the target node.\n"
         )
-        target_title = str((target_node or {}).get("title") or f"Node {target_node_id}").strip()
-        target_summary = str((target_node or {}).get("summary") or "No target summary available.").strip()
+        transition_outro = (
+            "Do not let this become a major relocation or scene reset. Keep it local, specific, and modest so returning to the same menu still makes sense.\n"
+            "Do not add choices here. End at the natural handoff back into the same node.\n"
+            if target_current_node
+            else
+            "Do not teleport abruptly. Show the connective motion, exchange, realization, or arrival that makes the merge feel earned.\n"
+            "Do not add choices here. End at the natural handoff into the target node.\n"
+        )
         return (
             f"{issue_block}"
             f"{scene_plan_summary}"
@@ -2483,15 +2542,13 @@ def build_step_prompt(
             f"Step: link_nodes for choice_{choice_list_index + 1}\n"
             f"{retry_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
-            "Write a hidden transition node that bridges this merge choice into its target existing node.\n"
-            "This bridge node has no choices. The player should experience it as a seamless connective beat and then continue directly into the target node.\n"
+            f"{transition_intro}"
             f"Choice to bridge: {linked_choice.choice_text}\n"
             f"Choice NEXT_NODE: {linked_choice.next_node}\n"
-            f"Target existing node id: {target_node_id}\n"
+            f"Target existing node id: {target_node_id if target_node_id is not None else 'THIS_NODE'}\n"
             f"Target title: {target_title}\n"
             f"Target summary: {target_summary}\n"
-            "Do not teleport abruptly. Show the connective motion, exchange, realization, or arrival that makes the merge feel earned.\n"
-            "Do not add choices here. End at the natural handoff into the target node.\n"
+            f"{transition_outro}"
             "You may use the same scene-body scripting format here, including Narrator, speaker lines, and visibility commands.\n"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
             f"{build_form_template('link_nodes')}"
@@ -3087,15 +3144,17 @@ def validate_transition_node_draft(
         issues.append(f"Transition bridge references unknown choice index {draft.choice_index + 1}.")
         return issues
     attached_choice = state.choices[draft.choice_index]
-    if attached_choice.target_existing_node is None:
-        issues.append("Transition bridges can only be written for choices that already merge into an existing node.")
+    if attached_choice.target_existing_node is None and not attached_choice.target_current_node:
+        issues.append("Transition bridges can only be written for choices that already merge into an existing node or self-merge back into this_node.")
         return issues
+    if attached_choice.target_current_node != draft.target_current_node:
+        issues.append("Transition bridge target type does not match the accepted target for this choice.")
     if attached_choice.target_existing_node != draft.target_existing_node:
         issues.append("Transition bridge target does not match the accepted merge target for this choice.")
     if not draft.scene_summary.strip():
         issues.append("TRANSITION_SUMMARY cannot be empty.")
     if len((draft.scene_summary or "").split()) < 8:
-        issues.append("TRANSITION_SUMMARY should explain how this bridge reaches the target node, not just name it.")
+        issues.append("TRANSITION_SUMMARY should explain how this bridge reaches its target, not just name it.")
 
     transition_packet = dict(packet)
     transition_packet["isolation_pressure"] = {"active": False}
@@ -3113,16 +3172,23 @@ def validate_transition_node_draft(
     )
 
     target_summary = ""
-    for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or []):
-        if int(candidate.get("node_id") or 0) == draft.target_existing_node:
-            target_summary = str(candidate.get("summary") or "").strip()
-            break
+    if draft.target_existing_node is not None:
+        for candidate in ((packet.get("context_summary") or {}).get("merge_candidates") or []):
+            if int(candidate.get("node_id") or 0) == draft.target_existing_node:
+                target_summary = str(candidate.get("summary") or "").strip()
+                break
     compiled, _ = compile_scene_body_draft(state=state, draft=draft.body, resolution=resolution)
     transition_text = compiled.scene_text if compiled is not None else draft.body.raw_body
     if target_summary and texts_are_near_duplicates(transition_text, target_summary):
         issues.append("Transition bridge SCENE_BODY is too close to the merge target summary. Show the connective movement into that node instead of restating it.")
     if attached_choice.next_node and texts_are_near_duplicates(transition_text, attached_choice.next_node):
         issues.append("Transition bridge SCENE_BODY is too close to this choice's NEXT_NODE. Dramatize the connective beat instead of paraphrasing the handoff.")
+    if draft.target_current_node:
+        self_merge_text = " ".join(filter(None, [draft.scene_summary, transition_text])).lower()
+        if any(pattern.search(self_merge_text) for pattern in SCENE_TRANSITION_CUE_PATTERNS):
+            issues.append(
+                "Self-merge transition nodes must stay local and modest. Do not stage a major travel, arrival, or relocation beat if the bridge returns to this_node."
+            )
     return issues
 
 
@@ -3233,6 +3299,8 @@ def collect_choice_target_issues(
     draft: ChoiceDraft,
 ) -> list[str]:
     issues: list[str] = []
+    if draft.target_current_node:
+        return issues
     if draft.target_existing_node is None:
         return issues
     merge_candidates = ((packet.get("context_summary") or {}).get("merge_candidates") or [])
@@ -3243,8 +3311,8 @@ def collect_choice_target_issues(
     }
     if int(draft.target_existing_node) not in allowed_target_ids:
         issues.append(
-            f"TARGET_EXISTING_NODE {draft.target_existing_node} is not a valid merge candidate for this branch right now. "
-            "Use one of the listed merge candidate node ids or set TARGET_EXISTING_NODE to NONE."
+            f"TARGETED_NODE {draft.target_existing_node} is not a valid merge candidate for this branch right now. "
+            "Use one of the listed merge candidate node ids, set TARGETED_NODE to this_node for a self-merge inspection loop, or set TARGETED_NODE to NONE."
         )
     return issues
 
@@ -3265,13 +3333,17 @@ def collect_frontier_choice_shape_issues(
     allow_second_fresh = bool(constraints.get("allow_second_fresh_choice_only_for_bloom_scenes"))
     bloom_scene_candidate = bool(packet.get("is_bloom_scene_candidate"))
 
-    fresh_choices = [choice for choice in choices if choice.target_existing_node is None and choice.ending_category is None]
+    fresh_choices = [
+        choice
+        for choice in choices
+        if choice.target_existing_node is None and not choice.target_current_node and choice.ending_category is None
+    ]
     if len(fresh_choices) > default_max_fresh and not (
         allow_second_fresh and bloom_scene_candidate and len(fresh_choices) == default_max_fresh + 1
     ):
         issues.append(
             f"Frontier pressure only allows {default_max_fresh} fresh branch choice(s) in this run. "
-            "Use TARGET_EXISTING_NODE for a merge or a non-NONE ENDING_CATEGORY for a closure instead of opening another fresh leaf."
+            "Use TARGETED_NODE with an existing node id for a merge or a non-NONE ENDING_CATEGORY for a closure instead of opening another fresh leaf."
         )
 
     inspection_fresh_choices = []
@@ -3280,13 +3352,18 @@ def collect_frontier_choice_shape_issues(
             choice.choice_text,
             f"NEXT_NODE: {choice.next_node} FURTHER_GOALS: {choice.further_goals}",
         )
-        if inferred_class == "inspection" and choice.target_existing_node is None and choice.ending_category is None:
+        if (
+            inferred_class == "inspection"
+            and choice.target_existing_node is None
+            and not choice.target_current_node
+            and choice.ending_category is None
+        ):
             inspection_fresh_choices.append(choice)
     if inspection_fresh_choices:
         choice_labels = ", ".join(f"'{choice.choice_text}'" for choice in inspection_fresh_choices[:3])
         issues.append(
             "Inspection choices cannot open durable fresh leaves under frontier pressure. "
-            f"Make {choice_labels} reconverge with TARGET_EXISTING_NODE, turn it into a closure, or rewrite it as a materially different move."
+            f"Make {choice_labels} reconverge with TARGETED_NODE, turn it into a closure, or rewrite it as a materially different move."
         )
     return issues
 
@@ -3443,6 +3520,22 @@ def validate_choice_draft(
         issues.append("ENDING_CATEGORY is required when CHOICE_CLASS is ending.")
     if draft.choice_class != "ending" and draft.ending_category is not None:
         issues.append("ENDING_CATEGORY should be NONE unless CHOICE_CLASS is ending.")
+    if draft.target_current_node and draft.target_existing_node is not None:
+        issues.append("TARGETED_NODE cannot name both an existing node id and this_node.")
+    if draft.target_current_node:
+        combined_choice_text = " ".join(filter(None, [draft.choice_text, draft.next_node, draft.further_goals]))
+        inferred_from_text = infer_choice_class_from_text(
+            draft.choice_text,
+            f"NEXT_NODE: {draft.next_node} FURTHER_GOALS: {draft.further_goals}",
+        )
+        if draft.choice_class != "inspection":
+            issues.append("TARGETED_NODE: this_node is only allowed for CHOICE_CLASS: inspection in this v1.")
+        elif inferred_from_text != "inspection":
+            issues.append(
+                "TARGETED_NODE: this_node is only for brief local inspection elaboration. This choice currently reads like travel, commitment, or another outward move."
+            )
+        if choice_text_implies_consequence(combined_choice_text) and inferred_from_text != "inspection":
+            issues.append("TARGETED_NODE: this_node cannot be used for major commitment, closure, travel, or merge-style moves.")
     issues.extend(collect_choice_grounding_issues(packet=packet, state=state, draft=draft))
     issues.extend(collect_choice_target_issues(packet=packet, draft=draft))
     merge_or_closure_required_now = bool(
@@ -3450,7 +3543,7 @@ def validate_choice_draft(
     )
     if merge_or_closure_required_now and draft.target_existing_node is None and draft.ending_category is None:
         issues.append(
-            "Frontier pressure is active. choice_1 must either use TARGET_EXISTING_NODE for a deliberate merge into an existing node or use a non-NONE ENDING_CATEGORY for a real closure."
+            "Frontier pressure is active. choice_1 must either use TARGETED_NODE with an existing node id for a deliberate merge into an existing node or use a non-NONE ENDING_CATEGORY for a real closure."
         )
     inferred_choice_class = draft.choice_class or infer_choice_class_from_text(
         draft.choice_text,
@@ -3460,11 +3553,12 @@ def validate_choice_draft(
         (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
         and inferred_choice_class == "inspection"
         and draft.target_existing_node is None
+        and not draft.target_current_node
         and draft.ending_category is None
     ):
         issues.append(
             "Under frontier pressure, an inspection choice cannot open a durable fresh leaf. "
-            "Use TARGET_EXISTING_NODE to merge it, give it a real ENDING_CATEGORY closure, or rewrite it as a materially different move."
+            "Use TARGETED_NODE to merge it, TARGETED_NODE: this_node for a brief self-merge elaboration, give it a real ENDING_CATEGORY closure, or rewrite it as a materially different move."
         )
     return issues
 
@@ -3494,13 +3588,23 @@ def validate_choice_menu(
     if repeated_action_family in {"inspect", "follow", "touch", "step_back"} and repeated_action_count >= 3:
         if choices and not any(choice_breaks_repeated_action_pattern(choice) for choice in choices):
             issues.append(
-                f"This branch has been overusing the '{repeated_action_family}' action family. At least one choice in this menu must break that pattern with a social turn, location shift, merge using TARGET_EXISTING_NODE, closure using ENDING_CATEGORY, or another materially different move."
+                f"This branch has been overusing the '{repeated_action_family}' action family. At least one choice in this menu must break that pattern with a social turn, location shift, merge using TARGETED_NODE, closure using ENDING_CATEGORY, or another materially different move."
             )
 
     if len(choices) >= 2 and ((packet.get("consequential_choice_requirement") or {}).get("required")):
         if not any(choice_draft_counts_as_consequential(choice) for choice in choices):
             issues.append(
                 "At least one choice in this menu must be a commitment, social move, location shift, merge, closure, or immediate-pressure response."
+            )
+
+    if any(choice.target_current_node for choice in choices):
+        if len(choices) <= 1:
+            issues.append(
+                "A single-choice scene cannot use TARGETED_NODE: this_node. Self-merges are only allowed when the menu still leaves at least one non-self-merge way forward."
+            )
+        elif all(choice.target_current_node for choice in choices):
+            issues.append(
+                "This menu cannot make every choice TARGETED_NODE: this_node. Keep at least one option that leads outward instead of looping back into the same node."
             )
 
     location_stall_pressure = packet.get("location_stall_pressure") or {}
@@ -3802,6 +3906,7 @@ def assemble_generation_candidate_from_state(
             choice_class=choice.choice_class,
             ending_category=choice.ending_category,
             target_node_id=choice.target_existing_node,
+            target_current_node=choice.target_current_node,
         )
         for choice in state.choices
     ]
@@ -3821,6 +3926,8 @@ def assemble_generation_candidate_from_state(
                 scene_summary=transition.scene_summary,
                 scene_text=compiled_transition_body.scene_text,
                 dialogue_lines=compiled_transition_body.dialogue_lines,
+                target_node_id=transition.target_existing_node,
+                target_current_node=transition.target_current_node,
             )
         )
 
@@ -4761,7 +4868,7 @@ def run_normal_conversational_builder(
 
     state.transition_nodes = []
     for merge_choice_index, merge_choice in enumerate(state.choices):
-        if merge_choice.target_existing_node is None:
+        if merge_choice.target_existing_node is None and not merge_choice.target_current_node:
             continue
         transition_issues: list[str] | None = None
         accepted_transition: TransitionNodeDraft | None = None
@@ -4773,14 +4880,15 @@ def run_normal_conversational_builder(
                     state=state,
                     requested_choice_count=args.requested_choice_count,
                     issues=transition_issues,
-                    transition_target=(merge_choice_index, int(merge_choice.target_existing_node)),
+                    transition_target=(merge_choice_index, merge_choice.target_existing_node, merge_choice.target_current_node),
                     retry_index=attempt,
                 )
             )
             if args.author_mode == "human" and is_force_next_override(raw_transition):
                 accepted_transition = build_forced_transition_node_draft(
                     choice_index=merge_choice_index,
-                    target_existing_node=int(merge_choice.target_existing_node),
+                    target_existing_node=merge_choice.target_existing_node,
+                    target_current_node=merge_choice.target_current_node,
                 )
                 mark_force_next_step(state, f"link_nodes:{merge_choice_index + 1}")
                 break
@@ -4788,7 +4896,8 @@ def run_normal_conversational_builder(
                 draft = parse_transition_node_form(
                     raw_text=raw_transition,
                     choice_index=merge_choice_index,
-                    target_existing_node=int(merge_choice.target_existing_node),
+                    target_existing_node=merge_choice.target_existing_node,
+                    target_current_node=merge_choice.target_current_node,
                 )
                 transition_issues = validate_transition_node_draft(
                     packet=packet,

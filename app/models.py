@@ -247,6 +247,7 @@ class GeneratedChoice(BaseModel):
     ending_category: EndingCategory | None = None
     required_affordances: list[str] = Field(default_factory=list)
     target_node_id: int | None = None
+    target_current_node: bool = False
 
 
 class HookProposal(BaseModel):
@@ -360,6 +361,8 @@ class TransitionNodeSpec(BaseModel):
     dialogue_lines: list[DialogueLine] = Field(default_factory=list)
     entity_references: list[EntityReference] = Field(default_factory=list)
     scene_present_entities: list[ScenePresentEntity] = Field(default_factory=list)
+    target_node_id: int | None = None
+    target_current_node: bool = False
 
 
 class GenerationCandidate(BaseModel):

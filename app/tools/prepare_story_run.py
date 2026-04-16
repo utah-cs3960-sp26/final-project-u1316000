@@ -461,6 +461,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Do not create more than 5 choices on any scene node.",
         "Every choice must include planning notes in the form `NEXT_NODE: ... FURTHER_GOALS: ...`.",
         "Use choice_class when helpful: inspection, progress, commitment, location_transition, or ending.",
+        "For brief inspection elaboration that should loop back to the same menu node, you may use TARGETED_NODE: this_node and then write a hidden transition bridge. Do not make every choice a self-merge.",
         "Inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.",
         "When location_stall_pressure is active, satisfy it in the menu by including at least one `location_transition` choice rather than teleporting the current scene.",
         "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
@@ -558,7 +559,7 @@ def build_author_warnings(
     if frontier_choice_constraints.get("must_include_merge_or_closure"):
         warnings.append("This scene must include at least one merge or closure path.")
         warnings.append(
-            "This run will ONLY validate if at least one choice uses TARGET_EXISTING_NODE to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure."
+            "This run will ONLY validate if at least one choice uses TARGETED_NODE with an existing node id to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure."
         )
         warnings.append(
             "You will be able to apply that merge/closure requirement during the choice creation phase."
@@ -1209,7 +1210,8 @@ def build_normal_packet(
             "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it. "
             "Answer only the requested form for the current step. Do not emit JSON in normal mode. "
             "If consequential_choice_requirement.required is true and you return multiple choices, make sure at least one option is a commitment, social move, location shift, merge, closure, or immediate-pressure response. "
-            "When frontier_choice_constraints requires a merge or closure path, this run will only validate if at least one choice uses TARGET_EXISTING_NODE to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure. "
+            "For brief local inspection elaboration, you may use TARGETED_NODE: this_node so a hidden transition beat can loop back into the same menu node. Use that for inspection only, not for every choice, and keep at least one outward option. "
+            "When frontier_choice_constraints requires a merge or closure path, this run will only validate if at least one choice uses TARGETED_NODE with an existing node id to merge into an existing node or uses a non-NONE ENDING_CATEGORY for a real closure. "
             "You will be able to satisfy that requirement during the choice creation phase. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "

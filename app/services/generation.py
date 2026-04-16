@@ -323,17 +323,34 @@ class LLMGenerationService:
                 continue
             seen_transition_choice_indexes.add(transition.choice_list_index)
             attached_choice = candidate.choices[transition.choice_list_index]
-            if attached_choice.target_node_id is None:
+            if attached_choice.target_node_id is None and not attached_choice.target_current_node:
                 issues.append(
-                    f"Transition node for choice '{attached_choice.choice_text}' is invalid because that choice does not merge into an existing node."
+                    f"Transition node for choice '{attached_choice.choice_text}' is invalid because that choice does not merge into an existing node or self-merge back into the current node."
+                )
+            if transition.target_current_node and not attached_choice.target_current_node:
+                issues.append(
+                    f"Transition node for choice '{attached_choice.choice_text}' does not match that choice's target_current_node setting."
+                )
+            if transition.target_node_id is not None and transition.target_node_id != attached_choice.target_node_id:
+                issues.append(
+                    f"Transition node for choice '{attached_choice.choice_text}' does not match that choice's target_node_id."
                 )
             if len((transition.scene_text or "").split()) < 12:
                 issues.append(
                     f"Transition node for choice '{attached_choice.choice_text}' is too thin. Write a real bridging beat, not a fragment."
                 )
+            if attached_choice.target_current_node:
+                choice_class = self._resolve_choice_class(attached_choice)
+                if choice_class != "inspection":
+                    issues.append(
+                        f"Choice '{attached_choice.choice_text}' uses target_current_node but is not inspection-class. Self-merges are inspection-only in this v1."
+                    )
 
         merge_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is not None)
-        fresh_choice_count = sum(1 for choice in candidate.choices if choice.target_node_id is None)
+        self_merge_choice_count = sum(1 for choice in candidate.choices if choice.target_current_node)
+        fresh_choice_count = sum(
+            1 for choice in candidate.choices if choice.target_node_id is None and not choice.target_current_node
+        )
         closure_choice_count = 0
         inspection_fresh_count = 0
         inferred_choice_classes: list[str] = []
@@ -367,7 +384,7 @@ class LLMGenerationService:
                     issues.append(
                         f"Ending choice '{choice.choice_text}' must include ending_category."
                     )
-            if choice_class == "inspection" and choice.target_node_id is None:
+            if choice_class == "inspection" and choice.target_node_id is None and not choice.target_current_node:
                 inspection_fresh_count += 1
             if choice_class in {"commitment", "location_transition", "ending"} or choice.target_node_id is not None:
                 consequential_choice_count += 1
@@ -395,6 +412,12 @@ class LLMGenerationService:
         if pressure_level in {"soft", "hard"} and inspection_fresh_count > 0:
             issues.append("Inspection choices should reconverge quickly under frontier pressure instead of opening new durable leaves.")
         _ = consequential_choice_count
+
+        if self_merge_choice_count > 0:
+            if len(candidate.choices) <= 1:
+                issues.append("A single-choice scene cannot use target_current_node self-merges.")
+            elif self_merge_choice_count == len(candidate.choices):
+                issues.append("A menu cannot make every choice a target_current_node self-merge; keep at least one outward option.")
 
         if branch_shape.get("same_location_streak", 0) >= story_graph.SAME_LOCATION_PRESSURE_THRESHOLD:
             if not self._candidate_has_location_transition_choice(candidate):

@@ -1035,6 +1035,7 @@ class StoryGraphService:
             created_transition_nodes: list[dict[str, Any]] = []
             for choice_index, choice in enumerate(candidate.choices):
                 target_node_id = choice.target_node_id
+                target_current_node = bool(choice.target_current_node)
                 if target_node_id is not None:
                     target_node = self.get_story_node(target_node_id)
                     if target_node is None:
@@ -1043,7 +1044,10 @@ class StoryGraphService:
                         raise ValueError("Merged choice target must belong to the same branch.")
                 applied_target_node_id = target_node_id
                 transition_spec = transition_specs_by_choice_index.get(choice_index)
-                if target_node_id is not None and transition_spec is not None:
+                if target_current_node and transition_spec is None:
+                    raise ValueError("Self-merge choices require a transition node.")
+                if (target_node_id is not None or target_current_node) and transition_spec is not None:
+                    auto_continue_target_id = new_node_id if target_current_node else target_node_id
                     transition_node = self.create_story_node(
                         branch_key=request_branch_key,
                         title=transition_spec.scene_title,
@@ -1051,7 +1055,7 @@ class StoryGraphService:
                         summary=transition_spec.scene_summary,
                         parent_node_id=new_node_id,
                         node_kind="transition",
-                        auto_continue_to_node_id=target_node_id,
+                        auto_continue_to_node_id=auto_continue_target_id,
                         dialogue_lines=[line.model_dump() for line in transition_spec.dialogue_lines],
                         referenced_entities=(
                             [reference.model_dump() for reference in transition_spec.entity_references]
@@ -1085,6 +1089,7 @@ class StoryGraphService:
                                     "choice_class": choice.choice_class,
                                     "ending_category": choice.ending_category,
                                     "target_node_id": target_node_id,
+                                    "target_current_node": target_current_node,
                                     "transition_node_id": (
                                         applied_target_node_id if transition_spec is not None else None
                                     ),
@@ -1092,6 +1097,7 @@ class StoryGraphService:
                             )
                             if choice.required_affordances or choice.notes
                             or applied_target_node_id is not None
+                            or target_current_node
                             or choice.choice_class is not None
                             or choice.ending_category is not None
                             else None

@@ -292,6 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const n = nodeMap[node.id];
         const isLeaf = outgoingEdges[n.id].length === 0;
         const isTransition = n.node_kind === "transition";
+        const isSelfMergeTransition = !!n.self_merge_transition;
         const borderColor = isTransition ? "#3a785e" : (isLeaf ? COLOR_LEAF : COLOR_BRANCH);
 
         ctx.save();
@@ -368,7 +369,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (isTransition) {
             ctx.fillStyle = "#3a785e";
             ctx.font = "bold 10px " + FONT_FAMILY;
-            ctx.fillText("transition", n.x, n.y - NODE_RADIUS - 12);
+            ctx.fillText(isSelfMergeTransition ? "self-merge" : "transition", n.x, n.y - NODE_RADIUS - 12);
         }
 
         // ID below circle

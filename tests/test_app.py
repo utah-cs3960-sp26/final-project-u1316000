@@ -1770,6 +1770,78 @@ def test_apply_generation_wraps_merge_choice_in_transition_node_when_requested(t
     assert transition_scene["choices"] == []
 
 
+def test_apply_generation_wraps_self_merge_choice_in_transition_node(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    seed = client.post("/story/seed-opening-story").json()
+    assert seed["start_node_id"] >= 1
+
+    nodes = client.get("/story-nodes").json()
+    hand_node = next(node for node in nodes if node["title"] == "Five Thumbs")
+    frontier_item = next(item for item in client.get("/frontier").json() if item["from_node_id"] == hand_node["id"])
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "A Hatband Pause",
+                "scene_summary": "You pause over the hatband and open a small inspection loop before returning to the same choice menu.",
+                "scene_text": "You hold the hatband up to the light and feel the menu of possibilities stay open around you.",
+                "choices": [
+                    {
+                        "choice_text": "Inspect the hidden stitch more closely",
+                        "notes": "NEXT_NODE: You draw one more clue out of the hidden stitch before returning to the same choice menu. FURTHER_GOALS: Use a self-merge inspection loop for local elaboration without opening a new leaf.",
+                        "choice_class": "inspection",
+                        "target_current_node": True,
+                    },
+                    {
+                        "choice_text": "Follow the silver tracks onward",
+                        "notes": "NEXT_NODE: You leave the hat behind and follow the silver tracks deeper into the field. FURTHER_GOALS: Keep one outward option available so the menu does not become a pure loop.",
+                        "choice_class": "progress",
+                    },
+                ],
+                "transition_nodes": [
+                    {
+                        "choice_list_index": 0,
+                        "scene_title": "Inside the Stitch",
+                        "scene_summary": "You pull one more tiny clue out of the stitch and then settle back into the same node.",
+                        "scene_text": "You pinch the hidden stitch, tease loose one violet filament, and notice how it catches a different light before your attention settles back onto the same branching moment.",
+                        "dialogue_lines": [
+                            {"speaker": "Narrator", "text": "You tease loose one violet filament and then settle back into the same branching moment."}
+                        ],
+                        "target_current_node": True,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    new_node_id = data["node"]["id"]
+    assert len(data["created_transition_nodes"]) == 1
+    transition_node = data["created_transition_nodes"][0]
+    assert transition_node["node_kind"] == "transition"
+    assert transition_node["auto_continue_to_node_id"] == new_node_id
+
+    created_choice = data["created_choices"][0]
+    assert created_choice["to_node_id"] == transition_node["id"]
+    assert created_choice["status"] == "fulfilled"
+    notes_payload = json.loads(created_choice["notes"])
+    assert notes_payload["target_current_node"] is True
+
+    graph_page = client.get("/ui/graph")
+    assert graph_page.status_code == 200
+    match = re.search(r'window.__GRAPH_DATA__ = (.*?);</script>', graph_page.text, re.S)
+    assert match is not None
+    graph_data = json.loads(html.unescape(match.group(1)))
+    graph_transition_node = next(node for node in graph_data["nodes"] if int(node["id"]) == int(transition_node["id"]))
+    assert graph_transition_node["self_merge_transition"] is True
+
+
 def test_apply_generation_rejects_invalid_candidate_without_partial_write(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/seed-opening-story")
@@ -2259,10 +2331,10 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
             assert any("location_transition" in warning for warning in packet["author_warnings"])
         if packet["frontier_budget_state"]["pressure_level"] in {"soft", "hard"}:
             assert any("Frontier pressure is" in warning for warning in packet["author_warnings"])
-            assert any("This run will ONLY validate if at least one choice uses TARGET_EXISTING_NODE" in warning for warning in packet["author_warnings"])
+            assert any("This run will ONLY validate if at least one choice uses TARGETED_NODE" in warning for warning in packet["author_warnings"])
             assert packet["message"].startswith("WARNING:")
             assert "YOUR RUN WILL FAIL" in packet["message"]
-            assert "TARGET_EXISTING_NODE to merge into an existing node" in packet["message"]
+            assert "TARGETED_NODE with an existing node id to merge into an existing node" in packet["message"]
             assert packet["author_warning_banner"].startswith("WARNING: YOUR RUN WILL FAIL")
             assert packet["final_warning"].startswith("WARNING: YOUR RUN WILL FAIL")
         assert "consequential_choice_requirement" in packet
@@ -2280,7 +2352,8 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "location_stall_pressure" in packet["next_action"]
         assert "path_location_continuity" in packet["next_action"]
         assert "location_transition option" in packet["next_action"]
-        assert "this run will only validate if at least one choice uses TARGET_EXISTING_NODE" in packet["next_action"]
+        assert "TARGETED_NODE: this_node" in packet["next_action"]
+        assert "this run will only validate if at least one choice uses TARGETED_NODE" in packet["next_action"]
         assert "You will be able to satisfy that requirement during the choice creation phase." in packet["next_action"]
         assert isinstance(packet["planning_policy"]["chance"], float)
         assert 0 < packet["planning_policy"]["chance"] <= 1
@@ -3786,6 +3859,22 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
     )
     assert isinstance(choice, ChoiceDraft)
     assert choice.choice_class == "commitment"
+    assert choice.target_current_node is False
+
+    choice_self_merge = parse_choice_form(
+        "\n".join(
+            [
+                "CHOICE_TEXT: Inspect the seam more closely",
+                "CHOICE_CLASS: inspection",
+                "NEXT_NODE: You notice a second set of ripples hiding inside the green glow.",
+                "FURTHER_GOALS: Pull one more clue out of the seam before returning to the current menu.",
+                "ENDING_CATEGORY: NONE",
+                "TARGETED_NODE: this_node",
+            ]
+        )
+    )
+    assert choice_self_merge.target_existing_node is None
+    assert choice_self_merge.target_current_node is True
 
     extras = parse_scene_extras_form(
         "\n".join(
@@ -3859,6 +3948,7 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
         )
     )
     assert choice_with_annotated_target.target_existing_node == 7
+    assert choice_with_annotated_target.target_current_node is False
 
 
 def test_normal_worker_session_resets_on_limit_or_model_change(tmp_path: Path) -> None:
@@ -4087,7 +4177,7 @@ def test_build_step_prompt_surfaces_frontier_pressure_constraints_up_front() -> 
 
     assert "Current frontier pressure rules:" in prompt
     assert "include at least one merge or closure path in this scene" in prompt
-    assert "THIS RUN WILL ONLY VALIDATE if at least one choice uses TARGET_EXISTING_NODE" in prompt
+    assert "THIS RUN WILL ONLY VALIDATE if at least one choice uses TARGETED_NODE" in prompt
     assert "allow at most 1 fresh branch choice(s)" in prompt
     assert "inspection choices should reconverge quickly" in prompt
     assert "MAKE this choice either a merge or a closure." in prompt
@@ -4123,6 +4213,20 @@ def test_build_step_prompt_surfaces_location_transition_requirement_when_locatio
     assert "Allowed CHOICE_CLASS values are only: inspection, progress, commitment, location_transition, ending." in prompt
 
 
+def test_build_step_prompt_surfaces_self_merge_option_for_inspection_choices() -> None:
+    prompt = build_step_prompt(
+        step_name="choice",
+        packet={},
+        state=NormalRunConversationState(),
+        requested_choice_count=3,
+        choice_index=1,
+    )
+
+    assert "TARGETED_NODE may be an existing node id" in prompt
+    assert "this_node for a brief inspection elaboration" in prompt
+    assert "At least one option should still lead outward." in prompt
+
+
 def test_build_step_prompt_repeats_merge_closure_requirement_in_hooks_step() -> None:
     prompt = build_step_prompt(
         step_name="hooks",
@@ -4140,7 +4244,7 @@ def test_build_step_prompt_repeats_merge_closure_requirement_in_hooks_step() -> 
 
     assert "Current frontier pressure rules:" in prompt
     assert "Reminder: if frontier pressure required a merge or closure path" in prompt
-    assert "TARGET_EXISTING_NODE for a deliberate merge" in prompt
+    assert "TARGETED_NODE with an existing node id for a deliberate merge" in prompt
     assert "non-NONE ENDING_CATEGORY for a real closure" in prompt
 
 
@@ -4164,7 +4268,57 @@ def test_validate_choice_draft_requires_choice_one_to_handle_merge_or_closure_un
         choice_index=0,
     )
 
-    assert any("choice_1 must either use TARGET_EXISTING_NODE" in issue for issue in issues)
+    assert any("choice_1 must either use TARGETED_NODE" in issue for issue in issues)
+
+
+def test_validate_choice_draft_allows_inspection_self_merge() -> None:
+    issues = validate_choice_draft(
+        packet={},
+        state=NormalRunConversationState(
+            scene_plan=ScenePlanDraft(
+                scene_title="Hatband Pause",
+                scene_summary="You steady the hat in your hands while the next choice hangs open.",
+                material_change="The hatband is now clearly the focus of the scene.",
+                opening_beat="inspection",
+                location_status="same_location",
+                scene_cast_mode="mc_only",
+            ),
+            scene_body=SceneBodyDraft(
+                settings={},
+                raw_body="You hold the hat close and study the frayed hatband while the rest of the moment stays poised around your next decision.",
+                textboxes=[],
+            ),
+        ),
+        draft=ChoiceDraft(
+            choice_text="Look closer at the hat",
+            choice_class="inspection",
+            next_node="You notice one more tiny clue in the hatband before the scene settles back into the same choice menu.",
+            further_goals="Pull a local detail into focus without advancing to a different node yet.",
+            target_current_node=True,
+        ),
+        resolution={},
+        choice_index=0,
+    )
+
+    assert issues == []
+
+
+def test_validate_choice_draft_rejects_noninspection_self_merge() -> None:
+    issues = validate_choice_draft(
+        packet={},
+        state=NormalRunConversationState(),
+        draft=ChoiceDraft(
+            choice_text="Run for the stairwell",
+            choice_class="progress",
+            next_node="You bolt toward the stairwell and try to leave the chamber behind.",
+            further_goals="Break away from the current location and open a new route.",
+            target_current_node=True,
+        ),
+        resolution={},
+        choice_index=0,
+    )
+
+    assert any("only allowed for CHOICE_CLASS: inspection" in issue for issue in issues)
 
 
 def test_validate_choice_draft_rejects_ungrounded_local_prop_early() -> None:
@@ -4938,7 +5092,7 @@ def test_validate_choice_menu_rejects_repeated_touch_family_with_specific_fix() 
     issues = validate_choice_menu(packet=packet, choices=choices)
 
     assert any("overusing the 'touch' action family" in issue for issue in issues)
-    assert any("merge using TARGET_EXISTING_NODE" in issue for issue in issues)
+    assert any("merge using TARGETED_NODE" in issue for issue in issues)
 
 
 def test_validate_choice_menu_allows_merge_to_break_repeated_follow_pattern() -> None:
@@ -4995,6 +5149,47 @@ def test_validate_choice_menu_allows_travel_or_escape_to_break_repeated_follow_p
     ]
 
     assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_rejects_all_self_merge_menu() -> None:
+    issues = validate_choice_menu(
+        packet={},
+        choices=[
+            ChoiceDraft(
+                choice_text="Inspect the knot in the hatband",
+                choice_class="inspection",
+                next_node="You pull one more visual detail out of the knot before the scene settles back.",
+                further_goals="Clarify a small clue locally and then return to the same menu.",
+                target_current_node=True,
+            ),
+            ChoiceDraft(
+                choice_text="Examine the underside of the brim",
+                choice_class="inspection",
+                next_node="You angle the hat toward the light and catch another tiny hint before the scene settles back.",
+                further_goals="Take one more local inspection pass and then return to the same menu.",
+                target_current_node=True,
+            ),
+        ],
+    )
+
+    assert any("cannot make every choice TARGETED_NODE: this_node" in issue for issue in issues)
+
+
+def test_validate_choice_menu_rejects_single_choice_self_merge() -> None:
+    issues = validate_choice_menu(
+        packet={},
+        choices=[
+            ChoiceDraft(
+                choice_text="Inspect the brim stitching",
+                choice_class="inspection",
+                next_node="You inspect the brim stitching more closely and then settle back into the same node.",
+                further_goals="Take one local elaboration pass before choosing a real outward move.",
+                target_current_node=True,
+            )
+        ],
+    )
+
+    assert any("single-choice scene cannot use TARGETED_NODE: this_node" in issue for issue in issues)
 
 
 def test_validate_choice_menu_does_not_raise_new_character_pressure_when_scene_plan_already_declared_one() -> None:
