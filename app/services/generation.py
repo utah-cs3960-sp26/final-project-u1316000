@@ -205,14 +205,14 @@ class LLMGenerationService:
             "Do not simply restate the just-taken choice as another choice in the child scene. Advance the situation materially first.\n"
             "Do not repeat the parent summary with only cosmetic wording changes.\n"
             "If an inspection choice names a local prop, marker, knot, placard, seam, or similar focal object, establish it clearly in the scene text first instead of inventing it only in the choice menu.\n"
-            "Most multi-choice scenes should include at least one consequential option that is not pure inspection, such as a commitment, merge, ending, social move, location change, or response to immediate pressure.\n"
+            "Most multi-choice scenes should include at least one consequential option that is not pure inspection, such as a commitment, location_transition, merge, ending, social move, location change, or response to immediate pressure.\n"
             "If the branch has gone too long without another actor affecting events, bring in a person, faction, patrol, courier, rival, or other external pressure.\n"
-            "If the branch has lingered too long in one place, move to a new location or route deliberately back to an existing one.\n"
+            "If the branch has lingered too long in one place, satisfy that in the menu by including at least one choice_class `location_transition` option that promises a later move to a different place when expanded.\n"
             "If frontier_budget_state.pressure_level is soft or hard, prefer merges, closures, and narrow continuation over spawning multiple fresh leaves.\n"
             "When a local beat feels like it is winding down and arc_exit_candidate says a larger merge is plausible, you may use 1-2 transition scenes to close the local arc and route into another compatible storyline.\n"
             "Every choice must include internal planning notes in this form: 'NEXT_NODE: ... FURTHER_GOALS: ...'. NEXT_NODE should state a specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader follow-through, medium-range aim, or later pressure the branch should keep in motion.\n"
             "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
-            "Choices may optionally include choice_class values inspection, progress, commitment, or ending.\n"
+            "Choices may optionally include choice_class values inspection, progress, commitment, location_transition, or ending.\n"
             "Ending choices are allowed. Death, capture, transformation, dead ends, and hub-return closures are all valid if they fit the scene.\n"
             "If you need to use a recurring canonical character who has not been met on this specific path yet, add a floating_character_introduction with that existing character_id and a short reusable first-meeting beat. Floating introductions are for recurring characters only, not locations or objects.\n"
             "If a quick merge is appropriate, a generated choice may include target_node_id pointing at one of the provided merge_candidates.\n"
@@ -366,7 +366,7 @@ class LLMGenerationService:
                     )
             if choice_class == "inspection" and choice.target_node_id is None:
                 inspection_fresh_count += 1
-            if choice_class in {"commitment", "ending"} or choice.target_node_id is not None:
+            if choice_class in {"commitment", "location_transition", "ending"} or choice.target_node_id is not None:
                 consequential_choice_count += 1
             elif choice_class == "progress" and self._choice_text_implies_consequence(choice.choice_text):
                 consequential_choice_count += 1
@@ -392,6 +392,12 @@ class LLMGenerationService:
         if pressure_level in {"soft", "hard"} and inspection_fresh_count > 0:
             issues.append("Inspection choices should reconverge quickly under frontier pressure instead of opening new durable leaves.")
         _ = consequential_choice_count
+
+        if branch_shape.get("same_location_streak", 0) >= story_graph.SAME_LOCATION_PRESSURE_THRESHOLD:
+            if not self._candidate_has_location_transition_choice(candidate):
+                issues.append(
+                    "This branch has stayed in one place too long. Include at least one choice_class `location_transition` option in the menu so a later expansion can move to a different location."
+                )
 
         beat_budget = self.story_bible["beat_budget"]
         major_hook_updates = 0
@@ -603,6 +609,9 @@ class LLMGenerationService:
             )
         )
 
+    def _candidate_has_location_transition_choice(self, candidate: GenerationCandidate) -> bool:
+        return any(self._resolve_choice_class(choice) == "location_transition" for choice in candidate.choices)
+
     def _candidate_adds_actor_pressure(self, candidate: GenerationCandidate) -> bool:
         if candidate.new_characters or candidate.floating_character_introductions:
             return True
@@ -687,7 +696,10 @@ class LLMGenerationService:
             or candidate.discovered_state_tags
         ):
             return True
-        if any(choice.target_node_id is not None or self._resolve_choice_class(choice) == "ending" for choice in candidate.choices):
+        if any(
+            choice.target_node_id is not None or self._resolve_choice_class(choice) in {"location_transition", "ending"}
+            for choice in candidate.choices
+        ):
             return True
         if any(choice.required_affordances for choice in candidate.choices):
             return True

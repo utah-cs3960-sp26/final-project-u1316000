@@ -19,7 +19,9 @@ from app.services.story_notes import StoryDirectionService
 from app.services.story_graph import StoryGraphService
 from app.services.worldbuilding import WorldbuildingService
 
-SAME_LOCATION_PRESSURE_THRESHOLD = 6
+SAME_LOCATION_PRESSURE_THRESHOLD = 4
+ISOLATION_PRESSURE_THRESHOLD = 6
+NEW_CHARACTER_PRESSURE_THRESHOLD = 6
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -421,6 +423,35 @@ def build_path_character_continuity_summary(
     }
 
 
+def build_path_location_continuity_summary(
+    *,
+    selected: dict[str, Any],
+    story: StoryGraphService,
+    canon: CanonResolver,
+) -> dict[str, Any]:
+    parent_node_id = int(selected["from_node_id"])
+    encountered_ids = story.list_lineage_entity_ids(parent_node_id, "location")
+    encountered_locations: list[dict[str, Any]] = []
+    for location_id in sorted(encountered_ids):
+        location = canon.get_location(location_id)
+        if location is None:
+            continue
+        encountered_locations.append(
+            {
+                "id": int(location["id"]),
+                "name": location.get("name"),
+                "canonical_summary": location.get("canonical_summary"),
+            }
+        )
+    return {
+        "rule": (
+            "Only return to canonical locations that have already appeared on this path. "
+            "Use these encountered locations as the safe set for RETURN_LOCATION."
+        ),
+        "encountered_locations": encountered_locations,
+    }
+
+
 def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) -> list[str]:
     checklist = [
         "Return valid GenerationCandidate JSON only; do not wrap it in prose.",
@@ -429,8 +460,9 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "Usually return 2 or 3 choices; 1 is okay for a forced beat; 4+ should be rare.",
         "Do not create more than 5 choices on any scene node.",
         "Every choice must include planning notes in the form `NEXT_NODE: ... FURTHER_GOALS: ...`.",
-        "Use choice_class when helpful: inspection, progress, commitment, or ending.",
+        "Use choice_class when helpful: inspection, progress, commitment, location_transition, or ending.",
         "Inspection choices should usually reconverge quickly instead of creating a durable new frontier leaf.",
+        "When location_stall_pressure is active, satisfy it in the menu by including at least one `location_transition` choice rather than teleporting the current scene.",
         "Ending choices are allowed. Death, capture, transformation, quiet failure, and hub-return closures are all valid when they fit.",
         "If you need to use a recurring canonical character who has not been met on this path yet, use floating_character_introductions with their existing character_id and a short first-meeting beat.",
         "In choice notes, NEXT_NODE should state the specific immediate result or situation the next scene should actually deliver. FURTHER_GOALS should state the broader direction, later pressure, or branch shape that should continue beyond that.",
@@ -485,9 +517,13 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         checklist.append(
             "This branch is currently over-merged. Open at least one fresh path this run instead of only reconverging into existing scenes."
         )
-    if branch_shape and (branch_shape.get("single_actor_scene_streak") or 0) >= 2:
+    if branch_shape and (branch_shape.get("single_actor_scene_streak") or 0) >= ISOLATION_PRESSURE_THRESHOLD:
         checklist.append(
-            "This branch has gone several scenes without enough character pressure. Reintroduce or introduce a character, or put an external faction/patrol/courier pressure onstage."
+            "This branch has stayed protagonist-only too long. Reintroduce or introduce a character, or put clear faction/social pressure onstage."
+        )
+    if branch_shape and (branch_shape.get("new_character_gap_streak") or 0) >= NEW_CHARACTER_PRESSURE_THRESHOLD:
+        checklist.append(
+            "This branch has gone too long without a brand-new character. Introduce a new character through NEW_CHARACTERS; reusing existing cast does not satisfy this."
         )
     if branch_shape and (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD:
         checklist.append(
@@ -504,8 +540,10 @@ def build_author_warnings(
     *,
     frontier_budget_state: dict[str, Any],
     frontier_choice_constraints: dict[str, Any],
-    actor_pressure: dict[str, Any],
-    location_motion_pressure: dict[str, Any],
+    isolation_pressure: dict[str, Any],
+    new_character_pressure: dict[str, Any],
+    location_stall_pressure: dict[str, Any],
+    location_transition_obligation: dict[str, Any],
     recent_action_family_summary: dict[str, Any],
 ) -> list[str]:
     warnings: list[str] = []
@@ -527,10 +565,22 @@ def build_author_warnings(
         warnings.append(f"This scene may open at most {int(max_fresh_choices)} fresh branch choice(s) under current pressure.")
     if frontier_choice_constraints.get("inspection_choices_should_reconverge_under_pressure"):
         warnings.append("Inspection choices should reconverge quickly here instead of creating durable fresh leaves.")
-    if actor_pressure.get("needs_more_people"):
-        warnings.append("Character pressure is active: bring another person or faction pressure onstage soon.")
-    if location_motion_pressure.get("should_move"):
-        warnings.append("Location pressure is active: move to a new or meaningful known location soon.")
+    if isolation_pressure.get("active"):
+        warnings.append(
+            "Isolation pressure is active: this branch has stayed protagonist-only too long. Fix it with another named character, a reintroduced character, or clear faction/social pressure onstage. A new location alone will NOT satisfy this."
+        )
+    if new_character_pressure.get("active"):
+        warnings.append(
+            "New-character pressure is active: this branch has gone too long without a brand-new character. Fix it with NEW_CHARACTERS and a real first-meeting beat. Reusing only existing characters will NOT satisfy this."
+        )
+    if location_stall_pressure.get("active"):
+        warnings.append(
+            "Location-stall pressure is active: this menu must include at least one CHOICE_CLASS: location_transition option. That choice will promise a move to a different location when it is expanded later. A new character alone will NOT satisfy this."
+        )
+    if location_transition_obligation.get("active"):
+        warnings.append(
+            "This selected frontier choice already promised a location transition. THIS RUN WILL ONLY VALIDATE if the child scene changes location now with LOCATION_STATUS: new_location or LOCATION_STATUS: return_location."
+        )
     repeated_action_family = recent_action_family_summary.get("repeated_action_family")
     if repeated_action_family:
         warnings.append(
@@ -920,6 +970,11 @@ def build_normal_packet(
         story=story,
         canon=canon,
     )
+    path_location_continuity = build_path_location_continuity_summary(
+        selected=selected,
+        story=story,
+        canon=canon,
+    )
     parent_node_id = int(selected["from_node_id"])
     allowed_entity_ids_by_type = {
         "character": story.list_lineage_entity_ids(parent_node_id, "character"),
@@ -937,6 +992,16 @@ def build_normal_packet(
         if (lowered_name := (character.get("name") or "").strip().lower()) and lowered_name not in allowed_character_names
     }
     selected_choice = story.get_choice(int(selected["choice_id"])) or {}
+    parent_current_location_ref = next(
+        (
+            entity for entity in ((context.get("current_node") or {}).get("entities") or [])
+            if entity.get("entity_type") == "location" and entity.get("role") == "current_scene" and entity.get("entity_id") is not None
+        ),
+        None,
+    )
+    parent_current_location = None
+    if parent_current_location_ref is not None:
+        parent_current_location = canon.get_location(int(parent_current_location_ref["entity_id"]))
     frontier_budget_state = context.get("frontier_budget_state") or {}
     budget_config = (branching_policy or {}).get("frontier_budget") or {}
     branch_shape = context.get("branch_shape") or {}
@@ -967,23 +1032,48 @@ def build_normal_packet(
             "worldbuilding pressure becoming immediate",
         ],
     }
-    actor_pressure = {
+    isolation_pressure = {
         "streak": branch_shape.get("single_actor_scene_streak", 0),
-        "needs_more_people": bool((branch_shape.get("single_actor_scene_streak") or 0) >= 2),
+        "threshold": ISOLATION_PRESSURE_THRESHOLD,
+        "active": bool((branch_shape.get("single_actor_scene_streak") or 0) >= ISOLATION_PRESSURE_THRESHOLD),
         "guidance": (
-            "Bring in another actor soon: introduce or reintroduce a character, or put faction/patrol/courier pressure onstage."
-            if (branch_shape.get("single_actor_scene_streak") or 0) >= 2
-            else "Character pressure is healthy enough for now, but additional people are still welcome."
+            "This branch has stayed protagonist-only too long. Fix that with another named character, a reintroduced character, or clear faction/social pressure onstage. A new location alone does not satisfy this."
+            if (branch_shape.get("single_actor_scene_streak") or 0) >= ISOLATION_PRESSURE_THRESHOLD
+            else "Solo scenes are still allowed right now, but another person or faction is welcome."
         ),
     }
-    location_motion_pressure = {
-        "streak": branch_shape.get("same_location_streak", 0),
-        "should_move": bool((branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD),
+    new_character_pressure = {
+        "streak": branch_shape.get("new_character_gap_streak", 0),
+        "threshold": NEW_CHARACTER_PRESSURE_THRESHOLD,
+        "active": bool((branch_shape.get("new_character_gap_streak") or 0) >= NEW_CHARACTER_PRESSURE_THRESHOLD),
         "guidance": (
-            "Move the branch to a new location or route back to an old one soon."
+            "This branch has gone too long without a brand-new character. Fix that by introducing someone through NEW_CHARACTERS with a real first-meeting beat. Reusing existing characters alone does not satisfy this."
+            if (branch_shape.get("new_character_gap_streak") or 0) >= NEW_CHARACTER_PRESSURE_THRESHOLD
+            else "A brand-new character is optional right now, but fresh faces are welcome."
+        ),
+    }
+    location_stall_pressure = {
+        "streak": branch_shape.get("same_location_streak", 0),
+        "threshold": SAME_LOCATION_PRESSURE_THRESHOLD,
+        "active": bool((branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD),
+        "guidance": (
+            "This branch has stayed in the same place too long. Fix that in the menu by including at least one CHOICE_CLASS: location_transition option. That choice should later move to a genuinely new location or a meaningful return to an already encountered place. A new character alone does not satisfy this."
             if (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD
             else "Location motion is optional right now, but new places or meaningful returns are welcome."
         ),
+    }
+    selected_choice_class = (selected_choice.get("choice_class") or "").strip()
+    location_transition_obligation = {
+        "active": selected_choice_class == "location_transition",
+        "rule": (
+            "The selected frontier choice already promised a location transition. This child scene will only validate if it changes current_scene now with LOCATION_STATUS: new_location or LOCATION_STATUS: return_location."
+            if selected_choice_class == "location_transition"
+            else "No expansion-time location-transition obligation is active for this run."
+        ),
+        "valid_fixes": [
+            "LOCATION_STATUS: new_location with NEW_LOCATION",
+            "LOCATION_STATUS: return_location with RETURN_LOCATION pointing at an already encountered different location",
+        ],
     }
     recent_action_family_summary = {
         "repeated_action_family": branch_shape.get("repeated_action_family"),
@@ -993,8 +1083,10 @@ def build_normal_packet(
     author_warnings = build_author_warnings(
         frontier_budget_state=frontier_budget_state,
         frontier_choice_constraints=frontier_choice_constraints,
-        actor_pressure=actor_pressure,
-        location_motion_pressure=location_motion_pressure,
+        isolation_pressure=isolation_pressure,
+        new_character_pressure=new_character_pressure,
+        location_stall_pressure=location_stall_pressure,
+        location_transition_obligation=location_transition_obligation,
         recent_action_family_summary=recent_action_family_summary,
     )
     author_warning_banner = build_author_warning_banner(author_warnings)
@@ -1002,7 +1094,8 @@ def build_normal_packet(
         "required": bool(
             (frontier_budget_state.get("pressure_level") in {"soft", "hard"})
             or (branch_shape.get("same_location_streak") or 0) >= SAME_LOCATION_PRESSURE_THRESHOLD
-            or (branch_shape.get("single_actor_scene_streak") or 0) >= 2
+            or (branch_shape.get("single_actor_scene_streak") or 0) >= ISOLATION_PRESSURE_THRESHOLD
+            or (branch_shape.get("new_character_gap_streak") or 0) >= NEW_CHARACTER_PRESSURE_THRESHOLD
             or branch_shape.get("repeated_action_family") in {"inspect", "follow", "touch", "step_back"}
         ),
         "rule": (
@@ -1028,13 +1121,25 @@ def build_normal_packet(
             f"&scene={selected['from_node_id']}"
         ),
         "path_character_continuity": path_character_continuity,
+        "path_location_continuity": path_location_continuity,
+        "parent_current_location": (
+            {
+                "id": int(parent_current_location["id"]),
+                "name": parent_current_location.get("name"),
+                "canonical_summary": parent_current_location.get("canonical_summary"),
+            }
+            if parent_current_location is not None
+            else None
+        ),
         "global_open_choice_count": frontier_budget_state.get("open_choice_count"),
         "frontier_budget_state": frontier_budget_state,
         "frontier_choice_constraints": frontier_choice_constraints,
         "required_scene_delta": required_scene_delta,
         "reveal_guardrails": reveal_guardrails,
-        "actor_pressure": actor_pressure,
-        "location_motion_pressure": location_motion_pressure,
+        "isolation_pressure": isolation_pressure,
+        "new_character_pressure": new_character_pressure,
+        "location_stall_pressure": location_stall_pressure,
+        "location_transition_obligation": location_transition_obligation,
         "recent_action_family_summary": recent_action_family_summary,
         "consequential_choice_requirement": consequential_choice_requirement,
         "from_node_total_choice_count": selected.get("from_node_total_choice_count"),
@@ -1085,8 +1190,13 @@ def build_normal_packet(
             "Introduce or reintroduce characters frequently. Characters make a story. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
             "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Worldbuilding files, hooks, and other behind-the-scenes coherence trackers often name things the player is not aware of yet. "
-            "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
-            "Use required_scene_delta, actor_pressure, location_motion_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
+            "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Treat IDEAS.md as a main source of fresh people, places, and whimsical turns. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
+            "Use required_scene_delta, isolation_pressure, new_character_pressure, location_stall_pressure, and recent_action_family_summary to avoid another tiny inspect/follow/press loop. "
+            "If isolation_pressure is active, fix it with another named character, a reintroduced character, or clear faction/social pressure onstage; a new location alone does not satisfy it. "
+            "If new_character_pressure is active, fix it with NEW_CHARACTERS and a real first-meeting beat; reusing only existing characters does not satisfy it. "
+            "If location_stall_pressure is active, satisfy it in the choice-writing phase by including at least one CHOICE_CLASS: location_transition option. That choice should promise a move to a different location when it is expanded later. "
+            "If location_transition_obligation.active is true, this child scene must change current_scene now with LOCATION_STATUS: new_location or LOCATION_STATUS: return_location. RETURN_LOCATION must come from path_location_continuity and must be different from parent_current_location. "
+            "When either pressure is active, prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat. "
             "If choice_handoff is present, follow its NEXT_NODE as the direct immediate handoff unless continuity now clearly demands a pivot. Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it. "
             "Answer only the requested form for the current step. Do not emit JSON in normal mode. "
             "If consequential_choice_requirement.required is true and you return multiple choices, make sure at least one option is a commitment, social move, location shift, merge, closure, or immediate-pressure response. "
@@ -1094,6 +1204,7 @@ def build_normal_packet(
             "You will be able to satisfy that requirement during the choice creation phase. "
             "Follow reveal_guardrails strictly: early pressure, partial strange sightings, and first personal breadcrumbs are okay, but delayed ruler/backstory revelations are not. "
             "Use path_character_continuity.encountered_characters as the safe set of already-met canonical names for this branch path. "
+            "Use path_location_continuity.encountered_locations as the safe set of already encountered canonical places for RETURN_LOCATION on this path. "
             "If a hook, note, or merge summary names someone with the label `[not yet introduced on this path]`, treat that as future-facing planning memory only. "
             "Do not casually name a canonical character from some other leaf unless you are explicitly introducing them now. "
             "If you need that kind of recurring cross-arc appearance, use floating_character_introductions so the branch gains a short reusable first meeting instead of pretending prior familiarity. "

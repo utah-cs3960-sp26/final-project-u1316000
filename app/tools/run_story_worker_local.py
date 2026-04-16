@@ -90,7 +90,7 @@ class RevivalChoiceResult(BaseModel):
         min_length=20,
         pattern=r"^NEXT_NODE:\s*\S[\s\S]*FURTHER_GOALS:\s*\S[\s\S]*$",
     )
-    choice_class: Literal["inspection", "progress", "commitment", "ending"] | None = None
+    choice_class: Literal["inspection", "progress", "commitment", "location_transition", "ending"] | None = None
     ending_category: Literal["death", "dead_end", "capture", "transformation", "hub_return"] | None = None
 
 
@@ -120,6 +120,7 @@ class ScenePlanDraft(BaseModel):
     scene_cast_entries: list[str] = Field(default_factory=list)
     new_character_names: list[str] = Field(default_factory=list)
     new_location_name: str | None = None
+    return_location_ref: str | None = None
     new_character_intro: str | None = None
     new_location_intro: str | None = None
 
@@ -540,13 +541,17 @@ def infer_choice_class_from_text(choice_text: str, notes: str | None) -> str:
     return "progress"
 
 
+def choice_is_location_transition(choice: ChoiceDraft) -> bool:
+    return choice.choice_class == "location_transition"
+
+
 def choice_text_implies_consequence(value: str) -> bool:
     text = (value or "").lower()
     return any(pattern.search(text) for pattern in CONSEQUENCE_TEXT_PATTERNS)
 
 
 def choice_breaks_repeated_action_pattern(choice: ChoiceDraft) -> bool:
-    if choice.target_existing_node is not None or choice.ending_category is not None:
+    if choice.target_existing_node is not None or choice.ending_category is not None or choice_is_location_transition(choice):
         return True
     action_family = classify_choice_action_family(choice.choice_text)
     if action_family in {"social", "travel"}:
@@ -588,6 +593,10 @@ def candidate_adds_actor_pressure(candidate: GenerationCandidate) -> bool:
     )
 
 
+def candidate_adds_new_character(candidate: GenerationCandidate) -> bool:
+    return bool(candidate.new_characters)
+
+
 def candidate_adds_location_motion(candidate: GenerationCandidate) -> bool:
     if candidate.new_locations:
         return True
@@ -607,6 +616,192 @@ def candidate_adds_location_motion(candidate: GenerationCandidate) -> bool:
     )
 
 
+def candidate_has_location_transition_choice(candidate: GenerationCandidate) -> bool:
+    return any(choice.choice_class == "location_transition" for choice in candidate.choices)
+
+
+def candidate_satisfies_location_transition_obligation(
+    *,
+    packet: dict[str, Any],
+    candidate: GenerationCandidate,
+) -> bool:
+    parent_current_location = packet.get("parent_current_location") or {}
+    parent_location_id = parent_current_location.get("id")
+    current_scene_reference = next(
+        (
+            reference for reference in candidate.entity_references
+            if reference.entity_type == "location" and reference.role == "current_scene"
+        ),
+        None,
+    )
+    if current_scene_reference is not None and current_scene_reference.entity_id is not None and parent_location_id is not None:
+        if int(current_scene_reference.entity_id) != int(parent_location_id):
+            return True
+    return candidate_adds_location_motion(candidate)
+
+
+def build_staleness_pressure_block(packet: dict[str, Any]) -> str:
+    isolation_pressure = packet.get("isolation_pressure") or {}
+    new_character_pressure = packet.get("new_character_pressure") or {}
+    location_stall_pressure = packet.get("location_stall_pressure") or {}
+    location_transition_obligation = packet.get("location_transition_obligation") or {}
+    lines: list[str] = []
+    if isolation_pressure.get("active"):
+        lines.append("Current isolation pressure rules:")
+        lines.append(
+            "- this branch has stayed protagonist-only too long and must stop being effectively solitary"
+        )
+        lines.append(
+            "- satisfy this with another named character, a reintroduced character, or clear faction/social pressure onstage"
+        )
+        lines.append("- a new location alone does NOT satisfy isolation pressure")
+    if new_character_pressure.get("active"):
+        lines.append("Current new-character pressure rules:")
+        lines.append(
+            "- this branch has gone too long without introducing a brand-new character"
+        )
+        lines.append(
+            "- satisfy this with NEW_CHARACTERS and a real first-meeting beat"
+        )
+        lines.append("- reusing only existing characters does NOT satisfy new-character pressure")
+    if location_stall_pressure.get("active"):
+        lines.append("Current location-stall pressure rules:")
+        lines.append(
+            "- this branch has stayed in the same place too long"
+        )
+        lines.append(
+            "- satisfy this in the choice-writing phase by including at least one CHOICE_CLASS: location_transition option in the menu"
+        )
+        lines.append("- that location_transition choice promises that its future expansion will move to a different location")
+        lines.append("- a new character alone does NOT satisfy location-stall pressure")
+    if location_transition_obligation.get("active"):
+        lines.append("Current location-transition expansion rules:")
+        lines.append(
+            "- the selected frontier choice already promised a move to a different location"
+        )
+        lines.append(
+            "- this child scene will only validate if LOCATION_STATUS changes location now with either new_location or return_location"
+        )
+        lines.append(
+            "- return_location must target a path-safe existing location different from the parent current location"
+        )
+    if lines:
+        lines.append(
+            "- use IDEAS.md as a main source of fresh people, places, and whimsical turns when pressure is active"
+        )
+        lines.append(
+            "- prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat"
+        )
+        return "\n".join(lines) + "\n\n"
+    return ""
+
+
+def scene_plan_satisfies_isolation_pressure(*, draft: ScenePlanDraft, resolution: dict[str, Any]) -> bool:
+    protagonist_name = (resolution.get("protagonist_name") or "").strip().lower()
+    resolved_cast = resolve_scene_cast_names(draft=draft, resolution=resolution)
+    visible_non_protagonists = any(
+        name.strip() and name.strip().lower() != protagonist_name
+        for name in resolved_cast
+    )
+    text = " ".join(
+        filter(
+            None,
+            [
+                draft.scene_summary,
+                draft.material_change,
+                draft.new_character_intro or "",
+                draft.new_location_intro or "",
+            ],
+        )
+    ).lower()
+    has_social_or_faction_pressure = any(
+        marker in text
+        for marker in (
+            "patrol",
+            "enumerator",
+            "courier",
+            "guard",
+            "clerk",
+            "auditor",
+            "question",
+            "interrogate",
+            "confront",
+            "called out",
+            "someone arrives",
+            "they arrive",
+        )
+    )
+    return visible_non_protagonists or has_social_or_faction_pressure
+
+
+def scene_plan_satisfies_new_character_pressure(*, draft: ScenePlanDraft) -> bool:
+    return bool([name for name in draft.new_character_names if name.strip()])
+
+
+def resolve_return_location_target(
+    *,
+    draft: ScenePlanDraft,
+    resolution: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw_target = (draft.return_location_ref or "").strip()
+    if not raw_target:
+        return None
+    path_location_name_map = resolution.get("path_location_name_map") or {}
+    path_location_id_map = resolution.get("path_location_id_map") or {}
+    lowered_target = raw_target.lower()
+    if lowered_target in path_location_name_map:
+        return path_location_name_map[lowered_target]
+    if lowered_target.isdigit():
+        return path_location_id_map.get(int(lowered_target))
+    return None
+
+
+def scene_plan_satisfies_location_transition_obligation(
+    *,
+    draft: ScenePlanDraft,
+    resolution: dict[str, Any],
+) -> bool:
+    if draft.location_status == "new_location":
+        return bool((draft.new_location_name or "").strip())
+    if draft.location_status != "return_location":
+        return False
+    target_location = resolve_return_location_target(draft=draft, resolution=resolution)
+    if target_location is None or target_location.get("id") is None:
+        return False
+    current_location_id = resolution.get("current_location_id")
+    return int(target_location["id"]) != int(current_location_id) if current_location_id is not None else True
+
+
+def scene_body_mentions_declared_new_character(*, state: NormalRunConversationState, draft: SceneBodyDraft) -> bool:
+    if state.scene_plan is None:
+        return False
+    declared_new_names = {
+        name.strip().lower()
+        for name in state.scene_plan.new_character_names
+        if name.strip()
+    }
+    if not declared_new_names:
+        return False
+    lowered_text = " ".join(
+        filter(
+            None,
+            [
+                draft.raw_body,
+                *(textbox.text for textbox in draft.textboxes),
+            ],
+        )
+    ).lower()
+    if any(name in lowered_text for name in declared_new_names):
+        return True
+    for textbox in draft.textboxes:
+        if textbox.speaker_ref.strip().lower() in declared_new_names:
+            return True
+        for command in textbox.pending_commands:
+            if any(target.strip().lower() in declared_new_names for target in command.targets):
+                return True
+    return False
+
+
 def candidate_has_material_delta(candidate: GenerationCandidate) -> bool:
     if (
         candidate.new_locations
@@ -622,7 +817,11 @@ def candidate_has_material_delta(candidate: GenerationCandidate) -> bool:
         or candidate.discovered_state_tags
     ):
         return True
-    if any(choice.target_node_id is not None or infer_choice_class_from_text(choice.choice_text, choice.notes) == "ending" for choice in candidate.choices):
+    if any(
+        choice.target_node_id is not None
+        or (choice.choice_class or infer_choice_class_from_text(choice.choice_text, choice.notes)) in {"location_transition", "ending"}
+        for choice in candidate.choices
+    ):
         return True
     if any(choice.required_affordances for choice in candidate.choices):
         return True
@@ -1035,6 +1234,7 @@ def build_form_template(step: str) -> str:
             "SCENE_CAST: <write one actual value only: MC_ONLY, SAME, NONE, or comma-separated canonical character ids/names like 1, 2> | Choose one syntax and write only that value. Do not copy the option list itself.\n"
             "NEW_CHARACTERS: <comma-separated character NAMES only, or NONE> | Brand-new characters introduced by this scene. Write names only, not ids, not parentheses, and not name-plus-number formats like 'Bob (2)'. New characters do not need to be listed in SCENE_CAST; they will be appended automatically.\n"
             "NEW_LOCATION: <string or NONE> | Brand-new location name introduced by this scene.\n"
+            "RETURN_LOCATION: <existing canonical location id or name, or NONE> | Required when LOCATION_STATUS is return_location.\n"
             "NEW_CHARACTER_INTRO: <string or NONE> | Use for a first-meeting beat if a newly visible person matters now.\n"
             "NEW_LOCATION_INTRO: <string or NONE> | Use for an arrival/transition beat if the location changes."
         )
@@ -1065,7 +1265,7 @@ def build_form_template(step: str) -> str:
             "Put each field on its own new line. Newlines are the only valid separator between fields. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between top-level fields.\n"
             "Fill this exact label form:\n"
             "CHOICE_TEXT: <string> | Player-facing choice text.\n"
-            "CHOICE_CLASS: <one of: inspection, progress, commitment, ending>\n"
+            "CHOICE_CLASS: <one of: inspection, progress, commitment, location_transition, ending>\n"
             "NEXT_NODE: <string> | Specific immediate result the next scene should deliver.\n"
             "FURTHER_GOALS: <string> | Broader medium-range direction for the branch.\n"
             "ENDING_CATEGORY: <one of: death, dead_end, capture, transformation, hub_return, NONE> | Use a non-NONE ending category when this choice is a real closure path.\n"
@@ -1467,6 +1667,10 @@ def parse_scene_script_command(line: str) -> SceneScriptCommand | None:
     if not stripped.startswith("@"):
         return None
     lowered = stripped.lower()
+    if lowered in {"@show_all", "@showall", "@show all"}:
+        return SceneScriptCommand(action="show_all")
+    if lowered in {"@hide_all", "@hideall", "@hide all"}:
+        return SceneScriptCommand(action="hide_all")
     for action in ("show_only", "show", "hide"):
         prefix = f"@{action}"
         if lowered.startswith(prefix):
@@ -1477,10 +1681,6 @@ def parse_scene_script_command(line: str) -> SceneScriptCommand | None:
             if not rest:
                 raise ValueError(f"@{action} requires at least one target.")
             return SceneScriptCommand(action=cast(Any, action), targets=split_command_targets(rest))
-    if lowered in {"@show_all", "@showall"}:
-        return SceneScriptCommand(action="show_all")
-    if lowered in {"@hide_all", "@hideall"}:
-        return SceneScriptCommand(action="hide_all")
     raise ValueError(f"Unknown scene body command: {line}")
 
 
@@ -1583,6 +1783,7 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
 def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
     sections = parse_labeled_sections(raw_text, NORMAL_STEP_LABELS["scene_plan"])
     scene_cast_mode, scene_cast_entries = parse_scene_cast_value(sections["SCENE_CAST"])
+    return_location_match = re.search(r"(?m)^RETURN_LOCATION:\s*(.*)$", strip_markdown_fences(raw_text).strip())
     return ScenePlanDraft(
         scene_title=sections["SCENE_TITLE"].strip(),
         scene_summary=sections["SCENE_SUMMARY"].strip(),
@@ -1596,6 +1797,7 @@ def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
         scene_cast_entries=scene_cast_entries,
         new_character_names=parse_comma_list(sections["NEW_CHARACTERS"]),
         new_location_name=parse_none_text(sections["NEW_LOCATION"]),
+        return_location_ref=parse_none_text(return_location_match.group(1)) if return_location_match else None,
         new_character_intro=parse_none_text(sections["NEW_CHARACTER_INTRO"]),
         new_location_intro=parse_none_text(sections["NEW_LOCATION_INTRO"]),
     )
@@ -2094,6 +2296,7 @@ def build_step_prompt(
             f"- summary: {state.scene_plan.scene_summary}\n"
             f"- material change: {state.scene_plan.material_change}\n"
             f"- location_status: {state.scene_plan.location_status}\n"
+            f"- return_location: {state.scene_plan.return_location_ref or 'NONE'}\n"
             f"- scene_cast: {scene_cast_summary}\n\n"
         )
 
@@ -2113,9 +2316,11 @@ def build_step_prompt(
         ) + "\n\n"
 
     frontier_constraint_block = build_frontier_constraint_block(packet)
+    staleness_pressure_block = build_staleness_pressure_block(packet)
 
     declared_new_characters = ", ".join(state.scene_plan.new_character_names) if state.scene_plan and state.scene_plan.new_character_names else "NONE"
     declared_new_location = state.scene_plan.new_location_name if state.scene_plan and state.scene_plan.new_location_name else "NONE"
+    declared_return_location = state.scene_plan.return_location_ref if state.scene_plan and state.scene_plan.return_location_ref else "NONE"
 
     if step_name == "scene_plan":
         cast_refs = summarize_recent_cast_references(packet)
@@ -2129,13 +2334,18 @@ def build_step_prompt(
             "Step: scene_plan\n"
             f"{retry_block}"
             f"{frontier_constraint_block}"
+            f"{staleness_pressure_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
             "Decide the immediate shape of the next scene.\n"
             "The scene plan must materially advance the branch, not restate the parent beat.\n"
             "SCENE_CAST lists the characters available to appear in this scene. It does not force immediate visibility.\n"
+            "When pressure is active, use IDEAS.md as a main source of fresh people, places, and whimsical turns.\n"
+            "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
             "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list.\n"
             "For NEW_CHARACTERS, write only the new characters' names, comma-separated if needed. Do not invent ids, slot numbers, or parenthetical numbers there. Any actual ids are assigned later by the system at apply time.\n"
             "New characters do not need to be repeated in SCENE_CAST. If you declare them in NEW_CHARACTERS, they will be added to the accepted scene cast automatically.\n"
+            f"Already encountered path-safe locations for RETURN_LOCATION: {', '.join(entry.get('name') for entry in ((packet.get('path_location_continuity') or {}).get('encountered_locations') or []) if entry.get('name')) or 'NONE'}.\n"
+            "If LOCATION_STATUS is return_location, use RETURN_LOCATION to name a path-safe existing location from that list. Do not guess an unseen canonical place.\n"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
             f"{scene_plan_template}"
         )
@@ -2155,10 +2365,14 @@ def build_step_prompt(
             "Step: scene_body\n"
             f"{retry_block}"
             f"{frontier_constraint_block}"
+            f"{staleness_pressure_block}"
             f"{scene_cast_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
             "Write the scripted scene body.\n"
             "Make this feel like a real story passage, not a stub. Usually write multiple beats before choices appear.\n"
+            "When pressure is active, use IDEAS.md as a main source of fresh people, places, and whimsical turns.\n"
+            "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
+            f"Declared location setup so far: NEW_LOCATION={declared_new_location}; RETURN_LOCATION={declared_return_location}.\n"
             "Use the accepted scene cast refs when possible. Existing canon keeps its real id; brand-new characters use refs like 1n, 2n. Exact speaker names also work.\n"
             "When the narrator is speaking about the protagonist, refer to the protagonist as 'you' and 'your', not by name. The narrator should NEVER say \"The Tall Gnome\"\n"
             "If you want the protagonist visibly on-screen, the protagonist must be included in SCENE_CAST. mc_always_visible keeps the protagonist visible only if the protagonist is already in the accepted scene cast.\n"
@@ -2189,6 +2403,14 @@ def build_step_prompt(
             consequence_note = (
                 "At least one menu choice this scene must be a commitment, social move, location shift, merge, closure, or immediate-pressure response. Prefer making this choice satisfy that requirement unless a later choice clearly will.\n"
             )
+        location_transition_pressure = packet.get("location_stall_pressure") or {}
+        location_transition_note = ""
+        if location_transition_pressure.get("active") and not any(choice.choice_class == "location_transition" for choice in state.choices):
+            location_transition_note = (
+                "Location-stall pressure is active. This menu must include at least one CHOICE_CLASS: location_transition option.\n"
+                "A location_transition choice promises that its future expansion will move to a different location than the current one.\n"
+                "Use path_location_continuity when returning to an existing place, or point toward a brand-new place if that fits better.\n"
+            )
         choice_header = f"Write choice {choice_index + 1} of {requested_choice_count}.\n"
         if optional_choice:
             prior_count_text = "1 choice" if choice_index == 1 else f"{choice_index} choices"
@@ -2210,11 +2432,13 @@ def build_step_prompt(
             f"Step: choice_{choice_index + 1}\n"
             f"{retry_block}"
             f"{frontier_constraint_block}"
+            f"{staleness_pressure_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
             f"{choice_header}"
             "This choice must open a genuinely distinct lane from the others. Do not repeat the just-taken choice or the parent's NEXT_NODE.\n"
             f"{consequence_note}"
-            "Allowed CHOICE_CLASS values are only: inspection, progress, commitment, ending.\n"
+            f"{location_transition_note}"
+            "Allowed CHOICE_CLASS values are only: inspection, progress, commitment, location_transition, ending.\n"
             "If the move is socially bold, urgent, or otherwise strongly consequential, usually use CHOICE_CLASS: commitment rather than inventing a new class label.\n"
             f"{merge_or_closure_instruction}"
             "Respond with ONLY the provided fields and corresponding values. Do not add any other fields not present at this step of the run.\n"
@@ -2310,6 +2534,7 @@ def resolve_normal_context(packet: dict[str, Any]) -> dict[str, Any]:
     current_node = (packet.get("context_summary") or {}).get("current_node") or {}
     current_entities = current_node.get("entities") or []
     encountered = ((packet.get("path_character_continuity") or {}).get("encountered_characters") or [])
+    encountered_locations = ((packet.get("path_location_continuity") or {}).get("encountered_locations") or [])
 
     settings = Settings.from_env()
     connection = connect(settings.database_path)
@@ -2338,6 +2563,21 @@ def resolve_normal_context(packet: dict[str, Any]) -> dict[str, Any]:
     encountered_names = {
         (entry.get("name") or "").strip().lower()
         for entry in encountered
+        if (entry.get("name") or "").strip()
+    }
+    path_location_name_map = {
+        (entry.get("name") or "").strip().lower(): entry
+        for entry in encountered_locations
+        if (entry.get("name") or "").strip()
+    }
+    path_location_id_map = {
+        int(entry["id"]): entry
+        for entry in encountered_locations
+        if entry.get("id") is not None
+    }
+    encountered_location_names = {
+        (entry.get("name") or "").strip().lower()
+        for entry in encountered_locations
         if (entry.get("name") or "").strip()
     }
     protagonist = next(
@@ -2376,6 +2616,12 @@ def resolve_normal_context(packet: dict[str, Any]) -> dict[str, Any]:
         if character is None or not (character.get("name") or "").strip():
             continue
         current_visible_cast_names.append((character.get("name") or "").strip())
+    current_location_id = int(current_location["entity_id"]) if current_location and current_location.get("entity_id") else None
+    current_location_record = (
+        path_location_id_map.get(current_location_id)
+        or (location_name_map.get((packet.get("parent_current_location") or {}).get("name", "").strip().lower()) if packet.get("parent_current_location") else None)
+        or None
+    )
     return {
         "selected_choice_text": selected.get("choice_text") or "",
         "selected_choice_notes": selected.get("existing_choice_notes") or "",
@@ -2384,12 +2630,19 @@ def resolve_normal_context(packet: dict[str, Any]) -> dict[str, Any]:
         "character_name_map": character_name_map,
         "character_id_map": character_id_map,
         "location_name_map": location_name_map,
+        "path_location_name_map": path_location_name_map,
+        "path_location_id_map": path_location_id_map,
         "encountered_names": encountered_names,
+        "encountered_location_names": encountered_location_names,
         "current_visible_cast_names": current_visible_cast_names,
         "protagonist_id": protagonist_id,
         "protagonist_name": protagonist_name,
-        "current_location_id": int(current_location["entity_id"]) if current_location and current_location.get("entity_id") else None,
-        "current_location_name": current_location.get("name") if current_location else None,
+        "current_location_id": current_location_id,
+        "current_location_name": (
+            current_location_record.get("name")
+            if isinstance(current_location_record, dict)
+            else (packet.get("parent_current_location") or {}).get("name")
+        ),
     }
 
 
@@ -2453,13 +2706,13 @@ def compile_scene_body_draft(
     }
 
     issues: list[str] = []
-    manual_visible: set[str] = set()
+    protagonist_lowered = protagonist_name.strip().lower()
+    manual_visible_order: list[str] = []
     if draft.settings.start_show_all_from_last_node:
-        manual_visible = {
-            name.strip().lower()
-            for name in (resolution.get("current_visible_cast_names") or [])
-            if name.strip().lower() in all_character_lookup
-        }
+        for name in (resolution.get("current_visible_cast_names") or []):
+            lowered_name = name.strip().lower()
+            if lowered_name in all_character_lookup and lowered_name not in manual_visible_order:
+                manual_visible_order.append(lowered_name)
     auto_visible: set[str] = set()
     dialogue_lines: list[DialogueLine] = []
     scene_paragraphs: list[str] = []
@@ -2467,6 +2720,37 @@ def compile_scene_body_draft(
         name.strip().lower(): []
         for name in all_character_names
     }
+
+    def limit_visible_order(order: list[str], *, prioritized: list[str] | None = None) -> list[str]:
+        prioritized = [name for name in (prioritized or []) if name and name != protagonist_lowered]
+        non_protagonists = [name for name in order if name != protagonist_lowered]
+        while len(non_protagonists) > 2:
+            removable_index = next(
+                (index for index, name in enumerate(non_protagonists) if name not in prioritized),
+                0,
+            )
+            del non_protagonists[removable_index]
+        rebuilt: list[str] = []
+        if protagonist_lowered and protagonist_lowered in order:
+            rebuilt.append(protagonist_lowered)
+        for name in non_protagonists:
+            if name not in rebuilt:
+                rebuilt.append(name)
+        return rebuilt
+
+    def show_character(lowered_name: str) -> None:
+        nonlocal manual_visible_order
+        if not lowered_name:
+            return
+        manual_visible_order = [name for name in manual_visible_order if name != lowered_name]
+        manual_visible_order.append(lowered_name)
+        manual_visible_order = limit_visible_order(manual_visible_order)
+
+    def hide_character(lowered_name: str) -> None:
+        nonlocal manual_visible_order
+        manual_visible_order = [name for name in manual_visible_order if name != lowered_name]
+
+    manual_visible_order = limit_visible_order(manual_visible_order)
 
     def resolve_command_targets(command: SceneScriptCommand) -> list[str]:
         resolved_targets: list[str] = []
@@ -2494,17 +2778,23 @@ def compile_scene_body_draft(
     for textbox in draft.textboxes:
         for command in textbox.pending_commands:
             resolved_targets = resolve_command_targets(command)
-            lowered_targets = {name.strip().lower() for name in resolved_targets}
+            lowered_targets = [name.strip().lower() for name in resolved_targets]
             if command.action == "show":
-                manual_visible.update(lowered_targets)
+                for lowered_target in lowered_targets:
+                    show_character(lowered_target)
             elif command.action == "hide":
-                manual_visible.difference_update(lowered_targets)
+                for lowered_target in lowered_targets:
+                    hide_character(lowered_target)
             elif command.action == "show_only":
-                manual_visible = set(lowered_targets)
+                manual_visible_order = []
+                for lowered_target in lowered_targets:
+                    show_character(lowered_target)
             elif command.action == "show_all":
-                manual_visible = {name.strip().lower() for name in all_character_names}
+                manual_visible_order = []
+                for character_name in all_character_names:
+                    show_character(character_name.strip().lower())
             elif command.action == "hide_all":
-                manual_visible = set()
+                manual_visible_order = []
 
         resolved_speaker = resolve_scene_reference_name(
             raw_ref=textbox.speaker_ref,
@@ -2528,9 +2818,17 @@ def compile_scene_body_draft(
         else:
             auto_visible = set()
 
-        effective_visible = manual_visible | auto_visible
+        effective_visible_order = list(manual_visible_order)
+        for lowered_name in auto_visible:
+            if lowered_name and lowered_name != protagonist_lowered:
+                effective_visible_order = [name for name in effective_visible_order if name != lowered_name]
+                effective_visible_order.append(lowered_name)
+        effective_visible_order = limit_visible_order(
+            effective_visible_order,
+            prioritized=[name for name in auto_visible if name != protagonist_lowered],
+        )
+        effective_visible = set(effective_visible_order) | {name for name in auto_visible if name == protagonist_lowered}
         if draft.settings.mc_always_visible and protagonist_name.strip():
-            protagonist_lowered = protagonist_name.strip().lower()
             if protagonist_lowered in all_character_lookup:
                 effective_visible.add(protagonist_lowered)
 
@@ -2581,18 +2879,26 @@ def validate_scene_plan_draft(
         issues.append("SCENE_SUMMARY is too close to the parent summary. Advance the situation materially.")
     if len((draft.material_change or "").split()) < 4:
         issues.append("MATERIAL_CHANGE should state a concrete change, not a fragment.")
-    resolved_visible_names = resolve_scene_cast_names(draft=draft, resolution=resolution)
     declared_new_names = {name.strip().lower() for name in draft.new_character_names if name.strip()}
+    resolved_visible_names = resolve_scene_cast_names(draft=draft, resolution=resolution)
     protagonist_name = (resolution.get("protagonist_name") or "").strip().lower()
     non_protagonist_visible = [name for name in resolved_visible_names if name.strip().lower() != protagonist_name]
-    if len(resolved_visible_names) > 3:
-        issues.append("SCENE_CAST can contain at most three characters total in the current scene staging.")
-    if len(non_protagonist_visible) > 2:
-        issues.append("SCENE_CAST can contain at most two non-protagonist characters because the current scene staging only supports two side slots.")
     if draft.location_status == "new_location" and not draft.new_location_name:
         issues.append("NEW_LOCATION is required when LOCATION_STATUS is new_location.")
     if draft.location_status == "new_location" and not draft.new_location_intro:
         issues.append("NEW_LOCATION_INTRO is required when LOCATION_STATUS is new_location.")
+    if draft.location_status == "return_location" and not (draft.return_location_ref or "").strip():
+        issues.append("RETURN_LOCATION is required when LOCATION_STATUS is return_location.")
+    if draft.location_status == "return_location":
+        target_location = resolve_return_location_target(draft=draft, resolution=resolution)
+        if target_location is None:
+            issues.append(
+                "RETURN_LOCATION must name an already encountered path-safe location by id or name. Use path_location_continuity as the safe set."
+            )
+        else:
+            current_location_id = resolution.get("current_location_id")
+            if current_location_id is not None and int(target_location["id"]) == int(current_location_id):
+                issues.append("RETURN_LOCATION must be a different location from the parent current location.")
     unknown_or_off_path_visible = []
     for name in non_protagonist_visible:
         lowered = name.strip().lower()
@@ -2609,10 +2915,29 @@ def validate_scene_plan_draft(
         draft.material_change,
         ", ".join(draft.new_character_names),
         draft.new_location_name or "",
+        draft.return_location_ref or "",
         draft.new_character_intro or "",
         draft.new_location_intro or "",
     ]
     issues.extend(collect_plan_names(texts_to_scan, resolution))
+    isolation_pressure = packet.get("isolation_pressure") or {}
+    if isolation_pressure.get("active") and not scene_plan_satisfies_isolation_pressure(draft=draft, resolution=resolution):
+        issues.append(
+            "Isolation pressure is active and this scene setup still looks effectively solitary. Fix SCENE_CAST and/or NEW_CHARACTERS, or make the plan explicitly bring clear faction/social pressure onstage. A new location alone does not satisfy this."
+        )
+    new_character_pressure = packet.get("new_character_pressure") or {}
+    if new_character_pressure.get("active") and not scene_plan_satisfies_new_character_pressure(draft=draft):
+        issues.append(
+            "New-character pressure is active and this scene setup still does not introduce a brand-new character. Add NEW_CHARACTERS and NEW_CHARACTER_INTRO. Reusing only existing characters does not satisfy this."
+        )
+    location_transition_obligation = packet.get("location_transition_obligation") or {}
+    if location_transition_obligation.get("active") and not scene_plan_satisfies_location_transition_obligation(
+        draft=draft,
+        resolution=resolution,
+    ):
+        issues.append(
+            "This selected choice promised a location transition, so this scene setup must change location now. Use LOCATION_STATUS: new_location with NEW_LOCATION or LOCATION_STATUS: return_location with RETURN_LOCATION pointing at a different path-safe existing location."
+        )
     lowered_text = " ".join(texts_to_scan).lower()
     if any(token in lowered_text for token in ("full backstory", "true mastermind", "secret ruler", "the king")):
         issues.append("This scene plan reveals too much too early. Keep large hidden powers and full backstory deferred.")
@@ -2655,6 +2980,98 @@ def validate_scene_body_draft(
     ):
         issues.append("SCENE_BODY must not contain menu text or explicit choice prompts. Only write what happens in the scene; choices come later.")
     issues.extend(collect_narrator_owned_dialogue_issues(state=state, draft=draft, resolution=resolution))
+    issues.extend(collect_scene_body_pressure_issues(packet=packet, state=state, draft=draft, scene_text=scene_text, resolution=resolution))
+    return issues
+
+
+def collect_scene_body_pressure_issues(
+    *,
+    packet: dict[str, Any],
+    state: NormalRunConversationState,
+    draft: SceneBodyDraft,
+    scene_text: str,
+    resolution: dict[str, Any],
+) -> list[str]:
+    issues: list[str] = []
+    if state.scene_plan is None:
+        return issues
+    lowered_scene_text = " ".join(filter(None, [draft.raw_body, scene_text])).lower()
+    isolation_pressure = packet.get("isolation_pressure") or {}
+    protagonist_name = (resolution.get("protagonist_name") or "").strip().lower()
+    _cast_names, ref_to_name, exact_name_lookup = build_scene_cast_index_map(
+        draft=state.scene_plan,
+        resolution=resolution,
+    )
+    non_protagonist_present_onstage = False
+    for textbox in draft.textboxes:
+        resolved_speaker = resolve_scene_reference_name(
+            raw_ref=textbox.speaker_ref,
+            ref_to_name=ref_to_name,
+            exact_name_lookup=exact_name_lookup,
+            allow_narrator=False,
+        )
+        if resolved_speaker and resolved_speaker.strip().lower() != protagonist_name:
+            non_protagonist_present_onstage = True
+            break
+        for command in textbox.pending_commands:
+            for target in command.targets:
+                resolved_target = resolve_scene_reference_name(
+                    raw_ref=target,
+                    ref_to_name=ref_to_name,
+                    exact_name_lookup=exact_name_lookup,
+                    allow_narrator=False,
+                )
+                if resolved_target and resolved_target.strip().lower() != protagonist_name:
+                    non_protagonist_present_onstage = True
+                    break
+            if non_protagonist_present_onstage:
+                break
+        if non_protagonist_present_onstage:
+            break
+    social_or_faction_pressure_present = any(
+        marker in lowered_scene_text
+        for marker in (
+            "patrol",
+            "enumerator",
+            "courier",
+            "guard",
+            "clerk",
+            "auditor",
+            "question",
+            "interrogate",
+            "confront",
+            "calls out",
+            "voice",
+            "they arrive",
+            "someone arrives",
+        )
+    )
+    if isolation_pressure.get("active") and not (non_protagonist_present_onstage or social_or_faction_pressure_present):
+        issues.append(
+            "Isolation pressure is active and this scene still cannot be fixed inside SCENE_BODY alone. Return to scene_plan and add another named character, reintroduced character, or clear faction/social pressure onstage. A new location alone does not satisfy this."
+        )
+    new_character_pressure = packet.get("new_character_pressure") or {}
+    if new_character_pressure.get("active"):
+        if not state.scene_plan.new_character_names:
+            issues.append(
+                "New-character pressure is active and this scene still cannot be fixed inside SCENE_BODY alone. Return to scene_plan and add NEW_CHARACTERS plus NEW_CHARACTER_INTRO. Reusing only existing characters does not satisfy this."
+            )
+        elif not scene_body_mentions_declared_new_character(state=state, draft=draft):
+            issues.append(
+                "New-character pressure is active and SCENE_BODY still does not actually introduce the declared NEW_CHARACTERS onstage. Make the new character appear clearly in the scene."
+            )
+    location_transition_obligation = packet.get("location_transition_obligation") or {}
+    if location_transition_obligation.get("active"):
+        if state.scene_plan.location_status == "same_location":
+            issues.append(
+                "This selected choice promised a location transition and this scene is still declared as same_location. Return to scene_plan and change LOCATION_STATUS so the child scene actually moves now."
+            )
+        elif state.scene_plan.location_status in {"new_location", "return_location"}:
+            has_motion_cue = any(pattern.search(lowered_scene_text) for pattern in SCENE_TRANSITION_CUE_PATTERNS)
+            if not has_motion_cue and not (state.scene_plan.new_location_intro or "").strip():
+                issues.append(
+                    "This selected choice promised a location transition, but this scene body does not actually show the move, arrival, or re-entry yet. Return to scene_plan and strengthen LOCATION_STATUS/RETURN_LOCATION setup before retrying SCENE_BODY."
+                )
     return issues
 
 
@@ -2680,8 +3097,12 @@ def validate_transition_node_draft(
     if len((draft.scene_summary or "").split()) < 8:
         issues.append("TRANSITION_SUMMARY should explain how this bridge reaches the target node, not just name it.")
 
+    transition_packet = dict(packet)
+    transition_packet["isolation_pressure"] = {"active": False}
+    transition_packet["new_character_pressure"] = {"active": False}
+    transition_packet["location_stall_pressure"] = {"active": False}
     body_issues = validate_scene_body_draft(
-        packet=packet,
+        packet=transition_packet,
         state=state,
         draft=draft.body,
         resolution=resolution,
@@ -2758,6 +3179,12 @@ def collect_narrator_owned_dialogue_issues(
 def scene_body_issues_require_scene_plan_rewind(issues: list[str] | None) -> bool:
     return any(
         "Return to scene_plan and either add the proper casting or declare a new character" in issue
+        or "Return to scene_plan and add another named character" in issue
+        or "Return to scene_plan and add NEW_CHARACTERS plus NEW_CHARACTER_INTRO" in issue
+        or "Return to scene_plan and change LOCATION_STATUS/NEW_LOCATION" in issue
+        or "Return to scene_plan and strengthen LOCATION_STATUS/NEW_LOCATION" in issue
+        or "Return to scene_plan and change LOCATION_STATUS so the child scene actually moves now" in issue
+        or "Return to scene_plan and strengthen LOCATION_STATUS/RETURN_LOCATION setup" in issue
         for issue in (issues or [])
     )
 
@@ -2889,28 +3316,37 @@ def collect_partial_branch_pressure_issues(
     *,
     packet: dict[str, Any],
     candidate: GenerationCandidate,
+    state: NormalRunConversationState | None = None,
 ) -> list[str]:
-    actor_pressure = packet.get("actor_pressure") or {}
-    location_motion_pressure = packet.get("location_motion_pressure") or {}
+    isolation_pressure = packet.get("isolation_pressure") or {}
+    new_character_pressure = packet.get("new_character_pressure") or {}
+    location_stall_pressure = packet.get("location_stall_pressure") or {}
     action_summary = packet.get("recent_action_family_summary") or {}
     repeated_action_family = action_summary.get("repeated_action_family")
     repeated_action_count = int((action_summary.get("recent_action_family_counts") or {}).get(repeated_action_family or "", 0))
     issues: list[str] = []
 
-    if actor_pressure.get("needs_more_people") and not candidate_adds_actor_pressure(candidate):
+    if isolation_pressure.get("active") and not candidate_adds_actor_pressure(candidate):
         issues.append(
-            "This branch has gone too many scenes without another actor materially affecting events. "
-            "Reintroduce or introduce a character, or bring external faction pressure onstage."
+            "Isolation pressure is active and this branch is still too solitary. Reintroduce or introduce a character, or bring clear faction/social pressure onstage."
         )
 
-    if location_motion_pressure.get("should_move") and not candidate_adds_location_motion(candidate):
+    declared_new_character_names = (
+        [name for name in ((state.scene_plan.new_character_names if state and state.scene_plan else []) or []) if name.strip()]
+    )
+    if (
+        new_character_pressure.get("active")
+        and not candidate_adds_new_character(candidate)
+        and not declared_new_character_names
+    ):
         issues.append(
-            "This branch has lingered in the same location for too long. Move to a new place, return to a meaningful known place, or otherwise make location motion explicit."
+            "New-character pressure is active and this branch still does not introduce a brand-new character. Use NEW_CHARACTERS; reusing only existing characters does not satisfy this."
         )
 
     if (
-        actor_pressure.get("needs_more_people")
-        or location_motion_pressure.get("should_move")
+        isolation_pressure.get("active")
+        or new_character_pressure.get("active")
+        or location_stall_pressure.get("active")
         or repeated_action_count >= 3
         or (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
     ) and not candidate_has_material_delta(candidate):
@@ -3034,7 +3470,7 @@ def validate_choice_draft(
 
 
 def choice_draft_counts_as_consequential(choice: ChoiceDraft) -> bool:
-    if choice.choice_class in {"commitment", "ending"} or choice.target_existing_node is not None:
+    if choice.choice_class in {"commitment", "location_transition", "ending"} or choice.target_existing_node is not None:
         return True
     combined_text = " ".join(filter(None, [choice.choice_text, choice.next_node, choice.further_goals]))
     action_family = classify_choice_action_family(choice.choice_text)
@@ -3067,6 +3503,12 @@ def validate_choice_menu(
                 "At least one choice in this menu must be a commitment, social move, location shift, merge, closure, or immediate-pressure response."
             )
 
+    location_stall_pressure = packet.get("location_stall_pressure") or {}
+    if location_stall_pressure.get("active") and not any(choice.choice_class == "location_transition" for choice in choices):
+        issues.append(
+            "Location-stall pressure is active. This menu must include at least one CHOICE_CLASS: location_transition option. Satisfy that here in the choice-writing phase; that choice will promise a move to a different location when it is expanded later."
+        )
+
     issues.extend(collect_frontier_choice_shape_issues(packet=packet, choices=choices))
 
     if state is not None and resolution is not None:
@@ -3075,7 +3517,7 @@ def validate_choice_menu(
         candidate = build_partial_candidate_for_stage_validation(packet=packet, state=temp_state, resolution=resolution)
         if candidate is not None:
             issues.extend(collect_redundant_progression_issues(packet=packet, candidate=candidate))
-            issues.extend(collect_partial_branch_pressure_issues(packet=packet, candidate=candidate))
+            issues.extend(collect_partial_branch_pressure_issues(packet=packet, candidate=candidate, state=temp_state))
     return issues
 
 
@@ -3276,20 +3718,10 @@ def infer_current_location_reference(
         new_locations = list((extras.new_locations if extras else []) or [])
         return new_locations, None
 
-    search_text = " ".join(
-        filter(
-            None,
-            [
-                state.scene_plan.new_location_name or "",
-                state.scene_plan.new_location_intro or "",
-                state.scene_body.raw_body if state.scene_body else "",
-            ],
-        )
-    )
-    for lowered_name, location in (resolution.get("location_name_map") or {}).items():
-        if lowered_name and lowered_name in search_text.lower():
-            return [], EntityReference(entity_type="location", entity_id=int(location["id"]), role="current_scene")
-    raise ValueError("Could not resolve return_location from existing canonical locations.")
+    target_location = resolve_return_location_target(draft=state.scene_plan, resolution=resolution)
+    if target_location is not None and target_location.get("id") is not None:
+        return [], EntityReference(entity_type="location", entity_id=int(target_location["id"]), role="current_scene")
+    raise ValueError("Could not resolve return_location from encountered canonical locations.")
 
 
 def assemble_generation_candidate_from_state(
@@ -3475,6 +3907,8 @@ def build_user_prompt(packet: dict[str, Any]) -> str:
         "Use NEXT_NODE as a base for your scene, but expand and elaborate on it. Do not simply repeat it.\n"
         "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it in playable text. Hooks, worldbuilding notes, and other behind-the-scenes coherence trackers often name things the player has not learned yet.\n"
         "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Planning runs exist specifically to make idea usage easier during normal runs like this one.\n"
+        "Treat IDEAS.md as a main source of fresh people, places, and whimsical turns when the branch is getting stale.\n"
+        "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
         "Return only the JSON object, with no markdown fences or extra commentary.\n\n"
         "Frequently introduce new characters or bring in old ones if the context makes sense. New character ideas in IDEAS.md. \n"
         "Continually introduce new locations or revisit old ones as choices progress and the location changes.\n"
@@ -4166,10 +4600,13 @@ def run_normal_conversational_builder(
                     )
                     if scene_body_issues_require_scene_plan_rewind(scene_body_issues):
                         rewind_to_scene_plan = True
-                        rewind_scene_plan_issues = [
-                            "The previous SCENE_BODY introduced or used an in-world speaking character through Narrator text without proper casting. "
-                            "Fix SCENE_CAST and/or NEW_CHARACTERS now, add NEW_CHARACTER_INTRO if needed, then retry SCENE_BODY."
-                        ]
+                        if any("Isolation pressure is active" in issue or "Location-stall pressure is active" in issue for issue in scene_body_issues):
+                            rewind_scene_plan_issues = list(scene_body_issues)
+                        else:
+                            rewind_scene_plan_issues = [
+                                "The previous SCENE_BODY introduced or used an in-world speaking character through Narrator text without proper casting. "
+                                "Fix SCENE_CAST and/or NEW_CHARACTERS now, add NEW_CHARACTER_INTRO if needed, then retry SCENE_BODY."
+                            ]
                         break
                 except (ValidationError, ValueError) as exc:
                     scene_body_issues = [str(exc)]
@@ -4739,8 +5176,10 @@ def collect_branch_pressure_issues(
     packet: dict[str, Any],
     candidate: GenerationCandidate,
 ) -> list[str]:
-    actor_pressure = packet.get("actor_pressure") or {}
-    location_motion_pressure = packet.get("location_motion_pressure") or {}
+    isolation_pressure = packet.get("isolation_pressure") or {}
+    new_character_pressure = packet.get("new_character_pressure") or {}
+    location_stall_pressure = packet.get("location_stall_pressure") or {}
+    location_transition_obligation = packet.get("location_transition_obligation") or {}
     action_summary = packet.get("recent_action_family_summary") or {}
     issues: list[str] = []
 
@@ -4752,24 +5191,37 @@ def collect_branch_pressure_issues(
     for choice in candidate.choices:
         choice_class = choice.choice_class or infer_choice_class_from_text(choice.choice_text, choice.notes)
         choice_classes.append(choice_class)
-        if choice_class in {"commitment", "ending"} or choice.target_node_id is not None:
+        if choice_class in {"commitment", "location_transition", "ending"} or choice.target_node_id is not None:
             consequential_choice_count += 1
         elif choice_class == "progress" and choice_text_implies_consequence(choice.choice_text):
             consequential_choice_count += 1
 
     if len(candidate.choices) >= 2 and consequential_choice_count == 0:
         issues.append(
-            "Multi-choice scenes should include at least one consequential option, such as a commitment, merge, ending, social move, location change, or response to immediate pressure."
+            "Multi-choice scenes should include at least one consequential option, such as a commitment, location_transition, merge, ending, social move, location change, or response to immediate pressure."
         )
 
-    if actor_pressure.get("needs_more_people") and not candidate_adds_actor_pressure(candidate):
+    if isolation_pressure.get("active") and not candidate_adds_actor_pressure(candidate):
         issues.append(
-            "This branch has gone too many scenes without another actor materially affecting events. Reintroduce or introduce a character, or bring external faction pressure onstage."
+            "Isolation pressure is active and this branch is still too solitary. Reintroduce or introduce a character, or bring clear faction/social pressure onstage."
         )
 
-    if location_motion_pressure.get("should_move") and not candidate_adds_location_motion(candidate):
+    if new_character_pressure.get("active") and not candidate_adds_new_character(candidate):
         issues.append(
-            "This branch has lingered in the same location for too long. Move to a new place, return to a meaningful known place, or otherwise make location motion explicit."
+            "New-character pressure is active and this branch still does not introduce a brand-new character. Use NEW_CHARACTERS; reusing only existing characters does not satisfy this."
+        )
+
+    if location_transition_obligation.get("active") and not candidate_satisfies_location_transition_obligation(
+        packet=packet,
+        candidate=candidate,
+    ):
+        issues.append(
+            "This selected choice promised a location transition, but the resulting scene still does not actually change location. Use new_location or return_location so the child scene arrives somewhere different from the parent current location."
+        )
+
+    if location_stall_pressure.get("active") and not candidate_has_location_transition_choice(candidate):
+        issues.append(
+            "Location-stall pressure is active and this menu still does not include a CHOICE_CLASS: location_transition option. Satisfy that in the choice-writing phase instead of forcing this scene to teleport."
         )
 
     if repeated_action_family in {"inspect", "follow", "touch", "step_back"} and repeated_action_count >= 3:
@@ -4780,8 +5232,9 @@ def collect_branch_pressure_issues(
             )
 
     if (
-        actor_pressure.get("needs_more_people")
-        or location_motion_pressure.get("should_move")
+        isolation_pressure.get("active")
+        or new_character_pressure.get("active")
+        or location_stall_pressure.get("active")
         or repeated_action_count >= 3
         or (packet.get("frontier_budget_state") or {}).get("pressure_level") in {"soft", "hard"}
     ) and not candidate_has_material_delta(candidate):

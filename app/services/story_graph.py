@@ -16,7 +16,9 @@ from app.services.story_notes import StoryDirectionService
 class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
 
-    SAME_LOCATION_PRESSURE_THRESHOLD = 6
+    SAME_LOCATION_PRESSURE_THRESHOLD = 4
+    ISOLATION_PRESSURE_THRESHOLD = 6
+    NEW_CHARACTER_PRESSURE_THRESHOLD = 6
 
     NONVISUAL_SPEAKER_PATTERNS = (
         re.compile(r"\bunseen\b", re.IGNORECASE),
@@ -679,6 +681,7 @@ class StoryGraphService:
         merge_only_streak = 0
         same_location_streak = 0
         single_actor_scene_streak = 0
+        new_character_gap_streak = 0
         action_family_counts: dict[str, int] = {}
         repeated_action_family: str | None = None
         recent_primary_location_id: int | None = None
@@ -725,12 +728,20 @@ class StoryGraphService:
                 )
                 or any(
                     entity.get("entity_type") == "character"
-                    and entity.get("role") in {"introduced", "speaker", "present"}
+                    and entity.get("role") in {"introduced", "new_character", "speaker", "present"}
                     for entity in (node.get("entities") or [])
                 )
             )
             if index == single_actor_scene_streak and not has_character_pressure:
                 single_actor_scene_streak += 1
+
+            introduces_brand_new_character = any(
+                entity.get("entity_type") == "character"
+                and entity.get("role") == "new_character"
+                for entity in (node.get("entities") or [])
+            )
+            if index == new_character_gap_streak and not introduces_brand_new_character:
+                new_character_gap_streak += 1
 
             node_action_families = {
                 family
@@ -761,6 +772,7 @@ class StoryGraphService:
                     "opens_fresh_path": opens_fresh_path,
                     "current_scene_location_id": current_scene_location_id,
                     "has_character_pressure": has_character_pressure,
+                    "introduces_brand_new_character": introduces_brand_new_character,
                     "action_families": sorted(node_action_families),
                 }
             )
@@ -797,6 +809,7 @@ class StoryGraphService:
             "nodes_opening_fresh_paths": nodes_opening_fresh_paths,
             "same_location_streak": same_location_streak,
             "single_actor_scene_streak": single_actor_scene_streak,
+            "new_character_gap_streak": new_character_gap_streak,
             "recent_action_family_counts": action_family_counts,
             "repeated_action_family": repeated_action_family,
             "merge_pressure_level": merge_pressure_level,
@@ -924,10 +937,39 @@ class StoryGraphService:
             if choice["to_node_id"] is not None:
                 raise ValueError("choice_id is already fulfilled.")
         development_depth = int(branch_state_service.ensure_branch(request_branch_key)["branch_depth"]) + 1
+        created_location_ids_by_name: dict[str, int] = {}
+        for location in candidate.new_locations:
+            created_location = canon.create_or_get_location(
+                name=location.name,
+                description=location.description,
+                canonical_summary=location.canonical_summary,
+            )
+            if location.name.strip() and created_location.get("id") is not None:
+                created_location_ids_by_name[location.name.strip().lower()] = int(created_location["id"])
         inherited_referenced_entities = self._inherit_referenced_entities(
             parent_node=parent_node,
             candidate=candidate,
         )
+        candidate_declares_current_scene = any(
+            reference.entity_type == "location" and reference.role == "current_scene"
+            for reference in candidate.entity_references
+        )
+        if not candidate_declares_current_scene and len(candidate.new_locations) == 1:
+            only_new_location = candidate.new_locations[0]
+            new_location_id = created_location_ids_by_name.get((only_new_location.name or "").strip().lower())
+            if new_location_id is not None:
+                inherited_referenced_entities = [
+                    item
+                    for item in inherited_referenced_entities
+                    if not (item.get("entity_type") == "location" and item.get("role") == "current_scene")
+                ]
+                inherited_referenced_entities.append(
+                    {
+                        "entity_type": "location",
+                        "entity_id": int(new_location_id),
+                        "role": "current_scene",
+                    }
+                )
         floating_intro_reference_ids = {
             int(intro.character_id)
             for intro in candidate.floating_character_introductions
@@ -1056,13 +1098,6 @@ class StoryGraphService:
                         ),
                         commit=False,
                     )
-                )
-
-            for location in candidate.new_locations:
-                canon.create_or_get_location(
-                    name=location.name,
-                    description=location.description,
-                    canonical_summary=location.canonical_summary,
                 )
 
             created_character_ids_by_name: dict[str, int] = {}
@@ -1566,7 +1601,7 @@ class StoryGraphService:
                     story_node_id=story_node_id,
                     entity_type="character",
                     entity_id=character_id,
-                    role="introduced" if lowered in created_character_ids_by_name else "mentioned",
+                    role="new_character" if lowered in created_character_ids_by_name else "mentioned",
                 )
                 referenced_character_ids.add(character_id)
             if character_id in present_character_ids or not available_slots:
@@ -1616,11 +1651,13 @@ class StoryGraphService:
             score += 6.0
         if choice_class == "inspection":
             score -= 4.0
-        elif choice_class in {"progress", "commitment"}:
+        elif choice_class in {"progress", "commitment", "location_transition"}:
             score += 2.0
         elif choice_class == "ending":
             score += 1.0
-        if branch_shape.get("single_actor_scene_streak", 0) >= 2:
+        if branch_shape.get("single_actor_scene_streak", 0) >= self.ISOLATION_PRESSURE_THRESHOLD:
+            score += 2.5
+        if branch_shape.get("new_character_gap_streak", 0) >= self.NEW_CHARACTER_PRESSURE_THRESHOLD:
             score += 2.5
         if branch_shape.get("same_location_streak", 0) >= self.SAME_LOCATION_PRESSURE_THRESHOLD:
             score += 2.5
@@ -1656,10 +1693,12 @@ class StoryGraphService:
             reason = "High-priority continuity target: this leaf carries a bound medium-range idea and should be revisited."
         elif branch_shape.get("should_prefer_divergence"):
             reason = "Strong divergence target: this branch has quick-merged too often and should open a fresh path now."
+        elif branch_shape.get("new_character_gap_streak", 0) >= self.NEW_CHARACTER_PRESSURE_THRESHOLD:
+            reason = "New-character target: this branch has gone too long without introducing a brand-new character and should add one now."
         elif branch_shape.get("same_location_streak", 0) >= self.SAME_LOCATION_PRESSURE_THRESHOLD:
-            reason = "Location-motion target: this branch has lingered in one place and should move, return somewhere meaningful, or transition."
-        elif branch_shape.get("single_actor_scene_streak", 0) >= 2:
-            reason = "Character-pressure target: this branch needs another person or faction pressure onstage soon."
+            reason = "Location-transition target: this branch has lingered in one place and this menu should open a location_transition path."
+        elif branch_shape.get("single_actor_scene_streak", 0) >= self.ISOLATION_PRESSURE_THRESHOLD:
+            reason = "Isolation-pressure target: this branch has stayed protagonist-only too long and needs another person or faction pressure onstage."
         elif global_budget.get("pressure_level") in {"soft", "hard"} and sibling_open_choices > 1:
             reason = "Frontier-control target: this parent already has several active siblings, so a merge or closure here would reduce branch sprawl."
         elif eligible_major > 0:

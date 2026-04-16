@@ -56,6 +56,7 @@ from app.tools.run_story_worker_local import (
     parse_choice_form,
     parse_llm_result,
     parse_scene_body_form,
+    parse_scene_script_command,
     parse_transition_node_form,
     parse_scene_extras_form,
     parse_scene_hooks_form,
@@ -2219,7 +2220,20 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "author_warnings" in packet
         assert "author_warning_banner" in packet
         assert "final_warning" in packet
+        assert "isolation_pressure" in packet
+        assert "new_character_pressure" in packet
+        assert "location_stall_pressure" in packet
+        assert "path_location_continuity" in packet
+        assert "parent_current_location" in packet
+        assert "location_transition_obligation" in packet
         assert packet["author_warnings"]
+        if packet["isolation_pressure"]["active"]:
+            assert any("Isolation pressure is active" in warning for warning in packet["author_warnings"])
+        if packet["new_character_pressure"]["active"]:
+            assert any("New-character pressure is active" in warning for warning in packet["author_warnings"])
+        if packet["location_stall_pressure"]["active"]:
+            assert any("Location-stall pressure is active" in warning for warning in packet["author_warnings"])
+            assert any("location_transition" in warning for warning in packet["author_warnings"])
         if packet["frontier_budget_state"]["pressure_level"] in {"soft", "hard"}:
             assert any("Frontier pressure is" in warning for warning in packet["author_warnings"])
             assert any("This run will ONLY validate if at least one choice uses TARGET_EXISTING_NODE" in warning for warning in packet["author_warnings"])
@@ -2234,9 +2248,15 @@ def test_prepare_story_run_tool_outputs_compact_packet(tmp_path: Path) -> None:
         assert "Use NEXT_NODE as a base for your scene" in packet["next_action"]
         assert "Do not emit JSON in normal mode" in packet["next_action"]
         assert "ideas.md" in packet["next_action"].lower()
+        assert "main source of fresh people, places, and whimsical turns" in packet["next_action"]
         assert "asset_availability" in packet["next_action"]
         assert "reveal_guardrails" in packet["next_action"]
         assert "frontier_choice_constraints as hard validation rules" in packet["next_action"]
+        assert "isolation_pressure" in packet["next_action"]
+        assert "new_character_pressure" in packet["next_action"]
+        assert "location_stall_pressure" in packet["next_action"]
+        assert "path_location_continuity" in packet["next_action"]
+        assert "location_transition option" in packet["next_action"]
         assert "this run will only validate if at least one choice uses TARGET_EXISTING_NODE" in packet["next_action"]
         assert "You will be able to satisfy that requirement during the choice creation phase." in packet["next_action"]
         assert isinstance(packet["planning_policy"]["chance"], float)
@@ -2280,6 +2300,53 @@ def test_prepare_story_run_exposes_choice_handoff_from_next_node_notes(tmp_path:
     packet = json.loads(result.stdout)
     assert packet["choice_handoff"]["next_node"] == "The seam opens and reveals a lift below the roots."
     assert packet["choice_handoff"]["further_goals"] == "Bring in survey pressure and move the branch underground soon."
+
+
+def test_prepare_story_run_exposes_location_transition_obligation_for_selected_choice(tmp_path: Path) -> None:
+    client, db_path = build_client(tmp_path)
+    client.post("/story/seed-opening-story")
+    frontier_choice_id = client.get("/frontier").json()[0]["choice_id"]
+
+    with connect(db_path) as connection:
+        connection.execute(
+            "UPDATE choices SET notes = ? WHERE id = ?",
+            (
+                json.dumps(
+                    {
+                        "notes": "NEXT_NODE: You follow the ladder shaft toward the old orchard route. FURTHER_GOALS: Return to an earlier location through a new scene.",
+                        "choice_class": "location_transition",
+                    }
+                ),
+                frontier_choice_id,
+            ),
+        )
+        connection.commit()
+
+    command = [
+        sys.executable,
+        "-m",
+        "app.tools.prepare_story_run",
+        "--play-base-url",
+        "http://127.0.0.1:8001",
+        "--choice-id",
+        str(frontier_choice_id),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "CYOA_DB_PATH": str(db_path)},
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(result.stdout)
+    assert packet["selected_frontier_item"]["choice_class"] == "location_transition"
+    assert packet["location_transition_obligation"]["active"] is True
+    assert "changes current_scene now" in packet["location_transition_obligation"]["rule"]
+    assert packet["parent_current_location"] is not None
+    assert packet["path_location_continuity"]["encountered_locations"]
 
 
 def test_prepare_story_run_tool_can_include_full_context_on_request(tmp_path: Path) -> None:
@@ -2522,8 +2589,9 @@ def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
     checklist = build_validation_checklist(
         branch_shape={
             "should_prefer_divergence": True,
-            "single_actor_scene_streak": 2,
-            "same_location_streak": 6,
+            "single_actor_scene_streak": 6,
+            "new_character_gap_streak": 6,
+            "same_location_streak": 4,
             "repeated_action_family": "inspect",
         }
     )
@@ -2533,7 +2601,8 @@ def test_validation_checklist_includes_boldness_and_dynamic_pressure() -> None:
     assert any("player is actually familiar" in item for item in checklist)
     assert any("Frequently use ideas from IDEAS.md" in item for item in checklist)
     assert any("Introduce new locations frequently" in item for item in checklist)
-    assert any("gone several scenes without enough character pressure" in item for item in checklist)
+    assert any("stayed protagonist-only too long" in item for item in checklist)
+    assert any("gone too long without a brand-new character" in item for item in checklist)
     assert any("lingered in one place too long" in item for item in checklist)
     assert any("repeating the 'inspect' action family" in item for item in checklist)
 
@@ -2598,8 +2667,8 @@ def test_collect_branch_pressure_issues_rejects_static_same_location_all_inspect
 
     issues = collect_branch_pressure_issues(
         packet={
-            "actor_pressure": {"needs_more_people": True},
-            "location_motion_pressure": {"should_move": True},
+            "isolation_pressure": {"active": True},
+            "location_stall_pressure": {"active": True},
             "recent_action_family_summary": {
                 "repeated_action_family": "inspect",
                 "recent_action_family_counts": {"inspect": 4},
@@ -2610,8 +2679,8 @@ def test_collect_branch_pressure_issues_rejects_static_same_location_all_inspect
     )
 
     assert any("consequential option" in issue for issue in issues)
-    assert any("gone too many scenes without another actor" in issue for issue in issues)
-    assert any("lingered in the same location" in issue for issue in issues)
+    assert any("still too solitary" in issue for issue in issues)
+    assert any("location_transition option" in issue for issue in issues)
 
 
 def test_rebalance_frontier_parks_excess_choices_and_can_unpark(tmp_path: Path) -> None:
@@ -3206,6 +3275,224 @@ def test_validate_scene_plan_draft_rejects_unknown_scene_cast_name_unless_declar
 
     assert any("SCENE_CAST includes 'New Witness'" in issue for issue in issues)
 
+
+def test_validate_scene_plan_draft_allows_larger_cast_when_not_all_visible_at_once() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Crowded Circuit",
+                "SCENE_SUMMARY: A larger cast is declared, but the body can stage them selectively.",
+                "MATERIAL_CHANGE: The scene may rotate who is present without showing everyone at once.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: new_location",
+                "SCENE_CAST: 1, 2",
+                "NEW_CHARACTERS: Gearwick, Clerk Sedge",
+                "NEW_LOCATION: The Junction Mechanism Chamber",
+                "NEW_CHARACTER_INTRO: New arrivals spill in from different conduits as the chamber wakes.",
+                "NEW_LOCATION_INTRO: The passage opens into a louder chamber full of moving brass.",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {
+                "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+                "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+
+    assert not any("side slots" in issue for issue in issues)
+    assert not any("at most three characters total" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_rejects_solitary_setup_under_isolation_pressure() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Alone Again",
+                "SCENE_SUMMARY: You study the vault seam in private again.",
+                "MATERIAL_CHANGE: The same solitary investigation continues in place.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={"isolation_pressure": {"active": True}},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("Isolation pressure is active" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_rejects_missing_new_character_under_new_character_pressure() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Familiar Faces",
+                "SCENE_SUMMARY: You rely on familiar company instead of anyone new.",
+                "MATERIAL_CHANGE: Existing cast pressure increases, but no brand-new person appears.",
+                "OPENING_BEAT: confrontation",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: 1, 2",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={"new_character_pressure": {"active": True}},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {
+                "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+                "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+
+    assert any("New-character pressure is active" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_allows_same_location_setup_under_location_stall_pressure_until_choice_phase() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Same Hallway",
+                "SCENE_SUMMARY: You remain in the same hall and inspect the same trouble again.",
+                "MATERIAL_CHANGE: The branch stays in place without changing location framing.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={"location_stall_pressure": {"active": True}},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert not any("Location-stall pressure is active" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_rejects_same_location_under_location_transition_obligation() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Same Hallway",
+                "SCENE_SUMMARY: You keep talking in the same hall.",
+                "MATERIAL_CHANGE: The conversation continues without actually moving.",
+                "OPENING_BEAT: dialogue_turn",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={"location_transition_obligation": {"active": True}},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+            "current_location_id": 2,
+            "path_location_name_map": {"echoing orchard": {"id": 3, "name": "Echoing Orchard"}},
+            "path_location_id_map": {3: {"id": 3, "name": "Echoing Orchard"}},
+        },
+    )
+
+    assert any("promised a location transition" in issue for issue in issues)
+
+
+def test_validate_scene_plan_draft_allows_path_safe_return_location_under_location_transition_obligation() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Back To The Orchard",
+                "SCENE_SUMMARY: You leave the archive and head back to the orchard with the fragment.",
+                "MATERIAL_CHANGE: The branch returns to a known place as a brand-new scene.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: return_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "RETURN_LOCATION: Echoing Orchard",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: The corridor tips you back toward the orchard's replaying fruit.",
+            ]
+        )
+    )
+
+    issues = validate_scene_plan_draft(
+        packet={"location_transition_obligation": {"active": True}},
+        draft=scene_plan,
+        resolution={
+            "protagonist_name": "The Tall Gnome",
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "encountered_names": {"the tall gnome"},
+            "current_location_id": 2,
+            "path_location_name_map": {"echoing orchard": {"id": 3, "name": "Echoing Orchard"}},
+            "path_location_id_map": {3: {"id": 3, "name": "Echoing Orchard"}},
+        },
+    )
+
+    assert not any("promised a location transition" in issue for issue in issues)
+
     none_settings_scene_body = parse_scene_body_form(
         "\n".join(
             [
@@ -3315,6 +3602,7 @@ def test_validate_scene_plan_draft_rejects_unknown_scene_cast_name_unless_declar
 
     scene_plan_template = build_form_template("scene_plan")
     assert "SCENE_CAST: <write one actual value only: MC_ONLY, SAME, NONE, or comma-separated canonical character ids/names like 1, 2>" in scene_plan_template
+    assert "RETURN_LOCATION: <existing canonical location id or name, or NONE>" in scene_plan_template
 
     scene_plan_prompt = build_step_prompt(
         step_name="scene_plan",
@@ -3323,6 +3611,26 @@ def test_validate_scene_plan_draft_rejects_unknown_scene_cast_name_unless_declar
         requested_choice_count=2,
     )
     assert "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list." in scene_plan_prompt
+
+    pressured_scene_plan_prompt = build_step_prompt(
+        step_name="scene_plan",
+        packet={
+            "branch_key": "default",
+            "isolation_pressure": {"active": True},
+            "new_character_pressure": {"active": True},
+            "location_stall_pressure": {"active": True},
+        },
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+    )
+    assert "Current isolation pressure rules" in pressured_scene_plan_prompt
+    assert "a new location alone does NOT satisfy isolation pressure" in pressured_scene_plan_prompt
+    assert "Current new-character pressure rules" in pressured_scene_plan_prompt
+    assert "reusing only existing characters does NOT satisfy new-character pressure" in pressured_scene_plan_prompt
+    assert "Current location-stall pressure rules" in pressured_scene_plan_prompt
+    assert "CHOICE_CLASS: location_transition option in the menu" in pressured_scene_plan_prompt
+    assert "a new character alone does NOT satisfy location-stall pressure" in pressured_scene_plan_prompt
+    assert "IDEAS.md as a main source of fresh people, places, and whimsical turns" in pressured_scene_plan_prompt
 
     link_nodes_template = build_form_template("link_nodes")
     assert "TRANSITION_TITLE" in link_nodes_template
@@ -3769,6 +4077,22 @@ def test_scene_plan_prompt_clarifies_new_character_names_only_and_auto_append() 
     assert "For NEW_CHARACTERS, write only the new characters' names" in prompt
     assert "Do not invent ids, slot numbers, or parenthetical numbers there." in prompt
     assert "they will be added to the accepted scene cast automatically" in prompt
+
+
+def test_build_step_prompt_surfaces_location_transition_requirement_when_location_pressure_is_active() -> None:
+    prompt = build_step_prompt(
+        step_name="choice",
+        packet={
+            "location_stall_pressure": {"active": True},
+        },
+        state=NormalRunConversationState(),
+        requested_choice_count=2,
+        choice_index=0,
+    )
+
+    assert "This menu must include at least one CHOICE_CLASS: location_transition option." in prompt
+    assert "future expansion will move to a different location than the current one" in prompt
+    assert "Allowed CHOICE_CLASS values are only: inspection, progress, commitment, location_transition, ending." in prompt
 
 
 def test_build_step_prompt_repeats_merge_closure_requirement_in_hooks_step() -> None:
@@ -4257,6 +4581,265 @@ def test_validate_scene_body_draft_allows_escaped_quotes_in_narrator_text() -> N
     assert not any("uses raw quotes inside Narrator text" in issue for issue in issues)
 
 
+def test_validate_scene_body_draft_requests_scene_plan_rewind_for_isolation_pressure_failure() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Thin Company",
+                "SCENE_SUMMARY: The scene promises pressure but still leaves you alone.",
+                "MATERIAL_CHANGE: The branch tries to continue in solitude again.",
+                "OPENING_BEAT: pressure_escalation",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You remain alone with the humming seam and listen to your own breathing.",
+                "Nothing else arrives and nobody addresses you.",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={"isolation_pressure": {"active": True}},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("Isolation pressure is active" in issue for issue in issues)
+    assert scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_validate_scene_body_draft_requests_scene_plan_rewind_for_new_character_pressure_without_setup() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Old Company",
+                "SCENE_SUMMARY: You stay with familiar people only.",
+                "MATERIAL_CHANGE: The branch keeps moving without introducing anyone new.",
+                "OPENING_BEAT: pressure_escalation",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: 1, 2",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "The Brass Patrol Member keeps talking while no new person enters the scene.",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={"new_character_pressure": {"active": True}},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {
+                "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+                "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+
+    assert any("New-character pressure is active" in issue for issue in issues)
+    assert scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_validate_scene_body_draft_retries_when_declared_new_character_never_appears() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Missing Arrival",
+                "SCENE_SUMMARY: The plan declares someone new, but the body forgets them.",
+                "MATERIAL_CHANGE: A fresh face should appear here.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: same_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: Clerk Sedge",
+                "NEW_LOCATION: NONE",
+                "NEW_CHARACTER_INTRO: A tidy clerk arrives balancing a waxed ledger.",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You wait by the seam and nothing new enters before the choices arrive.",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={"new_character_pressure": {"active": True}},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+        },
+    )
+
+    assert any("SCENE_BODY still does not actually introduce the declared NEW_CHARACTERS" in issue for issue in issues)
+    assert not scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_validate_scene_body_draft_requests_scene_plan_rewind_for_location_transition_obligation_failure() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Supposed Move",
+                "SCENE_SUMMARY: The scene claims a return but the body never actually moves.",
+                "MATERIAL_CHANGE: The plan says the branch shifts place.",
+                "OPENING_BEAT: transition",
+                "LOCATION_STATUS: return_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: NONE",
+                "RETURN_LOCATION: Echoing Orchard",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You stand exactly where you were, watching the same seam breathe in the same wall.",
+                "The place does not change and the moment does not shift.",
+            ]
+        )
+    )
+    issues = validate_scene_body_draft(
+        packet={"location_transition_obligation": {"active": True}},
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"the tall gnome": {"id": 1, "name": "The Tall Gnome"}},
+            "character_id_map": {1: {"id": 1, "name": "The Tall Gnome"}},
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome"},
+            "current_location_id": 2,
+            "path_location_name_map": {"echoing orchard": {"id": 3, "name": "Echoing Orchard"}},
+            "path_location_id_map": {3: {"id": 3, "name": "Echoing Orchard"}},
+        },
+    )
+
+    assert any("promised a location transition" in issue for issue in issues)
+    assert scene_body_issues_require_scene_plan_rewind(issues)
+
+
+def test_compile_scene_body_rotates_out_oldest_non_protagonist_when_side_slots_fill() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Junction Company",
+                "SCENE_SUMMARY: Several characters are available, but only some should be visible at once.",
+                "MATERIAL_CHANGE: The chamber fills with people in rotating beats.",
+                "OPENING_BEAT: confrontation",
+                "LOCATION_STATUS: new_location",
+                "SCENE_CAST: 1, 2",
+                "NEW_CHARACTERS: Gearwick, Clerk Sedge",
+                "NEW_LOCATION: The Junction Mechanism Chamber",
+                "NEW_CHARACTER_INTRO: New arrivals appear from different maintenance conduits.",
+                "NEW_LOCATION_INTRO: The seam opens into a mechanical chamber.",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY:",
+                "@show 2",
+                "@show Gearwick",
+                "@show Clerk Sedge",
+                "Narrator: The chamber fills with anxious voices.",
+            ]
+        )
+    )
+
+    compiled, issues = compile_scene_body_draft(
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {
+                "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+                "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+
+    assert compiled is not None
+    assert not issues
+    assert compiled.hidden_lines_by_character["brass patrol member"] == [0]
+    assert compiled.hidden_lines_by_character["gearwick"] == []
+    assert compiled.hidden_lines_by_character["clerk sedge"] == []
+
+
+def test_parse_scene_script_command_accepts_show_all_and_hide_all_variants() -> None:
+    command_lines = [
+        ("@show_all", "show_all"),
+        ("@show all", "show_all"),
+        ("@hide_all", "hide_all"),
+        ("@hide all", "hide_all"),
+    ]
+
+    for raw_line, expected_action in command_lines:
+        command = parse_scene_script_command(raw_line)
+        assert command is not None
+        assert command.action == expected_action
+        assert command.targets == []
+
+
 def test_validate_choice_menu_allows_distinct_progress_choices_when_one_has_real_motion() -> None:
     packet = {
         "consequential_choice_requirement": {"required": True},
@@ -4380,6 +4963,107 @@ def test_validate_choice_menu_allows_travel_or_escape_to_break_repeated_follow_p
             choice_class="progress",
             next_node="You break into a desperate run through the damp field before the patrol can close the gap.",
             further_goals="Gain distance, force location motion, and find temporary cover away from the immediate pressure.",
+        ),
+    ]
+
+    assert validate_choice_menu(packet=packet, choices=choices) == []
+
+
+def test_validate_choice_menu_does_not_raise_new_character_pressure_when_scene_plan_already_declared_one() -> None:
+    packet = {
+        "new_character_pressure": {"active": True},
+    }
+    state = NormalRunConversationState(
+        scene_plan=ScenePlanDraft(
+            scene_title="Registry Arrival",
+            scene_summary="A new official is about to appear.",
+            material_change="The branch reaches a new annex and introduces a fresh face.",
+            opening_beat="transition",
+            location_status="new_location",
+            scene_cast_mode="explicit",
+            scene_cast_entries=["1", "2"],
+            new_character_names=["Chrono-Curator"],
+            new_location_name="The Memory Registry Annex",
+            new_character_intro="The Chrono-Curator steps out to address the disturbance.",
+            new_location_intro="You enter the annex under a wash of registry light.",
+        ),
+        scene_body=SceneBodyDraft(
+            raw_body="The annex hums while the Brass Patrol Member gestures toward the deeper shelves."
+        ),
+    )
+    choices = [
+        ChoiceDraft(
+            choice_text="Follow the curator deeper into the annex",
+            choice_class="commitment",
+            next_node="The curator leads you past the first shelves toward a private registry alcove.",
+            further_goals="Learn why the annex tracks mnemonic energy and what the curator wants from you.",
+        ),
+        ChoiceDraft(
+            choice_text="Stay near the entrance and question the patrol member",
+            choice_class="progress",
+            next_node="You hold at the threshold and force the patrol member to explain why the annex reacted to you.",
+            further_goals="Keep the curator at a distance while testing the patrol's knowledge of the system.",
+        ),
+    ]
+    resolution = {
+        "protagonist_name": "The Tall Gnome",
+        "protagonist_id": 1,
+        "current_visible_cast_names": [],
+        "character_name_map": {
+            "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+            "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+        },
+        "character_id_map": {
+            1: {"id": 1, "name": "The Tall Gnome"},
+            2: {"id": 2, "name": "Brass Patrol Member"},
+        },
+        "encountered_names": {"the tall gnome", "brass patrol member"},
+    }
+
+    issues = validate_choice_menu(packet=packet, choices=choices, state=state, resolution=resolution)
+
+    assert not any("New-character pressure is active" in issue for issue in issues)
+
+
+def test_validate_choice_menu_requires_location_transition_under_location_stall_pressure() -> None:
+    packet = {
+        "location_stall_pressure": {"active": True},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Follow the conduit line toward the inner registry",
+            choice_class="commitment",
+            next_node="You move deeper into the junction toward a brighter cluster of memory conduits.",
+            further_goals="Learn what the chamber regulates and how it reacts to your altered hand.",
+        ),
+        ChoiceDraft(
+            choice_text="Stay near the threshold and observe the chamber's rhythm",
+            choice_class="progress",
+            next_node="You hold at the entrance long enough to study how the chamber cycles its light and pressure.",
+            further_goals="Gather enough information to decide whether the junction is safe to traverse further.",
+        ),
+    ]
+    issues = validate_choice_menu(packet=packet, choices=choices)
+
+    assert any("CHOICE_CLASS: location_transition" in issue for issue in issues)
+
+
+def test_validate_choice_menu_allows_location_transition_under_location_stall_pressure() -> None:
+    packet = {
+        "location_stall_pressure": {"active": True},
+    }
+    choices = [
+        ChoiceDraft(
+            choice_text="Follow Elara through the orchard tram gate",
+            choice_class="location_transition",
+            next_node="Elara leads you out of the archive and back toward the Echoing Orchard through a hidden gate.",
+            further_goals="Return to a known place with new context and compare the fragment against the orchard's replaying sounds.",
+        ),
+        ChoiceDraft(
+            choice_text="Stay in the archive and question Elara first",
+            choice_class="commitment",
+            next_node="You hold Elara in place for one direct answer before anyone moves.",
+            further_goals="Clarify what the map fragment means before committing to the route she suggests.",
         ),
     ]
 
@@ -5002,6 +5686,62 @@ def test_infer_missing_asset_requests_detects_current_scene_background(tmp_path:
     assert "Mushroom Field" in background_request["prompt"]
 
 
+def test_apply_generation_new_location_becomes_current_scene_for_inferred_background(tmp_path: Path) -> None:
+    client, _ = build_client(tmp_path)
+    client.post("/story/reset-opening-canon")
+    client.post("/story/seed-opening-story")
+    frontier_item = client.get("/frontier").json()[0]
+
+    response = client.post(
+        "/jobs/apply-generation",
+        json={
+            "branch_key": "default",
+            "parent_node_id": frontier_item["from_node_id"],
+            "choice_id": frontier_item["choice_id"],
+            "candidate": {
+                "branch_key": "default",
+                "scene_title": "Velvet Platform Arrival",
+                "scene_summary": "You step down into a velvet-edged platform hidden beneath the field.",
+                "scene_text": "You arrive at the velvet platform beneath the field and the air tastes like brass tea.",
+                "choices": [
+                    {
+                        "choice_text": "Keep going",
+                        "notes": "NEXT_NODE: continue along the velvet platform. FURTHER_GOALS: confirm the new location becomes the current scene for inferred art generation.",
+                    }
+                ],
+                "new_locations": [
+                    {
+                        "name": "Velvet Platform",
+                        "description": "A velvet-edged tram platform hidden beneath the mushroom field.",
+                        "canonical_summary": "Warm lantern haze, stitched rail markings, and brass bells hanging above the tracks.",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    created_node = next(row for row in client.get("/story-nodes").json() if row["id"] == response.json()["node"]["id"])
+    current_scene = next(
+        entity for entity in created_node["entities"]
+        if entity["entity_type"] == "location" and entity["role"] == "current_scene"
+    )
+
+    inferred = infer_missing_asset_requests(
+        node=created_node,
+        explicit_requests=[],
+        project_root=Path(__file__).resolve().parents[1],
+        client=client,
+    )
+
+    background_request = next(
+        request for request in inferred if request["asset_kind"] == "background" and request["entity_type"] == "location"
+    )
+    assert background_request["entity_id"] == int(current_scene["entity_id"])
+    assert "Velvet Platform" in background_request["prompt"]
+    assert "velvet-edged tram platform hidden beneath the mushroom field" in background_request["prompt"]
+
+
 def test_infer_missing_asset_requests_skips_explicit_requests(tmp_path: Path) -> None:
     client, _ = build_client(tmp_path)
     client.post("/story/reset-opening-canon")
@@ -5476,6 +6216,95 @@ def test_parse_and_validate_transition_node_form() -> None:
     )
 
     assert issues == []
+
+
+def test_validate_transition_node_draft_does_not_inherit_scene_level_new_character_pressure() -> None:
+    packet = {
+        "new_character_pressure": {"active": True},
+        "context_summary": {
+            "merge_candidates": [
+                {
+                    "node_id": 7,
+                    "title": "Sealed Vault",
+                    "summary": "The old vault waits with its humming wall intact.",
+                }
+            ]
+        },
+    }
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: The Resonance Junction",
+                "SCENE_SUMMARY: A new authority figure appears in a new chamber.",
+                "MATERIAL_CHANGE: The branch reaches a volatile junction and declares a new technician.",
+                "OPENING_BEAT: discovery",
+                "LOCATION_STATUS: new_location",
+                "SCENE_CAST: 1, 2",
+                "NEW_CHARACTERS: The Chrono-Technician",
+                "NEW_LOCATION: Resonance Junction",
+                "NEW_CHARACTER_INTRO: The Chrono-Technician emerges from a maintenance conduit.",
+                "NEW_LOCATION_INTRO: You step through the seam into a humming chamber of brass and memory light.",
+            ]
+        )
+    )
+    scene_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "You enter the junction while the patrol watches the glowing vault wall.",
+            ]
+        )
+    )
+    state = NormalRunConversationState(
+        scene_plan=scene_plan,
+        scene_body=scene_body,
+        choices=[
+            ChoiceDraft(
+                choice_text="Question the patrol and move back toward the vault",
+                choice_class="progress",
+                next_node="The patrol reacts badly to your question, forcing a tense return toward the vault wall.",
+                further_goals="Reconnect to the established vault lane without an abrupt teleport.",
+                target_existing_node=7,
+            )
+        ],
+    )
+    transition = parse_transition_node_form(
+        raw_text="\n".join(
+            [
+                "TRANSITION_TITLE: Back to the Vault Wall",
+                "TRANSITION_SUMMARY: The patrol's alarm drives you back across the junction until the sealed vault takes over the whole field of action again.",
+                "SCENE_SETTINGS: NONE",
+                "SCENE_BODY: Narrator",
+                "The patrol's warning cuts through the chamber and forces you back along the live conduits toward the sealed wall.",
+                "The deeper machinery falls away behind you until the older vault pressure closes around the scene once more.",
+            ]
+        ),
+        choice_index=0,
+        target_existing_node=7,
+    )
+    resolution = {
+        "protagonist_id": 1,
+        "protagonist_name": "The Tall Gnome",
+        "character_name_map": {
+            "the tall gnome": {"id": 1, "name": "The Tall Gnome"},
+            "brass patrol member": {"id": 2, "name": "Brass Patrol Member"},
+        },
+        "character_id_map": {
+            1: {"id": 1, "name": "The Tall Gnome"},
+            2: {"id": 2, "name": "Brass Patrol Member"},
+        },
+        "encountered_names": {"the tall gnome", "brass patrol member"},
+    }
+
+    issues = validate_transition_node_draft(
+        packet=packet,
+        state=state,
+        draft=transition,
+        resolution=resolution,
+    )
+
+    assert not any("New-character pressure is active" in issue for issue in issues)
 
 
 def test_prune_existing_asset_requests_drops_already_available_art() -> None:
