@@ -554,6 +554,22 @@ class StoryGraphService:
         self.connection.commit()
         return int(cursor.rowcount or 0)
 
+    def unpark_all_stuck_choices(self) -> int:
+        rows = fetch_all(
+            self.connection,
+            """
+            SELECT w.choice_id
+            FROM worker_choice_failures w
+            JOIN choices c ON c.id = w.choice_id
+            WHERE c.status = 'parked'
+            """,
+        )
+        count = 0
+        for row in rows:
+            self.set_choice_status(row["choice_id"], "open")
+            count += 1
+        return count
+
     def set_choice_status(self, choice_id: int, status: str) -> dict[str, Any]:
         self.connection.execute(
             "UPDATE choices SET status = ? WHERE id = ?",
@@ -1418,6 +1434,7 @@ class StoryGraphService:
             FROM worker_choice_failures w
             JOIN choices c ON c.id = w.choice_id
             JOIN story_nodes sn ON sn.id = c.from_node_id
+            WHERE c.status IN ('open', 'parked')
             ORDER BY
                 CASE WHEN c.status = 'parked' THEN 1 ELSE 0 END DESC,
                 w.failed_run_count DESC,

@@ -1057,6 +1057,12 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         )
         return node
 
+    @app.post("/choices/unpark-all-stuck")
+    def unpark_all_stuck_choices(db: sqlite3.Connection = Depends(get_db)) -> RedirectResponse:
+        story = StoryGraphService(db)
+        story.unpark_all_stuck_choices()
+        return RedirectResponse("/", status_code=303)
+
     @app.post("/choices")
     def create_choice(payload: ChoiceCreate, db: sqlite3.Connection = Depends(get_db)) -> dict[str, Any]:
         story = StoryGraphService(db)

@@ -193,16 +193,39 @@
 
     {{ card_start("Stuck Frontier Choices") }}
     {% if stuck_choices %}
+        {% set has_parked = stuck_choices | selectattr("status", "equalto", "parked") | list %}
+        {% if has_parked %}
+        <form method="post" action="/choices/unpark-all-stuck" style="margin-bottom:0.5em;">
+            <button type="submit" class="btn btn-sm">Unpark All ({{ has_parked | length }})</button>
+        </form>
+        {% endif %}
         <ul>
         {% for choice in stuck_choices %}
             <li>
                 <strong>#{{ choice.choice_id }}</strong> - {{ choice.choice_text }}
-                <span class="meta">(node #{{ choice.from_node_id }}, fails {{ choice.failed_run_count }}, {{ choice.status }})</span>
+                <span class="meta">(node #{{ choice.from_node_id }}, fails {{ choice.failed_run_count }},
+                    {% if choice.status == 'parked' %}
+                        <span style="color:#e74c3c;font-weight:bold;">⛔ parked</span>
+                    {% else %}
+                        <span style="color:#f39c12;">⟳ retrying</span>
+                    {% endif %})</span>
                 {% if choice.last_failed_at %}
                     <div class="meta">Last failed: {{ choice.last_failed_at }}</div>
                 {% endif %}
                 {% if choice.last_error %}
+                    {% set error_lines = choice.last_error.split('\n') %}
+                    {% if error_lines | length > 1 %}
+                    <details class="meta">
+                        <summary>{{ error_lines[0] }}</summary>
+                        <ul style="margin:0.25em 0 0 1em;padding:0;list-style:disc;">
+                        {% for line in error_lines[1:] if line.strip() %}
+                            <li>{{ line.strip() }}</li>
+                        {% endfor %}
+                        </ul>
+                    </details>
+                    {% else %}
                     <div class="meta">{{ choice.last_error[:180] }}{% if choice.last_error|length > 180 %}...{% endif %}</div>
+                    {% endif %}
                 {% endif %}
             </li>
         {% endfor %}

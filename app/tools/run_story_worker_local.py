@@ -4808,7 +4808,8 @@ def run_normal_conversational_builder(
                         retry_index=attempt + 1,
                     )
             if state.scene_plan is None:
-                raise RuntimeError("Failed to produce a valid scene_plan form.")
+                detail = "\n".join(scene_plan_issues) if scene_plan_issues else ""
+                raise RuntimeError(f"Failed to produce a valid scene_plan form.\n{detail}" if detail else "Failed to produce a valid scene_plan form.")
 
         rewind_to_scene_plan = False
         rewind_scene_plan_issues: list[str] | None = None
@@ -4865,7 +4866,8 @@ def run_normal_conversational_builder(
                 scene_body_issues = None
                 continue
             if state.scene_body is None:
-                raise RuntimeError("Failed to produce a valid scene_body form.")
+                detail = "\n".join(scene_body_issues) if scene_body_issues else ""
+                raise RuntimeError(f"Failed to produce a valid scene_body form.\n{detail}" if detail else "Failed to produce a valid scene_body form.")
         break
 
     def collect_choice(
@@ -4925,7 +4927,8 @@ def run_normal_conversational_builder(
                 )
         if optional:
             return None
-        raise RuntimeError(f"Failed to produce a valid choice_{choice_index + 1} form.")
+        detail = "\n".join(issues) if issues else ""
+        raise RuntimeError(f"Failed to produce a valid choice_{choice_index + 1} form.\n{detail}" if detail else f"Failed to produce a valid choice_{choice_index + 1} form.")
 
     first_choice = collect_choice(choice_index=0, requested_count=max(args.requested_choice_count, 1))
     if first_choice is None:
@@ -4954,7 +4957,8 @@ def run_normal_conversational_builder(
                 prompt_issues=menu_issues,
             )
             if replacement is None:
-                raise RuntimeError("Failed to produce a strong enough choice menu.")
+                detail = "\n".join(menu_issues) if menu_issues else ""
+                raise RuntimeError(f"Failed to produce a strong enough choice menu.\n{detail}" if detail else "Failed to produce a strong enough choice menu.")
             if len(state.choices) == 1:
                 state.choices.append(replacement)
             else:
