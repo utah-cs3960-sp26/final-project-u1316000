@@ -1458,6 +1458,19 @@ def parse_comma_list(value: str) -> list[str]:
     return [item.strip() for item in cleaned.split(",") if item.strip()]
 
 
+def sanitize_name_plus_description_blob(value: str | None, *, drop_leading_the: bool = False) -> str | None:
+    cleaned = parse_none_text(value or "")
+    if cleaned is None:
+        return None
+    if " | " in cleaned:
+        cleaned = cleaned.split(" | ", 1)[0].strip()
+        if drop_leading_the and cleaned.lower().startswith("the "):
+            articleless = cleaned[4:].strip()
+            if articleless:
+                cleaned = articleless
+    return cleaned or None
+
+
 def should_skip_optional_choice(raw_text: str) -> bool:
     cleaned = strip_markdown_fences(raw_text).strip().upper()
     return cleaned in OPTIONAL_CHOICE_SKIP_MARKERS
@@ -1736,6 +1749,63 @@ def parse_scene_speaker_line(line: str) -> tuple[str, str] | None:
     return None
 
 
+INLINE_SPEAKER_PRONOUN_TOKENS = {"I", "You", "He", "She", "We", "They", "It"}
+
+
+def parse_scene_inline_speaker_without_colon(line: str) -> tuple[str, str] | None:
+    stripped = (line or "").strip()
+    if not stripped or ":" in stripped:
+        return None
+
+    narrator_match = re.match(r"^(narrator|n)(?P<tail>[.!?;,\s].*)?$", stripped, re.IGNORECASE)
+    if narrator_match:
+        tail = (narrator_match.group("tail") or "").lstrip(" \t")
+        tail = re.sub(r"^[.!?;,]+\s*", "", tail)
+        if tail:
+            return "0", tail.strip()
+        return None
+
+    numeric_match = re.match(r"^(?P<speaker>\d+n?|\d+)\s+(?P<text>.+)$", stripped, re.IGNORECASE)
+    if numeric_match:
+        return numeric_match.group("speaker").strip(), numeric_match.group("text").strip()
+
+    words = stripped.split()
+    speaker_tokens: list[str] = []
+    rest_start_index = 0
+    for index, word in enumerate(words):
+        cleaned = re.sub(r"^[\"'“”‘’(\[]+|[\"'“”‘’)\],.!?;:]+$", "", word)
+        if not cleaned:
+            rest_start_index = index
+            break
+        if cleaned in INLINE_SPEAKER_PRONOUN_TOKENS:
+            rest_start_index = index
+            break
+        if re.fullmatch(r"[A-Z][A-Za-z'\\-]*", cleaned):
+            speaker_tokens.append(cleaned)
+            if len(speaker_tokens) == 4:
+                rest_start_index = index + 1
+                break
+            continue
+        rest_start_index = index
+        break
+    else:
+        rest_start_index = len(words)
+
+    if not speaker_tokens:
+        return None
+
+    if rest_start_index >= len(words):
+        return None
+
+    speaker_ref = " ".join(speaker_tokens).strip()
+    text = " ".join(words[rest_start_index:]).strip()
+    if not text:
+        return None
+    if len(speaker_ref) > 40:
+        return None
+    return speaker_ref, text
+
+
 def parse_scene_standalone_speaker_header(line: str) -> str | None:
     speaker_ref = (line or "").strip()
     if not speaker_ref or ":" in speaker_ref:
@@ -1809,6 +1879,15 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
             pending_commands = []
             has_current = True
             continue
+        inline_speaker = parse_scene_inline_speaker_without_colon(line)
+        if inline_speaker is not None:
+            flush_current()
+            current_speaker = inline_speaker[0].strip()
+            current_lines = [inline_speaker[1]]
+            pending_commands_snapshot = list(pending_commands)
+            pending_commands = []
+            has_current = True
+            continue
         standalone_speaker = parse_scene_standalone_speaker_header(line)
         if standalone_speaker is not None:
             next_nonempty_line = ""
@@ -1851,11 +1930,14 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
 
 
 def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
-    sections = parse_labeled_sections(raw_text, NORMAL_STEP_LABELS["scene_plan"])
+    stripped = strip_markdown_fences(raw_text).strip()
+    if not re.search(r"(?m)^NEW_LOCATION_INTRO:\s*", stripped):
+        stripped = f"{stripped}\nNEW_LOCATION_INTRO: NONE"
+    sections = parse_labeled_sections(stripped, NORMAL_STEP_LABELS["scene_plan"])
     scene_cast_mode, scene_cast_entries = parse_scene_cast_value(sections["SCENE_CAST"])
-    return_location_match = re.search(r"(?m)^RETURN_LOCATION:\s*(.*)$", strip_markdown_fences(raw_text).strip())
+    return_location_match = re.search(r"(?m)^RETURN_LOCATION:\s*(.*)$", stripped)
     return ScenePlanDraft(
-        scene_title=sections["SCENE_TITLE"].strip(),
+        scene_title=sanitize_name_plus_description_blob(sections["SCENE_TITLE"], drop_leading_the=True) or sections["SCENE_TITLE"].strip(),
         scene_summary=sections["SCENE_SUMMARY"].strip(),
         material_change=sections["MATERIAL_CHANGE"].strip(),
         opening_beat=sections["OPENING_BEAT"].strip(),
@@ -1866,7 +1948,7 @@ def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
         scene_cast_mode=scene_cast_mode,
         scene_cast_entries=scene_cast_entries,
         new_character_names=parse_comma_list(sections["NEW_CHARACTERS"]),
-        new_location_name=parse_none_text(sections["NEW_LOCATION"]),
+        new_location_name=sanitize_name_plus_description_blob(sections["NEW_LOCATION"], drop_leading_the=True),
         return_location_ref=parse_none_text(return_location_match.group(1)) if return_location_match else None,
         new_character_intro=parse_none_text(sections["NEW_CHARACTER_INTRO"]),
         new_location_intro=parse_none_text(sections["NEW_LOCATION_INTRO"]),
@@ -2985,8 +3067,6 @@ def validate_scene_plan_draft(
     non_protagonist_visible = [name for name in resolved_visible_names if name.strip().lower() != protagonist_name]
     if draft.location_status == "new_location" and not draft.new_location_name:
         issues.append("NEW_LOCATION is required when LOCATION_STATUS is new_location.")
-    if draft.location_status == "new_location" and not draft.new_location_intro:
-        issues.append("NEW_LOCATION_INTRO is required when LOCATION_STATUS is new_location.")
     if draft.location_status == "return_location" and not (draft.return_location_ref or "").strip():
         issues.append("RETURN_LOCATION is required when LOCATION_STATUS is return_location.")
     if draft.location_status == "return_location":

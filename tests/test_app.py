@@ -3278,6 +3278,25 @@ def test_conversational_scene_builder_form_parsers() -> None:
     assert scene_plan_with_ids.scene_cast_entries == []
     assert scene_plan_with_ids.new_character_names == []
 
+    sanitized_scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: The Grand Junction Market Hub | A sprawling, chaotic preindustrial market square built around a nexus of strange transit hubs.",
+                "SCENE_SUMMARY: The hidden line opens into a market hub full of noise and motion.",
+                "MATERIAL_CHANGE: The branch leaves the quiet route and arrives in a bustling public square with many exits.",
+                "OPENING_BEAT: arrival",
+                "LOCATION_STATUS: new_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: The Grand Junction Market Hub | A sprawling, chaotic preindustrial market square built around a nexus of strange transit hubs.",
+                "NEW_CHARACTER_INTRO: NONE",
+                "NEW_LOCATION_INTRO: NONE",
+            ]
+        )
+    )
+    assert sanitized_scene_plan.scene_title == "Grand Junction Market Hub"
+    assert sanitized_scene_plan.new_location_name == "Grand Junction Market Hub"
+
     scene_body = parse_scene_body_form(
         "\n".join(
             [
@@ -3599,6 +3618,26 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
 
     assert not any("promised a location transition" in issue for issue in issues)
 
+
+def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None:
+    scene_plan = parse_scene_plan_form(
+        "\n".join(
+            [
+                "SCENE_TITLE: Velvet Platform Return",
+                "SCENE_SUMMARY: The hidden line opens onto the velvet platform again.",
+                "MATERIAL_CHANGE: The branch leaves the field and arrives somewhere new with a more deliberate social atmosphere.",
+                "OPENING_BEAT: arrival",
+                "LOCATION_STATUS: new_location",
+                "SCENE_CAST: MC_ONLY",
+                "NEW_CHARACTERS: NONE",
+                "NEW_LOCATION: Velvet Platform",
+                "NEW_CHARACTER_INTRO: NONE",
+            ]
+        )
+    )
+    assert scene_plan.new_location_name == "Velvet Platform"
+    assert scene_plan.new_location_intro is None
+
     none_settings_scene_body = parse_scene_body_form(
         "\n".join(
             [
@@ -3679,6 +3718,16 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
     )
     assert named_speaker_without_colon_body.textboxes[0].speaker_ref == "Madam Bei"
     assert "trackway" in named_speaker_without_colon_body.textboxes[0].text
+
+    inline_named_speaker_without_colon_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "Madam Bei (smiling) yes my dear",
+            ]
+        )
+    )
+    assert inline_named_speaker_without_colon_body.textboxes[0].speaker_ref == "Madam Bei"
+    assert inline_named_speaker_without_colon_body.textboxes[0].text == "(smiling) yes my dear"
 
     scene_body_template = build_form_template("scene_body")
     assert "This is NOT JSON. Use a simple newline-based labeled input format." in scene_body_template
@@ -3784,6 +3833,24 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
     assert compile_issues == []
     assert compiled_body is not None
     assert compiled_body.dialogue_lines[0].speaker == "Narrator"
+
+    protagonist_named_line_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "The Tall Gnome I hate the look of those wires.",
+            ]
+        )
+    )
+    state_for_compile.scene_body = protagonist_named_line_body
+    protagonist_compiled_body, protagonist_compile_issues = compile_scene_body_draft(
+        state=state_for_compile,
+        draft=protagonist_named_line_body,
+        resolution=resolution,
+    )
+    assert protagonist_compile_issues == []
+    assert protagonist_compiled_body is not None
+    assert protagonist_compiled_body.dialogue_lines[0].speaker == "You"
+    assert protagonist_compiled_body.dialogue_lines[0].text == "I hate the look of those wires."
 
     mc_visibility_plan = parse_scene_plan_form(
         "\n".join(
