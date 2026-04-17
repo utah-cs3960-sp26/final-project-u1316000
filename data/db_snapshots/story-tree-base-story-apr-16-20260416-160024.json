@@ -1,0 +1,1116 @@
+{
+  "created_at": "2026-04-16T16:00:24.899375-06:00",
+  "counts": {
+    "locations": 2,
+    "characters": 2,
+    "objects": 0,
+    "relations": 0,
+    "facts": 5,
+    "story_nodes": 7,
+    "story_node_present_entities": 8,
+    "choices": 12,
+    "assets": 6,
+    "generation_jobs": 0,
+    "branch_state": 1,
+    "inventory_entries": 0,
+    "unlocked_affordances": 0,
+    "relationship_states": 0,
+    "branch_tags": 1,
+    "story_hooks": 2,
+    "story_direction_notes": 2,
+    "worldbuilding_notes": 4,
+    "worker_choice_failures": 62
+  },
+  "locations": [
+    {
+      "id": 11,
+      "slug": "mushroom-field",
+      "name": "Mushroom Field",
+      "description": "A dew-cold meadow of towering mushrooms above buried green glass, freshly strung with counting wires while brass enumerators sweep the field at dawn.",
+      "canonical_summary": "The opening field: beautiful, damp, and quietly under survey by forces that count bodies, routes, and names.",
+      "created_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 12,
+      "slug": "velvet-platform",
+      "name": "Velvet Platform",
+      "description": "A low velvet-trimmed tram platform hidden beneath oversized mushrooms, lit by soft lantern glass and stitched route ribbons.",
+      "canonical_summary": "A secret whimsical platform where tiny trams, velvet markers, lantern haze, and quiet departures gather beneath the field.",
+      "created_at": "2026-04-16 21:44:27"
+    }
+  ],
+  "characters": [
+    {
+      "id": 8,
+      "slug": "madam-bei",
+      "name": "Madam Bei",
+      "description": "A poised frog tram conductor with emerald silk, patient eyes, and the air of someone who has already decided whether you belong aboard.",
+      "home_location_id": 12,
+      "canonical_summary": "A frog tram conductor who speaks with warm precision, keeps odd timetables in her head, and seems prepared for improbable passengers.",
+      "created_at": "2026-04-16 21:44:27",
+      "home_location_name": "Velvet Platform"
+    },
+    {
+      "id": 7,
+      "slug": "the-tall-gnome",
+      "name": "The Tall Gnome",
+      "description": "An abnormally tall gnome with amnesia, five thumbs on the left hand, and a red-and-white striped bucket hat of unknown origin.",
+      "home_location_id": 11,
+      "canonical_summary": "An abnormally tall gnome with five thumbs on the left hand, a striped bucket hat of unknown origin, and the unnerving sense that somebody altered them for a purpose.",
+      "created_at": "2026-04-16 21:42:36",
+      "home_location_name": "Mushroom Field"
+    }
+  ],
+  "objects": [],
+  "facts": [
+    {
+      "id": 6,
+      "entity_type": "character",
+      "entity_id": 7,
+      "fact_text": "The protagonist is unmistakably a gnome, but stretched to roughly human size.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 7,
+      "entity_type": "character",
+      "entity_id": 7,
+      "fact_text": "The protagonist's left hand has five thumbs.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 8,
+      "entity_type": "character",
+      "entity_id": 7,
+      "fact_text": "The protagonist wears a red-and-white striped bucket hat and does not know how they got it.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 9,
+      "entity_type": "character",
+      "entity_id": 7,
+      "fact_text": "The protagonist begins with significant memory loss.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 10,
+      "entity_type": "world",
+      "entity_id": 0,
+      "fact_text": "The world is whimsical, surreal, and sincere; bizarre things are real and consequential, not punchlines.",
+      "is_locked": 1,
+      "source": "story_reset",
+      "created_at": "2026-04-16 21:42:36"
+    }
+  ],
+  "relations": [],
+  "branch_state": {
+    "branch_key": "default",
+    "act_phase": "middle",
+    "branch_depth": 6,
+    "latest_story_node_id": 90,
+    "notes": null,
+    "created_at": "2026-04-16 21:42:36",
+    "updated_at": "2026-04-16 21:44:28",
+    "inventory": [],
+    "affordances": [],
+    "relationships": [],
+    "tags": [
+      {
+        "id": 172,
+        "branch_key": "default",
+        "tag": "enumerators-closing-in",
+        "tag_type": "state",
+        "source": "story_reset",
+        "notes": "The opening scene begins under imminent survey pressure from the king's brass enumerators.",
+        "created_at": "2026-04-16 21:42:36"
+      }
+    ],
+    "active_hooks": [
+      {
+        "id": 4,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader tightening pressure gathering beyond the field.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ]
+      },
+      {
+        "id": 5,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "A foe, state agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the tightening survey apparatus, its enumerators, and its stranger metal walkers. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ]
+      }
+    ],
+    "resolved_hooks": [],
+    "eligible_major_hooks": [],
+    "blocked_major_hooks": [
+      {
+        "id": 4,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader tightening pressure gathering beyond the field.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": true,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 6,
+          "remaining_distance": 14,
+          "development_distance_ready": true,
+          "development_required_depth": 6,
+          "remaining_development_distance": 0,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      },
+      {
+        "id": 5,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "A foe, state agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the tightening survey apparatus, its enumerators, and its stranger metal walkers. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": true,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 6,
+          "remaining_distance": 14,
+          "development_distance_ready": true,
+          "development_required_depth": 6,
+          "remaining_development_distance": 0,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      }
+    ],
+    "developable_major_hooks": [
+      {
+        "id": 4,
+        "branch_key": "default",
+        "hook_type": "identity_mystery",
+        "importance": "major",
+        "summary": "The striped bucket hat, the missing first name, the amnesia, and waking in the Mushroom Field all point to the same hidden past event, and the hat was likely left by someone trying to guide or protect him.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may let the hat produce one or two personal breadcrumbs, but they should leave plenty of room for unrelated local arcs before the shared past event comes into focus.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "The hat came from a friend, ally, or protector in the protagonist's missing past, and clues around it should help recover the personal history behind the same event that caused the amnesia, the field arrival, and the broader tightening pressure gathering beyond the field.",
+        "must_not_imply_json": "[\"Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.\", \"Do not let the first nearby NPC fully explain who gave the hat or why it was left with him.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not reduce the hat to impersonal route hardware, ordinary uniform gear, or a one-scene magical gadget.",
+          "Do not let the first nearby NPC fully explain who gave the hat or why it was left with him."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": true,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 6,
+          "remaining_distance": 14,
+          "development_distance_ready": true,
+          "development_required_depth": 6,
+          "remaining_development_distance": 0,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      },
+      {
+        "id": 5,
+        "branch_key": "default",
+        "hook_type": "body_mystery",
+        "importance": "major",
+        "summary": "The five-thumbed hand and stretched gnome body are the aftermath of a deliberate curse, mutilation, or hostile alteration tied to the same hidden event that erased his memory and left him in the field.",
+        "linked_entity_type": "character",
+        "linked_entity_id": 7,
+        "introduced_at_depth": 0,
+        "min_distance_to_payoff": 20,
+        "required_clue_tags_json": "[]",
+        "required_state_tags_json": "[]",
+        "status": "active",
+        "notes": "Long-range major hook. Early scenes may show unease, pain, or suspicious reactions around the altered body, but they should not hurry into naming the culprit or explaining the whole curse.",
+        "resolution_text": null,
+        "blocked_reason": null,
+        "created_at": "2026-04-16 21:42:36",
+        "updated_at": "2026-04-16 21:42:36",
+        "payoff_concept": "A foe, state agent, or enemy force altered the protagonist on purpose, and that injury now entangles him with the tightening survey apparatus, its enumerators, and its stranger metal walkers. Systems may react to the curse, but the hand is not a gift or privileged access token.",
+        "must_not_imply_json": "[\"Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.\", \"Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks.\"]",
+        "min_distance_to_next_development": 6,
+        "last_development_depth": 0,
+        "required_clue_tags": [],
+        "required_state_tags": [],
+        "must_not_imply": [
+          "Do not explain the body alteration as a random mutation, harmless oddity, or beneficial upgrade.",
+          "Do not treat the five thumbs as a privileged passkey whose main purpose is opening local locks."
+        ],
+        "readiness": {
+          "eligible": false,
+          "development_eligible": true,
+          "distance_ready": false,
+          "required_depth": 20,
+          "current_depth": 6,
+          "remaining_distance": 14,
+          "development_distance_ready": true,
+          "development_required_depth": 6,
+          "remaining_development_distance": 0,
+          "conditions_ready": true,
+          "missing_state_tags": [],
+          "missing_clue_tags": []
+        }
+      }
+    ],
+    "blocked_major_developments": [],
+    "recurring_entities": [
+      {
+        "entity_type": "character",
+        "entity_id": 7,
+        "appearances": 7
+      },
+      {
+        "entity_type": "location",
+        "entity_id": 11,
+        "appearances": 6
+      },
+      {
+        "entity_type": "character",
+        "entity_id": 8,
+        "appearances": 1
+      },
+      {
+        "entity_type": "location",
+        "entity_id": 12,
+        "appearances": 1
+      }
+    ]
+  },
+  "story_nodes": [
+    {
+      "id": 84,
+      "branch_key": "default",
+      "parent_node_id": null,
+      "title": "Before the Counting Bell",
+      "scene_text": "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages. Thin black counting wires have been strung between the stalks sometime in the night, and every low hum through them makes the strange new shape of your left hand twitch. When you raise that hand into the dawn, a cold jolt goes through you: where five fingers ought to be, five thumbs flex back in eerie agreement. As if that were not enough, a tall striped bucket hat is sitting on your head, jaunty and unfamiliar, with no memory attached to it at all. You do not remember putting it on. You do not remember who changed your hand. You do not remember much of anything that seems useful. Far away, a brass bell rings seven clipped notes. From deeper in the mist, something metallic keeps moving with the patient certainty of a thing already heading straight for your patch of grass. If the field is being surveyed at dawn, you have very little time to decide whether to inspect yourself, follow the silver tracks, or climb before the field decides for you.",
+      "summary": "The Tall Gnome wakes in the Mushroom Field wearing an unfamiliar striped bucket hat and discovers that his left hand now has five thumbs, just as something brass and official begins approaching through the mist.",
+      "created_at": "2026-04-16 21:42:36",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages, while thin black counting wires hum low between the stalks.\"}, {\"speaker\": \"Narrator\", \"text\": \"Every pulse through the wires makes your left hand twitch, and when you lift it into the dawn you freeze: where five fingers ought to be, five thumbs flex back at you.\"}, {\"speaker\": \"Narrator\", \"text\": \"A tall striped bucket hat sits on your head as if it has always belonged there, though you are certain it did not belong to you yesterday.\"}, {\"speaker\": \"You\", \"text\": \"I do not know where this hat came from, and I definitely do not know what happened to my hand.\"}, {\"speaker\": \"Narrator\", \"text\": \"Far off in the mist, a brass bell rings seven clipped notes, and somewhere beyond the mushroom roots something metallic is already making its patient way toward you.\"}]",
+      "node_kind": "normal",
+      "auto_continue_to_node_id": null,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You wake belly-down in wet blue grass beneath mushrooms tall enough to hide cottages, while thin black counting wires hum low between the stalks."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Every pulse through the wires makes your left hand twitch, and when you lift it into the dawn you freeze: where five fingers ought to be, five thumbs flex back at you."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "A tall striped bucket hat sits on your head as if it has always belonged there, though you are certain it did not belong to you yesterday."
+        },
+        {
+          "speaker": "You",
+          "text": "I do not know where this hat came from, and I definitely do not know what happened to my hand."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Far off in the mist, a brass bell rings seven clipped notes, and somewhere beyond the mushroom roots something metallic is already making its patient way toward you."
+        }
+      ],
+      "choices": [
+        {
+          "id": 189,
+          "from_node_id": 84,
+          "choice_text": "Inspect your strange hat and stranger hand",
+          "to_node_id": 88,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: You take one unsettled moment to inspect the unfamiliar striped hat on your head and the five thumbs on your left hand, only to confirm that whatever happened to you, you do not remember it. FURTHER_GOALS: Use a self-merge inspection loop to underline the core mystery of your altered body and missing memory without introducing deeper secrets yet.\", \"choice_class\": \"inspection\", \"target_current_node\": true, \"transition_node_id\": 88}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: You take one unsettled moment to inspect the unfamiliar striped hat on your head and the five thumbs on your left hand, only to confirm that whatever happened to you, you do not remember it. FURTHER_GOALS: Use a self-merge inspection loop to underline the core mystery of your altered body and missing memory without introducing deeper secrets yet.",
+            "choice_class": "inspection",
+            "target_current_node": true,
+            "transition_node_id": 88
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "next_node": "You take one unsettled moment to inspect the unfamiliar striped hat on your head and the five thumbs on your left hand, only to confirm that whatever happened to you, you do not remember it.",
+            "further_goals": "Use a self-merge inspection loop to underline the core mystery of your altered body and missing memory without introducing deeper secrets yet."
+          }
+        },
+        {
+          "id": 192,
+          "from_node_id": 84,
+          "choice_text": "Follow the velvet-marked silver tracks through the mist",
+          "to_node_id": 85,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: The silver tracks lead you to a velvet-marked mushroom route that hints at a hidden platform nearby. FURTHER_GOALS: Reintroduce the Velvet Platform thread early and let it bloom into Madam Bei's arrival shortly after.\", \"choice_class\": \"progress\", \"target_node_id\": 85}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: The silver tracks lead you to a velvet-marked mushroom route that hints at a hidden platform nearby. FURTHER_GOALS: Reintroduce the Velvet Platform thread early and let it bloom into Madam Bei's arrival shortly after.",
+            "choice_class": "progress",
+            "target_node_id": 85
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "next_node": "The silver tracks lead you to a velvet-marked mushroom route that hints at a hidden platform nearby.",
+            "further_goals": "Reintroduce the Velvet Platform thread early and let it bloom into Madam Bei's arrival shortly after."
+          }
+        },
+        {
+          "id": 193,
+          "from_node_id": 84,
+          "choice_text": "Climb the tallest mushroom and scan the field",
+          "to_node_id": 86,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: From the mushroom top, you spot a polished brass figure heading your way in the distance. FURTHER_GOALS: Put outside pressure visibly onstage and give the branch a high-ground warning beat before the figure is identified more clearly.\", \"choice_class\": \"progress\", \"target_node_id\": 86}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: From the mushroom top, you spot a polished brass figure heading your way in the distance. FURTHER_GOALS: Put outside pressure visibly onstage and give the branch a high-ground warning beat before the figure is identified more clearly.",
+            "choice_class": "progress",
+            "target_node_id": 86
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "next_node": "From the mushroom top, you spot a polished brass figure heading your way in the distance.",
+            "further_goals": "Put outside pressure visibly onstage and give the branch a high-ground warning beat before the figure is identified more clearly."
+          }
+        }
+      ],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    },
+    {
+      "id": 85,
+      "branch_key": "default",
+      "parent_node_id": 84,
+      "title": "Silver Tracks",
+      "scene_text": "The silver grooves weave through the dew and stop beneath a mushroom stem marked with a small strip of velvet, as if somebody laid a secret route just for the right passenger to notice.",
+      "summary": "The velvet-marked silver grooves hint at a hidden route beneath the field and invite one cautious step closer.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"The silver grooves curve through the wet grass and vanish beneath a mushroom stem tied with a thumb-sized strip of velvet.\"}, {\"speaker\": \"Narrator\", \"text\": \"Under the moss, the grooves are too even to be roots and too delicate to belong to any cart that ever dared this field in daylight.\"}, {\"speaker\": \"You\", \"text\": \"This is not a road for wagons. It is a route for something quieter, smaller, and far more deliberate.\"}]",
+      "node_kind": "normal",
+      "auto_continue_to_node_id": null,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "The silver grooves curve through the wet grass and vanish beneath a mushroom stem tied with a thumb-sized strip of velvet."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Under the moss, the grooves are too even to be roots and too delicate to belong to any cart that ever dared this field in daylight."
+        },
+        {
+          "speaker": "You",
+          "text": "This is not a road for wagons. It is a route for something quieter, smaller, and far more deliberate."
+        }
+      ],
+      "choices": [
+        {
+          "id": 190,
+          "from_node_id": 85,
+          "choice_text": "Inspect the velvet knot on the stem",
+          "to_node_id": 89,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: You uncover one more tiny clue inside the velvet knot and then return to the same menu. FURTHER_GOALS: Keep the platform route tantalizingly close without spending the move yet.\", \"choice_class\": \"inspection\", \"target_current_node\": true, \"transition_node_id\": 89}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: You uncover one more tiny clue inside the velvet knot and then return to the same menu. FURTHER_GOALS: Keep the platform route tantalizingly close without spending the move yet.",
+            "choice_class": "inspection",
+            "target_current_node": true,
+            "transition_node_id": 89
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "next_node": "You uncover one more tiny clue inside the velvet knot and then return to the same menu.",
+            "further_goals": "Keep the platform route tantalizingly close without spending the move yet."
+          }
+        },
+        {
+          "id": 191,
+          "from_node_id": 85,
+          "choice_text": "Study the silver grooves under the moss",
+          "to_node_id": 90,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: You pull one more clue out of the silver grooves and then return to the same menu. FURTHER_GOALS: Deepen the route texture locally before committing to the platform itself.\", \"choice_class\": \"inspection\", \"target_current_node\": true, \"transition_node_id\": 90}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: You pull one more clue out of the silver grooves and then return to the same menu. FURTHER_GOALS: Deepen the route texture locally before committing to the platform itself.",
+            "choice_class": "inspection",
+            "target_current_node": true,
+            "transition_node_id": 90
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "next_node": "You pull one more clue out of the silver grooves and then return to the same menu.",
+            "further_goals": "Deepen the route texture locally before committing to the platform itself."
+          }
+        },
+        {
+          "id": 194,
+          "from_node_id": 85,
+          "choice_text": "Follow the hidden tramline to the Velvet Platform",
+          "to_node_id": 87,
+          "status": "fulfilled",
+          "notes": "{\"notes\": \"NEXT_NODE: The tramline opens onto the Velvet Platform and Madam Bei introduces herself there. FURTHER_GOALS: Re-establish Madam Bei and the platform as an early whimsical route with clear momentum.\", \"choice_class\": \"progress\", \"target_node_id\": 87}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: The tramline opens onto the Velvet Platform and Madam Bei introduces herself there. FURTHER_GOALS: Re-establish Madam Bei and the platform as an early whimsical route with clear momentum.",
+            "choice_class": "progress",
+            "target_node_id": 87
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "next_node": "The tramline opens onto the Velvet Platform and Madam Bei introduces herself there.",
+            "further_goals": "Re-establish Madam Bei and the platform as an early whimsical route with clear momentum."
+          }
+        }
+      ],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    },
+    {
+      "id": 86,
+      "branch_key": "default",
+      "parent_node_id": 84,
+      "title": "Above the Mushroom Caps",
+      "scene_text": "From the slick cap of the tallest mushroom, the field opens wide enough for you to see a polished brass figure in the distance, moving on a patient line straight toward your patch of dew and clues.",
+      "summary": "From the mushroom top, you catch sight of a polished brass figure heading your way through the mist below.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You pull yourself onto the highest mushroom cap and feel the whole field tilt into view beneath the dawn haze.\"}, {\"speaker\": \"Narrator\", \"text\": \"Far off but unmistakable, a polished brass figure is already heading your way, its gleaming shape cutting a steady line between the stalks.\"}, {\"speaker\": \"You\", \"text\": \"I do not know what that is yet, but it looks official in the worst possible way.\"}]",
+      "node_kind": "normal",
+      "auto_continue_to_node_id": null,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You pull yourself onto the highest mushroom cap and feel the whole field tilt into view beneath the dawn haze."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Far off but unmistakable, a polished brass figure is already heading your way, its gleaming shape cutting a steady line between the stalks."
+        },
+        {
+          "speaker": "You",
+          "text": "I do not know what that is yet, but it looks official in the worst possible way."
+        }
+      ],
+      "choices": [
+        {
+          "id": 195,
+          "from_node_id": 86,
+          "choice_text": "Stay low and watch the enumerator's route from above",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: You keep watching long enough to learn one crucial thing about the enumerator's path through the field. FURTHER_GOALS: Turn the high-ground warning into a tactical lane instead of a panic beat.\", \"choice_class\": \"inspection\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: You keep watching long enough to learn one crucial thing about the enumerator's path through the field. FURTHER_GOALS: Turn the high-ground warning into a tactical lane instead of a panic beat.",
+            "choice_class": "inspection"
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "next_node": "You keep watching long enough to learn one crucial thing about the enumerator's path through the field.",
+            "further_goals": "Turn the high-ground warning into a tactical lane instead of a panic beat."
+          }
+        },
+        {
+          "id": 196,
+          "from_node_id": 86,
+          "choice_text": "Climb down toward the silver tracks before they arrive",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: You scramble down and angle toward the silver tracks before the enumerator closes the distance. FURTHER_GOALS: Reconnect the high-ground warning branch with the hidden route under stronger pressure.\", \"choice_class\": \"progress\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: You scramble down and angle toward the silver tracks before the enumerator closes the distance. FURTHER_GOALS: Reconnect the high-ground warning branch with the hidden route under stronger pressure.",
+            "choice_class": "progress"
+          },
+          "idea_binding": null,
+          "choice_class": "progress",
+          "ending_category": null,
+          "planning": {
+            "next_node": "You scramble down and angle toward the silver tracks before the enumerator closes the distance.",
+            "further_goals": "Reconnect the high-ground warning branch with the hidden route under stronger pressure."
+          }
+        },
+        {
+          "id": 197,
+          "from_node_id": 86,
+          "choice_text": "Call softly to the hiding figure near the roots",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: A hidden stranger answers just enough to prove you are not the only one trying to stay uncounted this morning. FURTHER_GOALS: Open a social lane from the high-ground branch without losing the enumerator pressure.\", \"choice_class\": \"commitment\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: A hidden stranger answers just enough to prove you are not the only one trying to stay uncounted this morning. FURTHER_GOALS: Open a social lane from the high-ground branch without losing the enumerator pressure.",
+            "choice_class": "commitment"
+          },
+          "idea_binding": null,
+          "choice_class": "commitment",
+          "ending_category": null,
+          "planning": {
+            "next_node": "A hidden stranger answers just enough to prove you are not the only one trying to stay uncounted this morning.",
+            "further_goals": "Open a social lane from the high-ground branch without losing the enumerator pressure."
+          }
+        }
+      ],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    },
+    {
+      "id": 87,
+      "branch_key": "default",
+      "parent_node_id": 85,
+      "title": "Velvet Platform Arrival",
+      "scene_text": "The secret line beneath the field opens onto the Velvet Platform, and Madam Bei, the frog conductor in emerald silk, greets you with the steady calm of someone who has already decided you belong on the timetable.",
+      "summary": "The hidden tram route opens onto the Velvet Platform, where Madam Bei steps forward as though she has been expecting you all morning.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"The silver grooves resolve into a low velvet-trimmed platform hidden beneath the mushrooms, warm with lantern haze and the hush of a station that was never meant for broad daylight.\"}, {\"speaker\": \"Madam Bei\", \"text\": \"There you are. I was beginning to think the field had decided to keep you for itself.\"}, {\"speaker\": \"Narrator\", \"text\": \"A frog conductor in emerald silk steps out from beside a teacup-shaped tram, smooths one cuff, and gives you the kind of patient look reserved for late but expected passengers.\"}, {\"speaker\": \"Madam Bei\", \"text\": \"My name is Madam Bei. If you intend to survive the next bell, you had better learn which departures are really meant for you.\"}]",
+      "node_kind": "normal",
+      "auto_continue_to_node_id": null,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "The silver grooves resolve into a low velvet-trimmed platform hidden beneath the mushrooms, warm with lantern haze and the hush of a station that was never meant for broad daylight."
+        },
+        {
+          "speaker": "Madam Bei",
+          "text": "There you are. I was beginning to think the field had decided to keep you for itself."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "A frog conductor in emerald silk steps out from beside a teacup-shaped tram, smooths one cuff, and gives you the kind of patient look reserved for late but expected passengers."
+        },
+        {
+          "speaker": "Madam Bei",
+          "text": "My name is Madam Bei. If you intend to survive the next bell, you had better learn which departures are really meant for you."
+        }
+      ],
+      "choices": [
+        {
+          "id": 198,
+          "from_node_id": 87,
+          "choice_text": "Ask Madam Bei why she expected you",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: Madam Bei gives one careful answer about your arrival without surrendering the whole truth. FURTHER_GOALS: Let her become a deliberate guide without collapsing the larger mystery too quickly.\", \"choice_class\": \"commitment\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: Madam Bei gives one careful answer about your arrival without surrendering the whole truth. FURTHER_GOALS: Let her become a deliberate guide without collapsing the larger mystery too quickly.",
+            "choice_class": "commitment"
+          },
+          "idea_binding": null,
+          "choice_class": "commitment",
+          "ending_category": null,
+          "planning": {
+            "next_node": "Madam Bei gives one careful answer about your arrival without surrendering the whole truth.",
+            "further_goals": "Let her become a deliberate guide without collapsing the larger mystery too quickly."
+          }
+        },
+        {
+          "id": 199,
+          "from_node_id": 87,
+          "choice_text": "Study the platform ledgers and bell-signs before answering",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: The platform's signs and ledgers reveal one rule of departures that feels uncomfortably personal. FURTHER_GOALS: Make the platform itself informative before you commit to Madam Bei's help.\", \"choice_class\": \"inspection\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: The platform's signs and ledgers reveal one rule of departures that feels uncomfortably personal. FURTHER_GOALS: Make the platform itself informative before you commit to Madam Bei's help.",
+            "choice_class": "inspection"
+          },
+          "idea_binding": null,
+          "choice_class": "inspection",
+          "ending_category": null,
+          "planning": {
+            "next_node": "The platform's signs and ledgers reveal one rule of departures that feels uncomfortably personal.",
+            "further_goals": "Make the platform itself informative before you commit to Madam Bei's help."
+          }
+        },
+        {
+          "id": 200,
+          "from_node_id": 87,
+          "choice_text": "Step aboard the teacup tram with Madam Bei",
+          "to_node_id": null,
+          "status": "open",
+          "notes": "{\"notes\": \"NEXT_NODE: Madam Bei ushers you onto the teacup tram as the field recedes behind you. FURTHER_GOALS: Turn the platform introduction into real location motion and a stronger alliance lane.\", \"choice_class\": \"location_transition\"}",
+          "created_at": "2026-04-16 21:44:28",
+          "notes_data": {
+            "notes": "NEXT_NODE: Madam Bei ushers you onto the teacup tram as the field recedes behind you. FURTHER_GOALS: Turn the platform introduction into real location motion and a stronger alliance lane.",
+            "choice_class": "location_transition"
+          },
+          "idea_binding": null,
+          "choice_class": "location_transition",
+          "ending_category": null,
+          "planning": {
+            "next_node": "Madam Bei ushers you onto the teacup tram as the field recedes behind you.",
+            "further_goals": "Turn the platform introduction into real location motion and a stronger alliance lane."
+          }
+        }
+      ],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 8,
+          "slot": "right-support",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": false,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 12,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 8,
+          "role": "introduced"
+        }
+      ]
+    },
+    {
+      "id": 88,
+      "branch_key": "default",
+      "parent_node_id": 84,
+      "title": "Inside the Hatband",
+      "scene_text": "You take the striped bucket hat off, turn it over in your hands, and find nothing except the stubborn fact that you do not remember ever owning it. Then you stare at your left hand again and feel the same cold disbelief: where five fingers should be, five thumbs wait for you as if this has always been true. Whatever happened to you happened before you woke up here, and none of it comes back. After a long, useless moment, the field gives you back the same three choices.",
+      "summary": "You inspect the hat and your altered hand, then return to the same opening decision with no answers except your own missing memory.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You take the striped bucket hat off and turn it over in both hands, hoping the fabric itself will explain why it is yours now when it definitely was not before.\"}, {\"speaker\": \"Narrator\", \"text\": \"It does not. It is just a tall striped bucket hat, unfamiliar and undeniable.\"}, {\"speaker\": \"Narrator\", \"text\": \"Your left hand is worse. Five thumbs flex back at you where five fingers ought to be, and no amount of staring makes that feel less impossible.\"}, {\"speaker\": \"You\", \"text\": \"Whatever happened, I do not remember any of it.\"}]",
+      "node_kind": "transition",
+      "auto_continue_to_node_id": 84,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You take the striped bucket hat off and turn it over in both hands, hoping the fabric itself will explain why it is yours now when it definitely was not before."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "It does not. It is just a tall striped bucket hat, unfamiliar and undeniable."
+        },
+        {
+          "speaker": "Narrator",
+          "text": "Your left hand is worse. Five thumbs flex back at you where five fingers ought to be, and no amount of staring makes that feel less impossible."
+        },
+        {
+          "speaker": "You",
+          "text": "Whatever happened, I do not remember any of it."
+        }
+      ],
+      "choices": [],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    },
+    {
+      "id": 89,
+      "branch_key": "default",
+      "parent_node_id": 85,
+      "title": "The Velvet Knot",
+      "scene_text": "You pinch the velvet strip, find an old tram-ink knot hidden in its fold, and realize the marker was tied by someone who expected careful hands before your attention settles back onto the same route choices.",
+      "summary": "The velvet marker reveals one more local clue before the route returns to the same decision point.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You pinch the velvet strip, find an old tram-ink knot hidden in its fold, and realize the marker was tied by someone who expected careful hands before your attention settles back onto the same route choices.\"}]",
+      "node_kind": "transition",
+      "auto_continue_to_node_id": 85,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You pinch the velvet strip, find an old tram-ink knot hidden in its fold, and realize the marker was tied by someone who expected careful hands before your attention settles back onto the same route choices."
+        }
+      ],
+      "choices": [],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    },
+    {
+      "id": 90,
+      "branch_key": "default",
+      "parent_node_id": 85,
+      "title": "Under the Moss",
+      "scene_text": "You scrape away a little moss and discover the grooves are lined with crushed pearl dust, as if the route wants to shine only for the right passenger, before the choice settles back into place.",
+      "summary": "The grooves under the moss give up one more texture before the route settles back into the same menu.",
+      "created_at": "2026-04-16 21:44:28",
+      "dialogue_lines_json": "[{\"speaker\": \"Narrator\", \"text\": \"You scrape away a little moss and discover the grooves are lined with crushed pearl dust, as if the route wants to shine only for the right passenger, before the choice settles back into place.\"}]",
+      "node_kind": "transition",
+      "auto_continue_to_node_id": 85,
+      "dialogue_lines": [
+        {
+          "speaker": "Narrator",
+          "text": "You scrape away a little moss and discover the grooves are lined with crushed pearl dust, as if the route wants to shine only for the right passenger, before the choice settles back into place."
+        }
+      ],
+      "choices": [],
+      "present_entities": [
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "slot": "hero-center",
+          "scale": null,
+          "offset_x_percent": 0.0,
+          "offset_y_percent": 0.0,
+          "focus": true,
+          "hidden_on_lines": []
+        }
+      ],
+      "entities": [
+        {
+          "entity_type": "location",
+          "entity_id": 11,
+          "role": "current_scene"
+        },
+        {
+          "entity_type": "character",
+          "entity_id": 7,
+          "role": "player"
+        }
+      ]
+    }
+  ],
+  "story_direction_notes": [
+    {
+      "id": 20,
+      "note_type": "plotline",
+      "title": "Strange Brass Forces Before Named Rulers",
+      "note_text": "Introduce brass survey pressure and odd mechanical patrols gradually. Early scenes may show one strange walker, one alarming inspection, or one unnerving rumor, but should not hurry into naming the ruler behind it or explaining the whole regime too soon.",
+      "status": "active",
+      "priority": 5,
+      "related_entity_type": "character",
+      "related_entity_id": 7,
+      "related_hook_id": 5,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 19,
+      "note_type": "plotline",
+      "title": "One Past Event Exists, But It Can Wait",
+      "note_text": "Keep linking the bucket hat, the five-thumb curse, the amnesia, and waking in the Mushroom Field to the same hidden past event. Let the hat provide the first personal breadcrumb, but allow plenty of unrelated detours, local arcs, and present-tense trouble before the deeper backstory starts opening up.",
+      "status": "active",
+      "priority": 5,
+      "related_entity_type": "character",
+      "related_entity_id": 7,
+      "related_hook_id": 4,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    }
+  ],
+  "worldbuilding_notes": [
+    {
+      "id": 10,
+      "note_type": "regime_pressure",
+      "title": "Brass Survey Teams at Dawn",
+      "note_text": "Brass enumerators and survey engines have begun sweeping outlying districts at dawn. A few stranger metal walkers have appeared with them, but common people do not yet agree on what they are or who exactly commands them. Anything miscounted, unnamed, or physically irregular risks being claimed as an administrative error and removed.",
+      "status": "active",
+      "priority": 5,
+      "pressure": 5,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 12,
+      "note_type": "smuggling_network",
+      "title": "Names Travel Better Than Bodies",
+      "note_text": "There are covert routes for moving names, permits, and identities separately from the people who own them. Courier marks, hats, ribbons, and papers can outlast the memories of their carriers, especially when allies are trying to move someone ahead of the new counting machines.",
+      "status": "active",
+      "priority": 4,
+      "pressure": 4,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 11,
+      "note_type": "hidden_infrastructure",
+      "title": "Glass Villages Beneath the Field",
+      "note_text": "Old green-glass settlements and sealed registry passages still run beneath certain mushroom fields. Their windows, lifts, and listening seams only surface when specific routes or bodies are recognized.",
+      "status": "active",
+      "priority": 4,
+      "pressure": 4,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    },
+    {
+      "id": 13,
+      "note_type": "ambient_danger",
+      "title": "Survey Weather Makes Bad Choices Permanent",
+      "note_text": "When the counting bells ring under bad weather, routes close hard and official mistakes become difficult to reverse. A branch can die from delay, capture, or bad timing just as easily as from violence.",
+      "status": "active",
+      "priority": 3,
+      "pressure": 3,
+      "source_branch_key": "default",
+      "notes": null,
+      "created_by": "story_reset",
+      "created_at": "2026-04-16 21:42:36",
+      "updated_at": "2026-04-16 21:42:36"
+    }
+  ]
+}

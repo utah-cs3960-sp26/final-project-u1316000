@@ -79,6 +79,7 @@ from app.tools.run_story_worker_local import (
     append_validation_attempt_run_separator,
     apply_normal_result,
     is_force_next_override,
+    should_request_hooks,
     validate_choice_menu,
 )
 
@@ -124,6 +125,10 @@ def test_startup_creates_required_tables(tmp_path: Path) -> None:
         "worldbuilding_notes",
         "worker_choice_failures",
     }.issubset(tables)
+
+
+def test_should_request_hooks_is_disabled_for_normal_runs() -> None:
+    assert should_request_hooks(packet={}, state=NormalRunConversationState()) is False
 
 
 def test_seed_world_and_resolve_spatial_relation(tmp_path: Path) -> None:
@@ -3651,6 +3656,29 @@ def test_validate_scene_plan_draft_allows_path_safe_return_location_under_locati
     )
     assert narrator_without_colon_body.textboxes[0].speaker_ref == "0"
     assert "without requiring a colon" in narrator_without_colon_body.textboxes[0].text
+
+    narrator_with_punctuation_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "Narrator.",
+                "This should still be narrator text even with punctuation.",
+            ]
+        )
+    )
+    assert narrator_with_punctuation_body.textboxes[0].speaker_ref == "0"
+    assert "even with punctuation" in narrator_with_punctuation_body.textboxes[0].text
+
+    named_speaker_without_colon_body = parse_scene_body_form(
+        "\n".join(
+            [
+                "Madam Bei",
+                "(She pauses her polishing and looks up at you.)",
+                "You are looking at this line as if it were merely a trackway.",
+            ]
+        )
+    )
+    assert named_speaker_without_colon_body.textboxes[0].speaker_ref == "Madam Bei"
+    assert "trackway" in named_speaker_without_colon_body.textboxes[0].text
 
     scene_body_template = build_form_template("scene_body")
     assert "This is NOT JSON. Use a simple newline-based labeled input format." in scene_body_template

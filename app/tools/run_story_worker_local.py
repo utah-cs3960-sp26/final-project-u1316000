@@ -1258,6 +1258,7 @@ def build_form_template(step: str) -> str:
             "A numbered speaker line like '1:' means that character is SPEAKING out loud. Do not use '1:' or '2:' for narration, stage directions, internal thoughts, or menu options.\n"
             "It is okay if The Tall Gnome talks to himself, but a '1:' line must still be spoken dialogue.\n"
             "When a character speaks, write only the words they say. Do not write attribution like 'says the Tall Gnome' inside the dialogue text; the speaker label already provides that.\n"
+            "Do not use parentheticals on speaker lines like 'Madam Bei (smiling): ...' or '1 (quietly): ...'. Put those action beats in Narrator text instead, then write the dialogue normally as '<name>: ...' or '<id>: ...'.\n"
             "Think of this like a movie script, where there is narration by a narrator, and anybody else who talks is a speaker. This is like that.\n"
             "Your scene body should usually represent about a page of a movie script overall ~300 words between total narration and character dialogue.\n"
             "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
@@ -1289,6 +1290,7 @@ def build_form_template(step: str) -> str:
             "A numbered speaker line like '1:' means that character is SPEAKING out loud. Do not use '1:' or '2:' for narration, stage directions, internal thoughts, or menu options.\n"
             "It is okay if The Tall Gnome talks to himself, but a '1:' line must still be spoken dialogue.\n"
             "When a character speaks, write only the words they say. Do not write attribution like 'says the Tall Gnome' inside the dialogue text; the speaker label already provides that.\n"
+            "Do not use parentheticals on speaker lines like 'Madam Bei (smiling): ...' or '1 (quietly): ...'. Put those action beats in Narrator text instead, then write the dialogue normally as '<name>: ...' or '<id>: ...'.\n"
             "Think of this like a movie script, where there is narration by a narrator, and anybody else who talks is a speaker. This is like that.\n"
             "Your scene body should usually represent about a page of a movie script overall ~300 words between total narration and character dialogue.\n"
             "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
@@ -1734,6 +1736,30 @@ def parse_scene_speaker_line(line: str) -> tuple[str, str] | None:
     return None
 
 
+def parse_scene_standalone_speaker_header(line: str) -> str | None:
+    speaker_ref = (line or "").strip()
+    if not speaker_ref or ":" in speaker_ref:
+        return None
+    normalized_narrator = re.sub(r"[.!?;]+$", "", speaker_ref).strip().lower()
+    if normalized_narrator in {"n", "narrator"}:
+        return "0"
+    if len(speaker_ref) > 40:
+        return None
+    if any(mark in speaker_ref for mark in ".!?"):
+        return None
+    lowered_ref = speaker_ref.lower()
+    if re.fullmatch(r"\d+n?|\d+", lowered_ref):
+        return speaker_ref
+    if lowered_ref in {"n", "narrator"}:
+        return "0"
+    word_count = len(speaker_ref.split())
+    if word_count > 4:
+        return None
+    if re.fullmatch(r"[A-Z][A-Za-z'\\-]*(?:\s+[A-Z][A-Za-z'\\-]*){0,3}", speaker_ref):
+        return speaker_ref
+    return None
+
+
 def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
     raw_body = (value or "").strip()
     if not raw_body:
@@ -1762,7 +1788,8 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
         has_current = False
 
     pending_commands_snapshot: list[SceneScriptCommand] = []
-    for raw_line in raw_body.splitlines():
+    raw_lines = raw_body.splitlines()
+    for index, raw_line in enumerate(raw_lines):
         line = raw_line.rstrip()
         if not line.strip():
             if has_current:
@@ -1774,7 +1801,7 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
             pending_commands.append(command)
             continue
         stripped_line = line.strip()
-        if stripped_line.lower() in {"narrator", "n"}:
+        if re.sub(r"[.!?;]+$", "", stripped_line).strip().lower() in {"narrator", "n"}:
             flush_current()
             current_speaker = "0"
             current_lines = []
@@ -1782,6 +1809,21 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
             pending_commands = []
             has_current = True
             continue
+        standalone_speaker = parse_scene_standalone_speaker_header(line)
+        if standalone_speaker is not None:
+            next_nonempty_line = ""
+            for lookahead in raw_lines[index + 1:]:
+                if lookahead.strip():
+                    next_nonempty_line = lookahead.strip()
+                    break
+            if next_nonempty_line and parse_scene_script_command(next_nonempty_line) is None:
+                flush_current()
+                current_speaker = standalone_speaker.strip()
+                current_lines = []
+                pending_commands_snapshot = list(pending_commands)
+                pending_commands = []
+                has_current = True
+                continue
         speaker_match = parse_scene_speaker_line(line)
         if speaker_match:
             flush_current()
@@ -2422,6 +2464,7 @@ def build_step_prompt(
             "A numbered speaker line like '1:' means that character is SPEAKING out loud. Do not use '1:' or '2:' for narration, stage directions, internal thoughts, or menu options.\n"
             "It is okay if The Tall Gnome talks to himself, but a '1:' line must still be spoken dialogue.\n"
             "Dialogue text should be only what the character says. Do not add attribution like 'says the Tall Gnome' inside the spoken line; the speaker label already handles that.\n"
+            "Do not use parentheticals on speaker lines like 'Madam Bei (smiling): ...' or '1 (quietly): ...'. Put those action beats in Narrator text instead, then write the dialogue normally as '<name>: ...' or '<id>: ...'.\n"
             "If someone visible speaks on-screen, they must be a named existing character in SCENE_CAST or a named NEW_CHARACTER you declared for this scene. Do not invent fresh visible generic labels like 'Surveyor' or 'Guard' for on-screen dialogue.\n"
             "If the person should stay generic for now, keep them in Narrator text or make them explicitly offscreen instead of giving them a visible speaker line.\n"
             "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
@@ -3626,7 +3669,10 @@ def validate_choice_menu(
 
 
 def should_request_hooks(*, packet: dict[str, Any], state: NormalRunConversationState) -> bool:
-    return True
+    # Hooks are temporarily disabled for normal AI runs. Keep the surrounding
+    # parsing/validation/apply logic intact so the step can be re-enabled later
+    # without structural changes.
+    return False
 
 
 def should_request_details(*, packet: dict[str, Any], state: NormalRunConversationState) -> bool:
