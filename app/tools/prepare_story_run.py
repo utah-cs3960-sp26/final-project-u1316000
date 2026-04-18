@@ -720,7 +720,7 @@ def build_candidate_template(branch_key: str, *, context: dict[str, Any]) -> dic
 
 def build_planning_policy(story_bible: dict[str, Any]) -> dict[str, Any]:
     defaults = {
-        "chance": 0.125,
+        "chance": 0.05,
         "min_normal_runs_between_plans": 2,
         "frontier_count": 4,
         "ideas_per_run": 3,

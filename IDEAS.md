@@ -70,8 +70,6 @@ Suggested format:
 
 - [Event] Transit Robbery: A later tram ride could erupt into a robbery that introduces new characters and turns the network from eerie logistics into an active action plotline.
 
-- [Character] The Clockwork Gnome's Apprentice: A small gnome apprentice who repairs the clockwork trams but speaks only in riddles about lost time, hinting at a deeper temporal anomaly tied to the protagonist's missing past.
-
 - [Character] The Chrono-Swallower of Forgotten Lullabies: A frog with translucent skin that absorbs the weight of memories and releases them as glowing lullaby notes when it leaps. It cannot forget, only transform.
 - [Location] The Library of Unwritten Apologies: A subterranean vault where glass shelves hold books that have never been written—each page glows faintly with the emotional residue of unsaid words. The air hums with the sound of futures being mourned.
 - [Object] The Gravity-Refracting Umbrella of Unsettled Pauses: A large, iridescent umbrella that only opens when someone is about to make a decision they cannot name. When deployed, it causes time to stutter in localized loops, allowing brief moments of perfect stillness.
@@ -309,3 +307,7 @@ Suggested format:
 - [Location] The Conservatory of Suspended Echoes: A massive, bioluminescent glass dome built into the side of a floating mountain range. Inside, gravity shifts randomly and gently, causing echoes of past conversations (and forgotten songs) to solidify into tangible, crystalline structures that can be collected or played back like musical notes.
 - [Event] The Annual Migration of the Chrono-Moths: Once every solar cycle, enormous moths with wings made of polished clockwork and stained glass descend from beyond the visible sky. Their passage temporarily slows down time within a ten-mile radius, causing all non-magical mechanical objects to run in reverse for exactly three hours.
 - [Object] Pocket Constellations: Small, ornate glass orrery devices that do not map stars, but rather capture and contain the gravitational pull of specific emotions (e.g., 'The Weight of Nostalgia,' 'The Spark of Unearned Confidence'). They must be carefully charged by witnessing a moment of pure, unadulterated joy.
+
+- [Location] The Petrified Soundscape of Whispering Tides: A vast, shallow basin where sound waves have solidified over millennia. Certain 'sound-geodes' emit specific emotions (e.g., a piece humming with forgotten melancholy, another glowing with sharp, sudden joy). Travelers must navigate by tuning into the emotional resonance of the crystallized noise to find passage.
+- [Character] The Cartographer-Moth Guild: A secretive order of giant moths who do not map geography, but rather 'emotional currents' and 'probability vectors.' They track where people are most likely to go next, or what emotional state a region will enter, selling these predictive maps to desperate travelers and overly optimistic merchants.
+- [Event] The Annual Gravity Reversal Festival: A biannual celestial event where the local gravitational constant fluctuates wildly for a full day. Buildings float, rivers flow sideways into temporary sky-lagoons, and specialized 'anchor-suits' are required just to walk across solid ground. It is a chaotic carnival of falling things and unexpected buoyancy.

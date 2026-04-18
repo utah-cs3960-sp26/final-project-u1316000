@@ -152,6 +152,7 @@ class SceneBodyDraft(BaseModel):
     settings: SceneSettingsDraft = Field(default_factory=SceneSettingsDraft)
     raw_body: str
     textboxes: list[SceneScriptTextbox] = Field(default_factory=list)
+    inline_new_character_names: list[str] = Field(default_factory=list)
 
 
 class ChoiceDraft(BaseModel):
@@ -350,7 +351,7 @@ SAME_LOCATION_PRESSURE_THRESHOLD = 6
 
 
 SCENE_TRANSITION_CUE_PATTERNS = [
-    re.compile(r"\b(board|boarding|ride|travel|arrive|arrival|depart|departure|enter|entered|reach|reached)\b", re.IGNORECASE),
+    re.compile(r"\b(boarding|ride|travel|arrive|arrival|depart|departure|enter|entered|reach|reached)\b", re.IGNORECASE),
     re.compile(r"\bstep\s+(into|through)\b", re.IGNORECASE),
     re.compile(r"\b(head|go|went)\s+to\b", re.IGNORECASE),
     re.compile(r"\bportal\b", re.IGNORECASE),
@@ -781,9 +782,10 @@ def scene_plan_satisfies_location_transition_obligation(
 def scene_body_mentions_declared_new_character(*, state: NormalRunConversationState, draft: SceneBodyDraft) -> bool:
     if state.scene_plan is None:
         return False
+    all_new_names = list(state.scene_plan.new_character_names) + list(draft.inline_new_character_names)
     declared_new_names = {
         name.strip().lower()
-        for name in state.scene_plan.new_character_names
+        for name in all_new_names
         if name.strip()
     }
     if not declared_new_names:
@@ -1240,9 +1242,7 @@ def build_form_template(step: str) -> str:
             "SCENE_CAST: <write one actual value only: MC_ONLY, SAME, NONE, or comma-separated canonical character ids/names like 1, 2> | Choose one syntax and write only that value. Do not copy the option list itself.\n"
             "NEW_CHARACTERS: <comma-separated character NAMES only, or NONE> | Brand-new characters introduced by this scene. Write names only, not ids, not parentheses, and not name-plus-number formats like 'Bob (2)'. New characters do not need to be listed in SCENE_CAST; they will be appended automatically.\n"
             "NEW_LOCATION: <string or NONE> | Brand-new location name introduced by this scene.\n"
-            "RETURN_LOCATION: <existing canonical location id or name, or NONE> | Required when LOCATION_STATUS is return_location.\n"
-            "NEW_CHARACTER_INTRO: <string or NONE> | Use for a first-meeting beat if a newly visible person matters now.\n"
-            "NEW_LOCATION_INTRO: <string or NONE> | Use for an arrival/transition beat if the location changes."
+            "RETURN_LOCATION: <existing canonical location id or name, or NONE> | Required when LOCATION_STATUS is return_location."
         )
     if step == "scene_body":
         return (
@@ -1263,7 +1263,9 @@ def build_form_template(step: str) -> str:
             "Your scene body should usually represent about a page of a movie script overall ~300 words between total narration and character dialogue.\n"
             "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
             "Visibility commands must each be on their own line and apply at the same moment the next textbox begins.\n"
-            "1n refers to a NEW CHARACTER. If you are referring about the protagonist use 1: NOT 1n:."
+            "1n refers to a NEW CHARACTER. If you are referring about the protagonist use 1: NOT 1n:.\n"
+            "If a line should contain a literal colon near the front and is NOT a speaker label, escape the colon as '\\:' to prevent it from being parsed as dialogue.\n"
+            "You may declare a brand-new on-screen character by adding NEW_CHARACTER: <name> as its own field (before or after SCENE_BODY). This works the same as declaring them in NEW_CHARACTERS during scene_plan. Details and art will be requested later. The new character can then be used as a speaker inside SCENE_BODY.\n"
             "Examples: @show 1 | @show: 1 | @show1 | @show 1,2 | @hide 2 | @show_only 1n | @show_all | @hide_all"
         )
     if step == "choice":
@@ -1396,6 +1398,7 @@ def get_detail_targets(*, state: NormalRunConversationState) -> list[tuple[Liter
 def parse_labeled_sections(raw_text: str, labels: list[str]) -> dict[str, str]:
     stripped = strip_markdown_fences(raw_text)
     sections: dict[str, list[str]] = {}
+    seen_labels: dict[str, int] = {}
     current_label: str | None = None
     label_set = set(labels)
 
@@ -1403,10 +1406,18 @@ def parse_labeled_sections(raw_text: str, labels: list[str]) -> dict[str, str]:
         match = re.match(r"^([A-Z0-9_]+):\s*(.*)$", line.rstrip())
         if match and match.group(1) in label_set:
             current_label = match.group(1)
+            seen_labels[current_label] = seen_labels.get(current_label, 0) + 1
             sections[current_label] = [match.group(2).strip()] if match.group(2).strip() else []
             continue
         if current_label is not None:
             sections[current_label].append(line.rstrip())
+
+    duplicated = [label for label, count in seen_labels.items() if count > 1]
+    if duplicated:
+        raise ValueError(
+            f"Duplicate labels found: {', '.join(duplicated)}. "
+            f"Each label must appear exactly once. You should only write one set of fields per response, not multiple."
+        )
 
     missing = [label for label in labels if label not in sections]
     if missing:
@@ -1727,10 +1738,28 @@ def parse_scene_script_command(line: str) -> SceneScriptCommand | None:
     raise ValueError(f"Unknown scene body command: {line}")
 
 
+def unescape_scene_colon(text: str) -> str:
+    return text.replace("\\:", ":")
+
+
+def find_first_unescaped_colon(line: str) -> int | None:
+    index = 0
+    while index < len(line):
+        if line[index] == "\\" and index + 1 < len(line) and line[index + 1] == ":":
+            index += 2
+            continue
+        if line[index] == ":":
+            return index
+        index += 1
+    return None
+
+
 def parse_scene_speaker_line(line: str) -> tuple[str, str] | None:
-    if ":" not in line:
+    colon_pos = find_first_unescaped_colon(line)
+    if colon_pos is None:
         return None
-    prefix, remainder = line.split(":", 1)
+    prefix = line[:colon_pos]
+    remainder = line[colon_pos + 1:]
     speaker_ref = prefix.strip()
     if not speaker_ref:
         return None
@@ -1741,11 +1770,11 @@ def parse_scene_speaker_line(line: str) -> tuple[str, str] | None:
     word_count = len(speaker_ref.split())
     lowered_ref = speaker_ref.lower()
     if re.fullmatch(r"\d+n?|\d+", lowered_ref) or lowered_ref in {"n", "narrator"}:
-        return speaker_ref, remainder.strip()
+        return speaker_ref, unescape_scene_colon(remainder.strip())
     if word_count > 4:
         return None
     if re.fullmatch(r"[A-Za-z][A-Za-z'\\-]*(?:\s+[A-Za-z][A-Za-z'\\-]*){0,3}", speaker_ref):
-        return speaker_ref, remainder.strip()
+        return speaker_ref, unescape_scene_colon(remainder.strip())
     return None
 
 
@@ -1757,7 +1786,7 @@ def parse_scene_inline_speaker_without_colon(
     known_names: set[str] | None = None,
 ) -> tuple[str, str] | None:
     stripped = (line or "").strip()
-    if not stripped or ":" in stripped:
+    if not stripped or find_first_unescaped_colon(stripped) is not None:
         return None
 
     narrator_match = re.match(r"^(narrator|n)(?P<tail>[.!?;,\s].*)?$", stripped, re.IGNORECASE)
@@ -1830,7 +1859,7 @@ def parse_scene_standalone_speaker_header(
     known_names: set[str] | None = None,
 ) -> str | None:
     speaker_ref = (line or "").strip()
-    if not speaker_ref or ":" in speaker_ref:
+    if not speaker_ref or find_first_unescaped_colon(speaker_ref) is not None:
         return None
     normalized_narrator = re.sub(r"[.!?;]+$", "", speaker_ref).strip().lower()
     if normalized_narrator in {"n", "narrator"}:
@@ -1876,7 +1905,7 @@ def parse_scene_script_textboxes(value: str, known_names: set[str] | None = None
         nonlocal current_lines, has_current
         if not has_current:
             return
-        text = "\n".join(line.rstrip() for line in current_lines).strip()
+        text = unescape_scene_colon("\n".join(line.rstrip() for line in current_lines).strip())
         if text:
             textboxes.append(
                 SceneScriptTextbox(
@@ -1962,6 +1991,8 @@ def parse_scene_script_textboxes(value: str, known_names: set[str] | None = None
 
 def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
     stripped = strip_markdown_fences(raw_text).strip()
+    if not re.search(r"(?m)^NEW_CHARACTER_INTRO:\s*", stripped):
+        stripped = f"{stripped}\nNEW_CHARACTER_INTRO: NONE"
     if not re.search(r"(?m)^NEW_LOCATION_INTRO:\s*", stripped):
         stripped = f"{stripped}\nNEW_LOCATION_INTRO: NONE"
     sections = parse_labeled_sections(stripped, NORMAL_STEP_LABELS["scene_plan"])
@@ -1981,9 +2012,20 @@ def parse_scene_plan_form(raw_text: str) -> ScenePlanDraft:
         new_character_names=parse_comma_list(sections["NEW_CHARACTERS"]),
         new_location_name=sanitize_name_plus_description_blob(sections["NEW_LOCATION"], drop_leading_the=True),
         return_location_ref=parse_none_text(return_location_match.group(1)) if return_location_match else None,
-        new_character_intro=parse_none_text(sections["NEW_CHARACTER_INTRO"]),
-        new_location_intro=parse_none_text(sections["NEW_LOCATION_INTRO"]),
+        new_character_intro=None,
+        new_location_intro=None,
     )
+
+
+def _extract_new_character_names(raw_text: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"(?m)^NEW_CHARACTER:\s*(.+)$", raw_text, re.IGNORECASE):
+        name = match.group(1).strip()
+        if name and name.upper() != "NONE" and name.lower() not in seen:
+            names.append(name)
+            seen.add(name.lower())
+    return names
 
 
 def parse_scene_body_form(raw_text: str) -> SceneBodyDraft:
@@ -1991,12 +2033,15 @@ def parse_scene_body_form(raw_text: str) -> SceneBodyDraft:
     has_settings_label = bool(re.search(r"(?m)^SCENE_SETTINGS:\s*", stripped))
     has_body_label = bool(re.search(r"(?m)^SCENE_BODY:\s*", stripped))
 
+    inline_new_chars = _extract_new_character_names(stripped)
+
     if not has_settings_label and not has_body_label:
-        scene_body = stripped
+        scene_body = re.sub(r"(?m)^NEW_CHARACTER:\s*.+$\n?", "", stripped).strip() if inline_new_chars else stripped
         return SceneBodyDraft(
             settings=SceneSettingsDraft(),
             raw_body=scene_body,
             textboxes=parse_scene_script_textboxes(scene_body),
+            inline_new_character_names=inline_new_chars,
         )
 
     if has_body_label and not has_settings_label:
@@ -2019,6 +2064,7 @@ def parse_scene_body_form(raw_text: str) -> SceneBodyDraft:
         settings=parse_scene_settings(sections["SCENE_SETTINGS"]),
         raw_body=sections["SCENE_BODY"].strip(),
         textboxes=parse_scene_script_textboxes(sections["SCENE_BODY"]),
+        inline_new_character_names=inline_new_chars,
     )
 
 
@@ -2349,9 +2395,24 @@ def validate_scene_cast_entries(
             continue
         if lowered in declared_new_names:
             continue
-        issues.append(
-            f"SCENE_CAST includes '{token}', but that name is neither an existing canonical character nor a declared NEW_CHARACTER."
+        partial_match = next(
+            (declared for declared in declared_new_names if lowered in declared or declared in lowered),
+            None,
         )
+        if partial_match is not None:
+            matching_full_name = next(
+                (name.strip() for name in draft.new_character_names if name.strip().lower() == partial_match),
+                partial_match,
+            )
+            issues.append(
+                f"SCENE_CAST includes '{token}', which looks like a partial or alternate form of the declared NEW_CHARACTER '{matching_full_name}'. "
+                f"Use the exact name '{matching_full_name}' in SCENE_CAST so it matches NEW_CHARACTERS, or remove it from SCENE_CAST since NEW_CHARACTERS are automatically added to the cast."
+            )
+        else:
+            issues.append(
+                f"SCENE_CAST includes '{token}', but that name is neither an existing canonical character nor a declared NEW_CHARACTER. "
+                f"If this is meant to be a new character, declare them in NEW_CHARACTERS first using the exact same name."
+            )
     return issues
 
 
@@ -2465,6 +2526,7 @@ def build_step_prompt(
     state: NormalRunConversationState,
     requested_choice_count: int,
     issues: list[str] | None = None,
+    previous_output: str | None = None,
     choice_index: int | None = None,
     optional_choice: bool = False,
     detail_target: tuple[Literal["character", "location"], str] | None = None,
@@ -2473,9 +2535,15 @@ def build_step_prompt(
 ) -> str:
     issue_block = ""
     if issues:
+        failed_output_block = ""
+        if previous_output and previous_output.strip():
+            failed_output_block = f"Your previous response that failed:\n```\n{previous_output.strip()}\n```\n\n"
         issue_block = (
             "Your previous response for this step failed.\n"
             f"Issues:\n{json.dumps(issues, indent=2)}\n\n"
+            f"{failed_output_block}"
+            "If you get a validation error, please try to fix it. This may include rethinking and rewriting your response to fit the guidelines of the story validator. If you fail, think critically and creatively to fix the issue.\n"
+            "If you truly do not know how to fix this error, consider rewriting your response in a different way.\n\n"
         )
     retry_block = f"Retry: {retry_index}\n" if retry_index > 0 else ""
 
@@ -2535,6 +2603,7 @@ def build_step_prompt(
             "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
             "For SCENE_CAST, write one actual value only, such as MC_ONLY or 1, 2. Do not repeat the syntax guide or the option list.\n"
             "For NEW_CHARACTERS, write only the new characters' names, comma-separated if needed. Do not invent ids, slot numbers, or parenthetical numbers there. Any actual ids are assigned later by the system at apply time.\n"
+            "When creating new characters, strongly prefer non-human characters: talking animals, mythical creatures, animated objects, fae, golems, ghosts, trolls, sentient plants, or other whimsical beings. Human characters should be the exception, not the default.\n"
             "New characters do not need to be repeated in SCENE_CAST. If you declare them in NEW_CHARACTERS, they will be added to the accepted scene cast automatically.\n"
             f"Already encountered path-safe locations for RETURN_LOCATION: {', '.join(entry.get('name') for entry in ((packet.get('path_location_continuity') or {}).get('encountered_locations') or []) if entry.get('name')) or 'NONE'}.\n"
             "If LOCATION_STATUS is return_location, use RETURN_LOCATION to name a path-safe existing location from that list. Do not guess an unseen canonical place.\n"
@@ -2561,6 +2630,7 @@ def build_step_prompt(
             f"{scene_cast_block}"
             "Newlines are the ONLY valid separator between top-level fields in this step. Do not use pipes '|', slashes '/', backslashes '\\', commas, or other inline separators between fields.\n"
             "Write the scripted scene body.\n"
+            "The player can ONLY see what is written in SCENE_BODY. SCENE_SUMMARY is only used by future AI runs to know what happened; it is never shown to the player. Everything the player should experience must be in SCENE_BODY itself.\n"
             "Make this feel like a real story passage, not a stub. Usually write multiple beats before choices appear.\n"
             "When pressure is active, use IDEAS.md as a main source of fresh people, places, and whimsical turns.\n"
             "Prefer whimsical, readable, unexpected developments over another direct derivative of the current patrol/vault/seam beat.\n"
@@ -2580,6 +2650,8 @@ def build_step_prompt(
             "Do not use parentheticals on speaker lines like 'Madam Bei (smiling): ...' or '1 (quietly): ...'. Put those action beats in Narrator text instead, then write the dialogue normally as '<name>: ...' or '<id>: ...'.\n"
             "If someone visible speaks on-screen, they must be a named existing character in SCENE_CAST or a named NEW_CHARACTER you declared for this scene. Do not invent fresh visible generic labels like 'Surveyor' or 'Guard' for on-screen dialogue.\n"
             "If the person should stay generic for now, keep them in Narrator text or make them explicitly offscreen instead of giving them a visible speaker line.\n"
+            "You may also declare a brand-new on-screen character by adding NEW_CHARACTER: <name> as its own field (before or after SCENE_BODY). This works the same as declaring them in NEW_CHARACTERS during scene_plan. Character details and art will be requested later. The new character can then be used as a speaker inside SCENE_BODY.\n"
+            "If a line contains a literal colon near the front and is NOT a speaker label, escape the colon as '\\:' to prevent it from being parsed as dialogue.\n"
             "Do not put any choices, option lists, or menu text inside SCENE_BODY. SCENE_BODY is only what happens in the scene; the choices will be written in a later step.\n"
             "Visibility commands must each be isolated on their own line, with a newline before and after the command. They apply at the same moment the next textbox begins.\n"
             "DO NOT USE SHOW OR HIDE WITHOUT A NEWLINE BEFORE AND AFTER THE COMMAND.\n"
@@ -2604,7 +2676,7 @@ def build_step_prompt(
                 "A location_transition choice promises that its future expansion will move to a different location than the current one.\n"
                 "Use path_location_continuity when returning to an existing place, or point toward a brand-new place if that fits better.\n"
             )
-        choice_header = f"Write choice {choice_index + 1} of {requested_choice_count}.\n"
+        choice_header = f"Write choice {choice_index + 1} of {requested_choice_count}.\n" "Write ONLY this single choice. Do not include other choices in this response; each choice is written one at a time in its own step.\n"
         if optional_choice:
             prior_count_text = "1 choice" if choice_index == 1 else f"{choice_index} choices"
             choice_header = (
@@ -2869,7 +2941,7 @@ def collect_plan_names(texts: list[str], resolution: dict[str, Any]) -> list[str
         pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])")
         if any(pattern.search(text or "") for text in texts):
             issues.append(
-                f"'{name}' is not yet a safe known character on this path. Either keep them unnamed for now or explicitly introduce them."
+                f"'{name}' already exists as a canonical character but has not been introduced on this branch yet. Please add them to SCENE_CAST and introduce them, or leave them unnamed for now."
             )
     return issues
 
@@ -2903,6 +2975,19 @@ def resolve_scene_reference_name(
     return hit
 
 
+def _build_effective_scene_plan(state: NormalRunConversationState, draft: SceneBodyDraft) -> ScenePlanDraft:
+    assert state.scene_plan is not None
+    if not draft.inline_new_character_names:
+        return state.scene_plan
+    merged_names = list(state.scene_plan.new_character_names)
+    existing_lowered = {name.strip().lower() for name in merged_names}
+    for name in draft.inline_new_character_names:
+        if name.strip().lower() not in existing_lowered:
+            merged_names.append(name.strip())
+            existing_lowered.add(name.strip().lower())
+    return state.scene_plan.model_copy(update={"new_character_names": merged_names})
+
+
 def compile_scene_body_draft(
     *,
     state: NormalRunConversationState,
@@ -2912,8 +2997,10 @@ def compile_scene_body_draft(
     if state.scene_plan is None:
         return None, ["Cannot compile SCENE_BODY before SCENE_CAST is accepted."]
 
+    effective_plan = _build_effective_scene_plan(state, draft)
+
     cast_names, ref_to_name, exact_name_lookup = build_scene_cast_index_map(
-        draft=state.scene_plan,
+        draft=effective_plan,
         resolution=resolution,
     )
     all_character_names = [name.strip() for name in cast_names if name.strip()]
@@ -3042,8 +3129,13 @@ def compile_scene_body_draft(
             elif textbox.speaker_ref.strip().lower() in new_character_names:
                 resolved_speaker = new_character_names[textbox.speaker_ref.strip().lower()]
             else:
-                issues.append(f"SCENE_BODY speaker '{textbox.speaker_ref}' does not match SCENE_CAST.")
-                resolved_speaker = textbox.speaker_ref.strip()
+                speaker_name = textbox.speaker_ref.strip()
+                issues.append(
+                    f"'{speaker_name}' is not listed in SCENE_CAST, but is treated as a speaker as indicated by the ':' character. "
+                    f"If you wish to make '{speaker_name}' a character please add the field NEW_CHARACTER: {speaker_name} on a new line in your response (before or after SCENE_BODY). "
+                    f"Otherwise escape the colon with '\\' or remove the speaker from the scene."
+                )
+                resolved_speaker = speaker_name
 
         if draft.settings.visible_when_speaking and resolved_speaker not in {"Narrator", protagonist_name}:
             auto_visible = {resolved_speaker.strip().lower()} if resolved_speaker.strip() else set()
@@ -3138,10 +3230,6 @@ def validate_scene_plan_draft(
             continue
         if lowered not in (resolution.get("character_name_map") or {}) and lowered not in declared_new_names:
             unknown_or_off_path_visible.append(name)
-        elif lowered not in (resolution.get("encountered_names") or set()) and not draft.new_character_intro:
-            issues.append(f"SCENE_CAST includes '{name}' before a first-meeting beat. Provide NEW_CHARACTER_INTRO or keep them offstage for now.")
-    if unknown_or_off_path_visible and not draft.new_character_intro:
-        issues.append("A newly visible character needs NEW_CHARACTER_INTRO.")
     texts_to_scan = [
         draft.scene_summary,
         draft.material_change,
@@ -3160,7 +3248,7 @@ def validate_scene_plan_draft(
     new_character_pressure = packet.get("new_character_pressure") or {}
     if new_character_pressure.get("active") and not scene_plan_satisfies_new_character_pressure(draft=draft):
         issues.append(
-            "New-character pressure is active and this scene setup still does not introduce a brand-new character. Add NEW_CHARACTERS and NEW_CHARACTER_INTRO. Reusing only existing characters does not satisfy this."
+            "New-character pressure is active and this scene setup still does not introduce a brand-new character. Add NEW_CHARACTERS. Reusing only existing characters does not satisfy this."
         )
     location_transition_obligation = packet.get("location_transition_obligation") or {}
     if location_transition_obligation.get("active") and not scene_plan_satisfies_location_transition_obligation(
@@ -3284,9 +3372,10 @@ def collect_scene_body_pressure_issues(
         )
     new_character_pressure = packet.get("new_character_pressure") or {}
     if new_character_pressure.get("active"):
-        if not state.scene_plan.new_character_names:
+        has_any_new_characters = bool(state.scene_plan.new_character_names) or bool(draft.inline_new_character_names)
+        if not has_any_new_characters:
             issues.append(
-                "New-character pressure is active and this scene still cannot be fixed inside SCENE_BODY alone. Return to scene_plan and add NEW_CHARACTERS plus NEW_CHARACTER_INTRO. Reusing only existing characters does not satisfy this."
+                "New-character pressure is active and this scene still cannot be fixed inside SCENE_BODY alone. Return to scene_plan and add NEW_CHARACTERS. Reusing only existing characters does not satisfy this."
             )
         elif not scene_body_mentions_declared_new_character(state=state, draft=draft):
             issues.append(
@@ -3421,7 +3510,7 @@ def scene_body_issues_require_scene_plan_rewind(issues: list[str] | None) -> boo
     return any(
         "Return to scene_plan and either add the proper casting or declare a new character" in issue
         or "Return to scene_plan and add another named character" in issue
-        or "Return to scene_plan and add NEW_CHARACTERS plus NEW_CHARACTER_INTRO" in issue
+        or "Return to scene_plan and add NEW_CHARACTERS" in issue
         or "Return to scene_plan and change LOCATION_STATUS/NEW_LOCATION" in issue
         or "Return to scene_plan and strengthen LOCATION_STATUS/NEW_LOCATION" in issue
         or "Return to scene_plan and change LOCATION_STATUS so the child scene actually moves now" in issue
@@ -3484,11 +3573,6 @@ def collect_choice_target_issues(
         for candidate in merge_candidates
         if candidate.get("node_id") is not None
     }
-    if int(draft.target_existing_node) not in allowed_target_ids:
-        issues.append(
-            f"TARGETED_NODE {draft.target_existing_node} is not a valid merge candidate for this branch right now. "
-            "Use one of the listed merge candidate node ids, set TARGETED_NODE to this_node for a self-merge inspection loop, or set TARGETED_NODE to NONE."
-        )
     return issues
 
 
@@ -4578,7 +4662,7 @@ def build_validation_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context. Strongly prefer non-human characters over human ones.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
@@ -4648,7 +4732,7 @@ def build_schema_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic changes.\n"
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context. Strongly prefer non-human characters over human ones.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
@@ -4818,6 +4902,7 @@ def run_normal_conversational_builder(
 
     scene_plan_issues: list[str] | None = None
     scene_body_issues: list[str] | None = None
+    rewind_count = 0
     while True:
         if state.scene_plan is None:
             for attempt in range(step_retry_limit):
@@ -4828,6 +4913,7 @@ def run_normal_conversational_builder(
                         state=state,
                         requested_choice_count=args.requested_choice_count,
                         issues=scene_plan_issues,
+                        previous_output=raw_scene_plan if attempt > 0 else None,
                         retry_index=attempt,
                     )
                 )
@@ -4870,6 +4956,7 @@ def run_normal_conversational_builder(
                         state=state,
                         requested_choice_count=args.requested_choice_count,
                         issues=scene_body_issues,
+                        previous_output=raw_scene_body if attempt > 0 else None,
                         retry_index=attempt,
                     )
                 )
@@ -4881,6 +4968,12 @@ def run_normal_conversational_builder(
                     draft = parse_scene_body_form(raw_scene_body)
                     scene_body_issues = validate_scene_body_draft(packet=packet, state=state, draft=draft, resolution=resolution)
                     if not scene_body_issues:
+                        if draft.inline_new_character_names and state.scene_plan is not None:
+                            existing_lowered = {n.strip().lower() for n in state.scene_plan.new_character_names}
+                            for name in draft.inline_new_character_names:
+                                if name.strip().lower() not in existing_lowered:
+                                    state.scene_plan.new_character_names.append(name.strip())
+                                    existing_lowered.add(name.strip().lower())
                         state.scene_body = draft
                         break
                     log_validation_attempt(
@@ -4896,7 +4989,7 @@ def run_normal_conversational_builder(
                         else:
                             rewind_scene_plan_issues = [
                                 "The previous SCENE_BODY introduced or used an in-world speaking character through Narrator text without proper casting. "
-                                "Fix SCENE_CAST and/or NEW_CHARACTERS now, add NEW_CHARACTER_INTRO if needed, then retry SCENE_BODY."
+                                "Fix SCENE_CAST and/or NEW_CHARACTERS now, then retry SCENE_BODY."
                             ]
                         break
                 except (ValidationError, ValueError) as exc:
@@ -4908,6 +5001,14 @@ def run_normal_conversational_builder(
                         retry_index=attempt + 1,
                     )
             if rewind_to_scene_plan:
+                rewind_count += 1
+                if rewind_count >= step_retry_limit:
+                    detail = "\n".join(rewind_scene_plan_issues or scene_body_issues or [])
+                    raise RuntimeError(
+                        f"scene_body rewound to scene_plan {rewind_count} times, exceeding retry limit.\n{detail}"
+                        if detail
+                        else f"scene_body rewound to scene_plan {rewind_count} times, exceeding retry limit."
+                    )
                 state.scene_plan = None
                 state.scene_body = None
                 scene_plan_issues = rewind_scene_plan_issues
@@ -4926,6 +5027,7 @@ def run_normal_conversational_builder(
         prompt_issues: list[str] | None = None,
     ) -> ChoiceDraft | None:
         issues: list[str] | None = list(prompt_issues) if prompt_issues else None
+        prev_raw_choice: str | None = None
         for attempt in range(step_retry_limit):
             raw_choice = get_step_response(
                 prompt_text=build_step_prompt(
@@ -4934,6 +5036,7 @@ def run_normal_conversational_builder(
                     state=state,
                     requested_choice_count=requested_count,
                     issues=issues,
+                    previous_output=prev_raw_choice,
                     choice_index=choice_index,
                     optional_choice=optional,
                     retry_index=attempt,
@@ -4973,6 +5076,7 @@ def run_normal_conversational_builder(
                     choice_index=choice_index,
                     retry_index=attempt + 1,
                 )
+            prev_raw_choice = raw_choice
         if optional:
             return None
         detail = "\n".join(issues) if issues else ""
@@ -5050,6 +5154,7 @@ def run_normal_conversational_builder(
             continue
         transition_issues: list[str] | None = None
         accepted_transition: TransitionNodeDraft | None = None
+        prev_raw_transition: str | None = None
         for attempt in range(step_retry_limit):
             raw_transition = get_step_response(
                 prompt_text=build_step_prompt(
@@ -5058,6 +5163,7 @@ def run_normal_conversational_builder(
                     state=state,
                     requested_choice_count=args.requested_choice_count,
                     issues=transition_issues,
+                    previous_output=prev_raw_transition,
                     transition_target=(merge_choice_index, merge_choice.target_existing_node, merge_choice.target_current_node),
                     retry_index=attempt,
                 )
@@ -5102,6 +5208,7 @@ def run_normal_conversational_builder(
                     choice_index=merge_choice_index,
                     retry_index=attempt + 1,
                 )
+            prev_raw_transition = raw_transition
         if accepted_transition is None:
             raise RuntimeError(f"Failed to produce a valid transition bridge for choice_{merge_choice_index + 1}.")
         state.transition_nodes.append(accepted_transition)
@@ -5145,6 +5252,7 @@ def run_normal_conversational_builder(
                     )
                 if attempt == step_retry_limit - 1:
                     break
+                prev_raw_hooks = raw_hooks
                 raw_hooks = get_step_response(
                     prompt_text=build_step_prompt(
                         step_name="hooks",
@@ -5152,6 +5260,7 @@ def run_normal_conversational_builder(
                         state=state,
                         requested_choice_count=args.requested_choice_count,
                         issues=issues,
+                        previous_output=prev_raw_hooks,
                         retry_index=attempt,
                     )
                 )
@@ -5169,6 +5278,7 @@ def run_normal_conversational_builder(
                 else ["LOCATION_DETAILS", "LOCATION_ART_HINTS"]
             )
             issues = None
+            prev_raw_details: str | None = None
             for attempt in range(step_retry_limit):
                 raw_details = get_step_response(
                     prompt_text=build_step_prompt(
@@ -5177,6 +5287,7 @@ def run_normal_conversational_builder(
                         state=state,
                         requested_choice_count=args.requested_choice_count,
                         issues=issues,
+                        previous_output=prev_raw_details,
                         detail_target=detail_target,
                         retry_index=attempt,
                     )
@@ -5222,6 +5333,7 @@ def run_normal_conversational_builder(
                         detail_target=detail_target,
                         retry_index=attempt + 1,
                     )
+                prev_raw_details = raw_details
                 if attempt == step_retry_limit - 1:
                     raise RuntimeError(f'Failed to produce a valid details form for {detail_target[0]} "{detail_target[1]}".')
 
@@ -5835,12 +5947,34 @@ def sync_scripted_scene_visibility_after_apply(
         protagonist_name = (resolution.get("protagonist_name") or "").strip().lower()
         protagonist_id = resolution.get("protagonist_id")
         support_slots = ["left-support", "right-support"]
-        next_support_index = 0
         total_line_count = len(compiled_scene_body.dialogue_lines)
 
+        # --- protagonist gets hero-center as before ---
         for name in scene_cast_names:
             lowered = name.strip().lower()
             if not lowered:
+                continue
+            if lowered == protagonist_name and protagonist_id is not None:
+                character = canon.find_character_by_name(name)
+                if character is None or character.get("id") is None:
+                    raise RuntimeError(f"Could not resolve scripted SCENE_CAST character '{name}' after apply.")
+                hidden_on_lines = list(compiled_scene_body.hidden_lines_by_character.get(lowered, []))
+                if total_line_count > 0 and len(hidden_on_lines) >= total_line_count:
+                    continue
+                story.link_present_entity(
+                    story_node_id=story_node_id,
+                    entity_type="character",
+                    entity_id=int(protagonist_id),
+                    slot="hero-center",
+                    focus=True,
+                    hidden_on_lines=hidden_on_lines,
+                )
+
+        # --- dynamically assign support slots for non-protagonist characters ---
+        support_characters: list[dict[str, Any]] = []
+        for name in scene_cast_names:
+            lowered = name.strip().lower()
+            if not lowered or (lowered == protagonist_name and protagonist_id is not None):
                 continue
             character = canon.find_character_by_name(name)
             if character is None or character.get("id") is None:
@@ -5848,26 +5982,64 @@ def sync_scripted_scene_visibility_after_apply(
             hidden_on_lines = list(compiled_scene_body.hidden_lines_by_character.get(lowered, []))
             if total_line_count > 0 and len(hidden_on_lines) >= total_line_count:
                 continue
-            if lowered == protagonist_name and protagonist_id is not None:
-                slot = "hero-center"
-                focus = True
-                character_id = int(protagonist_id)
-            else:
-                if next_support_index >= len(support_slots):
-                    continue
-                slot = support_slots[next_support_index]
-                focus = False
-                next_support_index += 1
-                character_id = int(character["id"])
+            visible_lines = set(range(total_line_count)) - set(hidden_on_lines)
+            if not visible_lines:
+                continue
+            support_characters.append({
+                "name": lowered,
+                "character_id": int(character["id"]),
+                "visible_lines": visible_lines,
+            })
 
-            story.link_present_entity(
-                story_node_id=story_node_id,
-                entity_type="character",
-                entity_id=character_id,
-                slot=slot,
-                focus=focus,
-                hidden_on_lines=hidden_on_lines,
-            )
+        if support_characters:
+            # Dynamically assign the two support slots across all lines,
+            # evicting the longest-occupying character when a new one needs
+            # to appear and no free slot is available.
+            #
+            # Each slot tracks which character currently occupies it and
+            # which lines that character is visible on within that slot.
+            # A character may move between slots across the scene.
+            num_slots = len(support_slots)
+            slot_occupant: list[str | None] = [None] * num_slots
+            slot_since: list[int] = [0] * num_slots
+            # slot_visible_lines[(slot_index, char_name)] = set of line
+            # indices where char_name should be visible in that slot.
+            slot_visible_lines: dict[tuple[int, str], set[int]] = {}
+
+            for line_idx in range(total_line_count):
+                needed_now = [sc["name"] for sc in support_characters if line_idx in sc["visible_lines"]]
+                for char_name in needed_now:
+                    # Already occupying a slot?
+                    current_si = next((si for si in range(num_slots) if slot_occupant[si] == char_name), None)
+                    if current_si is not None:
+                        slot_visible_lines.setdefault((current_si, char_name), set()).add(line_idx)
+                        continue
+                    # Find a free slot
+                    free_si = next((si for si in range(num_slots) if slot_occupant[si] is None), None)
+                    if free_si is not None:
+                        slot_occupant[free_si] = char_name
+                        slot_since[free_si] = line_idx
+                        slot_visible_lines.setdefault((free_si, char_name), set()).add(line_idx)
+                        continue
+                    # Evict the character that has occupied its slot the longest
+                    evict_si = min(range(num_slots), key=lambda si: slot_since[si])
+                    slot_occupant[evict_si] = char_name
+                    slot_since[evict_si] = line_idx
+                    slot_visible_lines.setdefault((evict_si, char_name), set()).add(line_idx)
+
+            # Persist: each (slot, character) pair that has any visible lines
+            # becomes one present-entity row.
+            all_lines = set(range(total_line_count))
+            for (si, char_name), vis_lines in slot_visible_lines.items():
+                sc_entry = next(sc for sc in support_characters if sc["name"] == char_name)
+                story.link_present_entity(
+                    story_node_id=story_node_id,
+                    entity_type="character",
+                    entity_id=sc_entry["character_id"],
+                    slot=support_slots[si],
+                    focus=False,
+                    hidden_on_lines=sorted(all_lines - vis_lines),
+                )
 
         updated = story.get_story_node(story_node_id)
         if updated is None:
@@ -6100,7 +6272,10 @@ def ensure_validation_attempt_log_capacity(*, log_path: Path, max_lines: int = 1
 
 def append_validation_attempt_run_separator(*, log_path: Path, record: dict[str, Any], max_lines: int = 1000) -> None:
     ensure_validation_attempt_log_capacity(log_path=log_path, max_lines=max_lines)
-    metadata_bits = [str(record.get("timestamp") or "").strip(), str(record.get("model") or "").strip()]
+    metadata_bits = [str(record.get("model") or "").strip()]
+    time_str = str(record.get("time") or "").strip()
+    if time_str:
+        metadata_bits.append(time_str)
     run_mode = str(record.get("run_mode") or "").strip()
     if run_mode:
         metadata_bits.append(f"run_mode={run_mode}")
@@ -6122,7 +6297,7 @@ def append_validation_attempt_log_record(*, log_path: Path, record: dict[str, An
     attempted_output = str(record.get("attempted_output") or "")
     formatted_output = attempted_output.replace("\\r\\n", "\n").replace("\\n", "\n")
     issues = [str(issue) for issue in (record.get("issues") or [])]
-    metadata_bits = [str(record.get("timestamp") or "").strip(), str(record.get("model") or "").strip()]
+    metadata_bits = [str(record.get("model") or "").strip()]
     step = str(record.get("step") or "").strip()
     if step:
         metadata_bits.append(f"step={step}")

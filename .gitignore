@@ -9,7 +9,7 @@ __pycache__/
 *.sqlite3
 
 .aider*
-data/worker_logs/
+data/worker_logs/local_worker_runs.ndjson
 
 
 data/assets/generated/object_render

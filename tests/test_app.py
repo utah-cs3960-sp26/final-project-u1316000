@@ -4461,7 +4461,7 @@ def test_validate_choice_draft_rejects_ungrounded_local_prop_early() -> None:
     assert any("introduces a new focal prop or marker" in issue for issue in issues)
 
 
-def test_validate_choice_draft_rejects_invalid_merge_target_early() -> None:
+def test_validate_choice_draft_accepts_any_merge_target() -> None:
     issues = validate_choice_draft(
         packet={
             "context_summary": {
@@ -4483,7 +4483,7 @@ def test_validate_choice_draft_rejects_invalid_merge_target_early() -> None:
         choice_index=0,
     )
 
-    assert any("not a valid merge candidate" in issue for issue in issues)
+    assert not any("not a valid merge candidate" in issue for issue in issues)
 
 
 def test_is_force_next_override_accepts_secret_spellings() -> None:
