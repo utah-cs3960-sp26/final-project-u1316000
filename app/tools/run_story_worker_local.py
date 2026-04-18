@@ -1752,7 +1752,10 @@ def parse_scene_speaker_line(line: str) -> tuple[str, str] | None:
 INLINE_SPEAKER_PRONOUN_TOKENS = {"I", "You", "He", "She", "We", "They", "It"}
 
 
-def parse_scene_inline_speaker_without_colon(line: str) -> tuple[str, str] | None:
+def parse_scene_inline_speaker_without_colon(
+    line: str,
+    known_names: set[str] | None = None,
+) -> tuple[str, str] | None:
     stripped = (line or "").strip()
     if not stripped or ":" in stripped:
         return None
@@ -1768,6 +1771,19 @@ def parse_scene_inline_speaker_without_colon(line: str) -> tuple[str, str] | Non
     numeric_match = re.match(r"^(?P<speaker>\d+n?|\d+)\s+(?P<text>.+)$", stripped, re.IGNORECASE)
     if numeric_match:
         return numeric_match.group("speaker").strip(), numeric_match.group("text").strip()
+
+    if known_names is not None:
+        max_name_words = max((len(n.split()) for n in known_names), default=1)
+        words = stripped.split()
+        for length in range(min(max_name_words, len(words)), 0, -1):
+            candidate = " ".join(words[:length])
+            candidate_clean = re.sub(r"""["'()\[\],.!?;:]+$""", "", candidate).strip()
+            if candidate_clean.lower() in known_names:
+                rest = " ".join(words[length:]).strip()
+                rest = re.sub(r"""^[(\["']+\s*""", "", rest).strip()
+                if rest:
+                    return candidate_clean, rest
+        return None
 
     words = stripped.split()
     speaker_tokens: list[str] = []
@@ -1806,7 +1822,10 @@ def parse_scene_inline_speaker_without_colon(line: str) -> tuple[str, str] | Non
     return speaker_ref, text
 
 
-def parse_scene_standalone_speaker_header(line: str) -> str | None:
+def parse_scene_standalone_speaker_header(
+    line: str,
+    known_names: set[str] | None = None,
+) -> str | None:
     speaker_ref = (line or "").strip()
     if not speaker_ref or ":" in speaker_ref:
         return None
@@ -1825,12 +1844,16 @@ def parse_scene_standalone_speaker_header(line: str) -> str | None:
     word_count = len(speaker_ref.split())
     if word_count > 4:
         return None
+    if known_names is not None:
+        if speaker_ref.lower() in known_names:
+            return speaker_ref
+        return None
     if re.fullmatch(r"[A-Z][A-Za-z'\\-]*(?:\s+[A-Z][A-Za-z'\\-]*){0,3}", speaker_ref):
         return speaker_ref
     return None
 
 
-def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
+def parse_scene_script_textboxes(value: str, known_names: set[str] | None = None) -> list[SceneScriptTextbox]:
     raw_body = (value or "").strip()
     if not raw_body:
         raise ValueError("SCENE_BODY cannot be empty.")
@@ -1879,7 +1902,7 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
             pending_commands = []
             has_current = True
             continue
-        inline_speaker = parse_scene_inline_speaker_without_colon(line)
+        inline_speaker = parse_scene_inline_speaker_without_colon(line, known_names=known_names)
         if inline_speaker is not None:
             flush_current()
             current_speaker = inline_speaker[0].strip()
@@ -1888,7 +1911,7 @@ def parse_scene_script_textboxes(value: str) -> list[SceneScriptTextbox]:
             pending_commands = []
             has_current = True
             continue
-        standalone_speaker = parse_scene_standalone_speaker_header(line)
+        standalone_speaker = parse_scene_standalone_speaker_header(line, known_names=known_names)
         if standalone_speaker is not None:
             next_nonempty_line = ""
             for lookahead in raw_lines[index + 1:]:
@@ -2886,6 +2909,19 @@ def compile_scene_body_draft(
         if name.strip().lower() not in (resolution.get("character_name_map") or {})
         and name.strip().lower() != protagonist_name.strip().lower()
     }
+
+    known_speaker_names: set[str] = set()
+    for name in all_character_names:
+        known_speaker_names.add(name.strip().lower())
+    if protagonist_name.strip():
+        known_speaker_names.add(protagonist_name.strip().lower())
+    for ref_key in ref_to_name:
+        known_speaker_names.add(ref_key.lower())
+    if draft.raw_body:
+        try:
+            draft.textboxes = parse_scene_script_textboxes(draft.raw_body, known_names=known_speaker_names)
+        except (ValueError, ValidationError):
+            pass
 
     issues: list[str] = []
     protagonist_lowered = protagonist_name.strip().lower()

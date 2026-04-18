@@ -203,6 +203,26 @@ def get_db(request: Request) -> sqlite3.Connection:
         connection.close()
 
 
+def _decode_stuck_choice_histories(choices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for choice in choices:
+        raw = choice.pop("error_history_json", "[]") or "[]"
+        try:
+            history = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            history = []
+        parsed = []
+        for entry in history:
+            error = entry.get("error", "")
+            lines = error.split("\n")
+            parsed.append({
+                "timestamp": entry.get("timestamp", ""),
+                "headline": lines[0],
+                "details": [l.strip() for l in lines[1:] if l.strip()],
+            })
+        choice["error_history"] = parsed
+    return choices
+
+
 def create_app(database_path: str | Path | None = None) -> FastAPI:
     settings = Settings.from_env(database_path)
     bootstrap_database(settings.database_path)
@@ -266,7 +286,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             "hooks": branch_state.list_hooks_with_readiness("default")[:5],
             "story_direction_notes": story_notes.list_notes(limit=5),
             "worldbuilding_notes": worldbuilding.list_notes(limit=5),
-            "stuck_choices": story.list_stuck_frontier_choices(limit=8),
+            "stuck_choices": _decode_stuck_choice_histories(story.list_stuck_frontier_choices(limit=8)),
             "db_path": str(settings.database_path),
         }
         return templates.TemplateResponse(request, "index.html", context)

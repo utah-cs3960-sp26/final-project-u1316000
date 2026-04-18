@@ -212,20 +212,26 @@
                 {% if choice.last_failed_at %}
                     <div class="meta">Last failed: {{ choice.last_failed_at }}</div>
                 {% endif %}
-                {% if choice.last_error %}
-                    {% set error_lines = choice.last_error.split('\n') %}
-                    {% if error_lines | length > 1 %}
-                    <details class="meta">
-                        <summary>{{ error_lines[0] }}</summary>
-                        <ul style="margin:0.25em 0 0 1em;padding:0;list-style:disc;">
-                        {% for line in error_lines[1:] if line.strip() %}
-                            <li>{{ line.strip() }}</li>
-                        {% endfor %}
-                        </ul>
-                    </details>
-                    {% else %}
-                    <div class="meta">{{ choice.last_error[:180] }}{% if choice.last_error|length > 180 %}...{% endif %}</div>
-                    {% endif %}
+                {% if choice.error_history %}
+                <details class="meta" style="cursor:pointer;">
+                    <summary style="list-style:disclosure-closed inside;display:list-item;">Validation errors ({{ choice.error_history | length }} runs)</summary>
+                    <ul style="margin:0.25em 0 0 1em;padding:0;list-style:none;">
+                    {% for entry in choice.error_history %}
+                        <li style="margin-bottom:0.4em;">
+                            <strong>Run {{ loop.index }}</strong> <span class="meta">({{ entry.timestamp[:19] }})</span>: {{ entry.headline }}
+                            {% if entry.details %}
+                            <ul style="margin:0.15em 0 0 1em;padding:0;list-style:disc;">
+                            {% for line in entry.details %}
+                                <li>{{ line }}</li>
+                            {% endfor %}
+                            </ul>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                    </ul>
+                </details>
+                {% elif choice.last_error %}
+                <div class="meta">{{ choice.last_error[:180] }}{% if choice.last_error|length > 180 %}...{% endif %}</div>
                 {% endif %}
             </li>
         {% endfor %}

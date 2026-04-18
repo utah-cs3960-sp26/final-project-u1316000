@@ -1385,17 +1385,29 @@ class StoryGraphService:
         choice = fetch_one(self.connection, "SELECT * FROM choices WHERE id = ?", (choice_id,))
         if choice is None:
             raise ValueError(f"Unknown choice id: {choice_id}")
+        now = datetime.now(timezone.utc).isoformat()
+        existing = self.get_choice_failure(choice_id)
+        if existing is not None:
+            try:
+                history = json.loads(existing.get("error_history_json") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                history = []
+        else:
+            history = []
+        history.append({"timestamp": now, "error": error})
+        history_json = json.dumps(history, ensure_ascii=False)
         self.connection.execute(
             """
-            INSERT INTO worker_choice_failures (choice_id, failed_run_count, last_failed_at, last_error, updated_at)
-            VALUES (?, 1, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+            INSERT INTO worker_choice_failures (choice_id, failed_run_count, last_failed_at, last_error, error_history_json, updated_at)
+            VALUES (?, 1, CURRENT_TIMESTAMP, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(choice_id) DO UPDATE SET
                 failed_run_count = worker_choice_failures.failed_run_count + 1,
                 last_failed_at = CURRENT_TIMESTAMP,
                 last_error = excluded.last_error,
+                error_history_json = excluded.error_history_json,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (choice_id, error),
+            (choice_id, error, history_json),
         )
         record = self.get_choice_failure(choice_id) or {}
         failed_run_count = int(record.get("failed_run_count") or 0)
@@ -1425,6 +1437,7 @@ class StoryGraphService:
                 w.failed_run_count,
                 w.last_failed_at,
                 w.last_error,
+                w.error_history_json,
                 w.auto_parked_at,
                 c.from_node_id,
                 c.choice_text,

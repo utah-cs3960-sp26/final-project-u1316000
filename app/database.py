@@ -329,6 +329,7 @@ def bootstrap_database(database_path: str | Path) -> None:
         _ensure_column(connection, "story_hooks", "min_distance_to_next_development", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "story_hooks", "last_development_depth", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "worldbuilding_notes", "pressure", "INTEGER NOT NULL DEFAULT 2")
+        _ensure_column(connection, "worker_choice_failures", "error_history_json", "TEXT NOT NULL DEFAULT '[]'")
         connection.execute(
             """
             INSERT INTO loop_runtime_state (id, normal_runs_since_plan, last_run_mode)
