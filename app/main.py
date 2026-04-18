@@ -457,19 +457,29 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     @app.get("/ui/locations", response_class=HTMLResponse)
     def locations_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
         canon = CanonResolver(db)
+        assets = AssetService(db, project_root)
+        locations = canon.list_locations()
+        for loc in locations:
+            asset = assets.get_latest_asset(entity_type="location", entity_id=loc["id"], asset_kind="background")
+            loc["image_url"] = assets.media_url_for_path(asset["file_path"]) if asset else None
         return templates.TemplateResponse(
             request,
             "locations.html",
-            {"request": request, "locations": canon.list_locations()},
+            {"request": request, "locations": locations},
         )
 
     @app.get("/ui/characters", response_class=HTMLResponse)
     def characters_page(request: Request, db: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
         canon = CanonResolver(db)
+        assets = AssetService(db, project_root)
+        characters = canon.list_characters()
+        for char in characters:
+            asset = assets.get_preferred_asset(entity_type="character", entity_id=char["id"], preferred_kinds=["cutout", "portrait"])
+            char["image_url"] = assets.media_url_for_path(asset["file_path"]) if asset else None
         return templates.TemplateResponse(
             request,
             "characters.html",
-            {"request": request, "characters": canon.list_characters()},
+            {"request": request, "characters": characters},
         )
 
     @app.get("/ui/objects", response_class=HTMLResponse)

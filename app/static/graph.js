@@ -11,11 +11,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const LEVEL_SPACING = 160;
     const SIBLING_SPACING = 140;
     const BORDER_WIDTH = 3;
-    const COLOR_BRANCH = "#9f4f2d";
-    const COLOR_LEAF = "#6b6154";
+    const COLOR_BRANCH = "#00e0b0";
+    const COLOR_LEAF = "#8a9baa";
     const ZOOM_MIN = 0.2;
     const ZOOM_MAX = 3.0;
-    const FONT_FAMILY = "Georgia, serif";
+    const FONT_FAMILY = "Inter, Segoe UI, system-ui, sans-serif";
 
     // --- State ---
     let offsetX = 0;
@@ -223,11 +223,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const metrics = ctx.measureText(label);
         const pw = metrics.width + 10;
         const ph = 16;
-        ctx.fillStyle = "rgba(255, 250, 240, 0.85)";
+        ctx.fillStyle = "rgba(11, 18, 24, 0.8)";
         ctx.beginPath();
         ctx.roundRect(x - pw / 2, y - ph / 2, pw, ph, 6);
         ctx.fill();
-        ctx.fillStyle = "#5a4a3a";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = "#8a9baa";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(label, x, y);
@@ -243,7 +246,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const y2 = to.y - NODE_RADIUS;
 
         ctx.save();
-        ctx.strokeStyle = "rgba(159, 79, 45, 0.5)";
+        ctx.strokeStyle = "rgba(0, 224, 176, 0.4)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -269,7 +272,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const cpOffset = Math.abs(x2 - x1) * 0.3 + 40;
 
         ctx.save();
-        ctx.strokeStyle = edge.status === "auto_continue" ? "rgba(58, 120, 94, 0.55)" : "rgba(107, 97, 84, 0.4)";
+        ctx.strokeStyle = edge.status === "auto_continue" ? "rgba(0, 224, 176, 0.35)" : "rgba(138, 155, 170, 0.3)";
         ctx.lineWidth = 2;
         ctx.setLineDash(edge.status === "auto_continue" ? [10, 5] : [6, 4]);
         ctx.beginPath();
@@ -293,7 +296,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const isLeaf = outgoingEdges[n.id].length === 0;
         const isTransition = n.node_kind === "transition";
         const isSelfMergeTransition = !!n.self_merge_transition;
-        const borderColor = isTransition ? "#3a785e" : (isLeaf ? COLOR_LEAF : COLOR_BRANCH);
+        const borderColor = isTransition ? "#00e0b0" : (isLeaf ? COLOR_LEAF : COLOR_BRANCH);
 
         ctx.save();
 
@@ -313,7 +316,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const size = NODE_RADIUS * 2;
             ctx.drawImage(img, n.x - NODE_RADIUS, n.y - NODE_RADIUS, size, size);
         } else {
-            ctx.fillStyle = "#faf3e8";
+            ctx.fillStyle = "rgba(16, 26, 36, 0.75)";
             ctx.fill();
         }
         ctx.restore();
@@ -337,13 +340,13 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 ctx.arc(n.x, n.y, NODE_RADIUS + 3, 0, Math.PI * 2);
             }
-            ctx.strokeStyle = "rgba(159, 79, 45, 0.35)";
+            ctx.strokeStyle = "rgba(0, 224, 176, 0.4)";
             ctx.lineWidth = 2;
             ctx.stroke();
         }
 
         // Title text
-        ctx.fillStyle = "#3a2e22";
+        ctx.fillStyle = "#e4e8ec";
         ctx.font = "bold 12px " + FONT_FAMILY;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -355,11 +358,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const tm = ctx.measureText(title);
             const pw = tm.width + 8;
             const ph = 16;
-            ctx.fillStyle = "rgba(255, 250, 240, 0.8)";
+            ctx.fillStyle = "rgba(8, 14, 20, 0.75)";
             ctx.beginPath();
             ctx.roundRect(n.x - pw / 2, n.y - ph / 2, pw, ph, 4);
             ctx.fill();
-            ctx.fillStyle = "#3a2e22";
+            ctx.fillStyle = "#e4e8ec";
             ctx.fillText(title, n.x, n.y);
             ctx.restore();
         } else {
@@ -367,13 +370,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (isTransition) {
-            ctx.fillStyle = "#3a785e";
+            ctx.fillStyle = "#00e0b0";
             ctx.font = "bold 10px " + FONT_FAMILY;
             ctx.fillText(isSelfMergeTransition ? "self-merge" : "transition", n.x, n.y - NODE_RADIUS - 12);
         }
 
         // ID below circle
-        ctx.fillStyle = "#7a6a5a";
+        ctx.fillStyle = "#8a9baa";
         ctx.font = "10px " + FONT_FAMILY;
         ctx.fillText("#" + n.id, n.x, n.y + NODE_RADIUS + 14);
 

@@ -1,26 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-    <h2>Locations</h2>
-    {% if locations %}
-        <table>
-            <thead>
-                <tr><th>ID</th><th>Name</th><th>Description</th><th>Summary</th></tr>
-            </thead>
-            <tbody>
-                {% for location in locations %}
-                <tr>
-                    <td>{{ location.id }}</td>
-                    <td>{{ location.name }}</td>
-                    <td>{{ location.description or "" }}</td>
-                    <td>{{ location.canonical_summary or "" }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p class="empty">No locations seeded yet.</p>
-    {% endif %}
-</section>
+<h2>Locations</h2>
+{% if locations %}
+<div class="entity-grid">
+    {% for location in locations %}
+    <article class="entity-card card">
+        {% if location.image_url %}
+        <div class="entity-card-image">
+            <img src="{{ location.image_url }}" alt="{{ location.name }}" loading="lazy">
+        </div>
+        {% else %}
+        <div class="entity-card-image entity-card-placeholder">
+            <span>No image</span>
+        </div>
+        {% endif %}
+        <div class="entity-card-body">
+            <h3>{{ location.name }}</h3>
+            {% set desc = location.description or location.canonical_summary or "" %}
+            {% if desc %}
+            <p class="entity-card-desc truncated" onclick="this.classList.toggle('truncated')">{{ desc }}</p>
+            {% endif %}
+        </div>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+    <p class="empty">No locations seeded yet.</p>
+{% endif %}
 {% endblock %}
-

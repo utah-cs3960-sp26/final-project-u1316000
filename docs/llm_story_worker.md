@@ -10,7 +10,7 @@ This is the single per-run entrypoint for the story-expansion loop.
 - Setting and characters: whimsical, surreal, adventurous, sincere, slightly unhinged.
 - Writing Tone: straightforward but can use prose to enhance or certain characters could have an interesting way of speaking (eg: in rhymes or alliteration) as long as it is immediately understandable
 - Feel free to act creatively. Make bold choices as long as they fit in the story.
-- Introduce or reintroduce characters frequently. Characters make a story.
+- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.
 - Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.
 - Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Behind-the-scenes hooks, worldbuilding notes, and coherence trackers often name things the player has not learned yet.
 - If someone besides the protagonist speaks on-screen, use a real character name and make sure that visible speaker can receive portrait/cutout art. Generic labels like `Guard` or `Patrol Member` should be reserved for unseen/offscreen voices or kept in narration until the character has a true name.

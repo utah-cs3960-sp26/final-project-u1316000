@@ -213,8 +213,8 @@
                     <div class="meta">Last failed: {{ choice.last_failed_at }}</div>
                 {% endif %}
                 {% if choice.error_history %}
-                <details class="meta" style="cursor:pointer;">
-                    <summary style="list-style:disclosure-closed inside;display:list-item;">Validation errors ({{ choice.error_history | length }} runs)</summary>
+                <details class="meta">
+                    <summary>Validation errors ({{ choice.error_history | length }} runs)</summary>
                     <ul style="margin:0.25em 0 0 1em;padding:0;list-style:none;">
                     {% for entry in choice.error_history %}
                         <li style="margin-bottom:0.4em;">

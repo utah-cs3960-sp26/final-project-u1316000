@@ -2680,7 +2680,7 @@ def test_generation_prompt_includes_bold_character_and_location_guidance(tmp_pat
     prompt = service.build_prompt({"branch_key": "default"})
 
     assert "Feel free to act creatively. Make bold choices as long as they fit in the story." in prompt
-    assert "Introduce or reintroduce characters frequently. Characters make a story." in prompt
+    assert "Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context." in prompt
     assert "Introduce new locations frequently when appropriate" in prompt
     assert "Always evaluate whether the player is actually familiar" in prompt
     assert "Frequently use ideas from IDEAS.md" in prompt

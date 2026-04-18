@@ -536,7 +536,7 @@ def infer_choice_class_from_text(choice_text: str, notes: str | None) -> str:
         return "commitment"
     if any(token in text for token in ("die", "death", "surrender", "give up", "accept capture", "let it take you")):
         return "ending"
-    if any(token in text for token in ("look", "listen", "inspect", "examine", "read", "study", "judge")):
+    if any(token in text for token in ("look", "listen", "inspect", "examine", "read", "study", "judge", "understand", "investigate", "observe", "focus", "consider", "analyze", "ponder", "contemplate", "check", "search", "scan", "survey", "peer", "watch")):
         return "inspection"
     if any(token in text for token in ("follow", "enter", "board", "ride", "climb", "descend", "return", "ask", "warn")):
         return "commitment"
@@ -2858,7 +2858,7 @@ def collect_plan_names(texts: list[str], resolution: dict[str, Any]) -> list[str
         if not lowered_name or lowered_name in encountered_names:
             continue
         name = character.get("name") or ""
-        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.IGNORECASE)
+        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])")
         if any(pattern.search(text or "") for text in texts):
             issues.append(
                 f"'{name}' is not yet a safe known character on this path. Either keep them unnamed for now or explicitly introduce them."
@@ -3682,18 +3682,14 @@ def validate_choice_draft(
     if draft.target_current_node and draft.target_existing_node is not None:
         issues.append("TARGETED_NODE cannot name both an existing node id and this_node.")
     if draft.target_current_node:
-        combined_choice_text = " ".join(filter(None, [draft.choice_text, draft.next_node, draft.further_goals]))
-        inferred_from_text = infer_choice_class_from_text(
-            draft.choice_text,
-            f"NEXT_NODE: {draft.next_node} FURTHER_GOALS: {draft.further_goals}",
-        )
+        inferred_from_text = infer_choice_class_from_text(draft.choice_text, None)
         if draft.choice_class != "inspection":
             issues.append("TARGETED_NODE: this_node is only allowed for CHOICE_CLASS: inspection in this v1.")
         elif inferred_from_text != "inspection":
             issues.append(
                 "TARGETED_NODE: this_node is only for brief local inspection elaboration. This choice currently reads like travel, commitment, or another outward move."
             )
-        if choice_text_implies_consequence(combined_choice_text) and inferred_from_text != "inspection":
+        if choice_text_implies_consequence(draft.choice_text) and inferred_from_text != "inspection":
             issues.append("TARGETED_NODE: this_node cannot be used for major commitment, closure, travel, or merge-style moves.")
     issues.extend(collect_choice_grounding_issues(packet=packet, state=state, draft=draft))
     issues.extend(collect_choice_target_issues(packet=packet, draft=draft))
@@ -4566,7 +4562,7 @@ def build_validation_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
@@ -4636,7 +4632,7 @@ def build_schema_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic changes.\n"
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"

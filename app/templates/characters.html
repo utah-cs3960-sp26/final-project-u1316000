@@ -1,25 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-    <h2>Characters</h2>
-    {% if characters %}
-        <table>
-            <thead>
-                <tr><th>ID</th><th>Name</th><th>Home</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-                {% for character in characters %}
-                <tr>
-                    <td>{{ character.id }}</td>
-                    <td>{{ character.name }}</td>
-                    <td>{{ character.home_location_name or "" }}</td>
-                    <td>{{ character.description or "" }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p class="empty">No characters seeded yet.</p>
-    {% endif %}
-</section>
+<h2>Characters</h2>
+{% if characters %}
+<div class="entity-grid">
+    {% for character in characters %}
+    <article class="entity-card card">
+        {% if character.image_url %}
+        <div class="entity-card-image entity-card-image--contain">
+            <img src="{{ character.image_url }}" alt="{{ character.name }}" loading="lazy">
+        </div>
+        {% else %}
+        <div class="entity-card-image entity-card-placeholder">
+            <span>No image</span>
+        </div>
+        {% endif %}
+        <div class="entity-card-body">
+            <h3>{{ character.name }}</h3>
+            {% if character.home_location_name %}
+            <p class="meta" style="margin:0 0 0.4em;">📍 {{ character.home_location_name }}</p>
+            {% endif %}
+            {% set desc = character.description or "" %}
+            {% if desc %}
+            <p class="entity-card-desc truncated" onclick="this.classList.toggle('truncated')">{{ desc }}</p>
+            {% endif %}
+        </div>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+    <p class="empty">No characters seeded yet.</p>
+{% endif %}
 {% endblock %}

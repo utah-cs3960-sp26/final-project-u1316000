@@ -6,10 +6,13 @@
     position: relative;
     width: 100%;
     height: calc(100vh - 140px);
-    border: 1px solid var(--line);
-    border-radius: 20px;
+    border: var(--glass-border);
+    border-radius: var(--radius);
     overflow: hidden;
-    background: #faf5ee;
+    background: var(--panel);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--shadow), var(--glow);
 }
 #graph-canvas {
     display: block;
@@ -24,19 +27,22 @@
     display: none;
     position: absolute;
     z-index: 100;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 16px;
+    background: var(--panel-strong);
+    border: var(--glass-border);
+    border-radius: var(--radius);
     box-shadow: var(--shadow);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
     padding: 1rem 1.2rem;
     max-width: 320px;
     min-width: 200px;
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     color: var(--ink);
 }
 #node-popup h3 {
     margin: 0 0 0.3rem;
     font-size: 1rem;
+    color: var(--ink);
 }
 #node-popup .popup-id {
     color: var(--muted);
@@ -65,12 +71,12 @@
     cursor: pointer;
 }
 #node-popup .popup-actions .btn-primary {
-    background: linear-gradient(135deg, #a94b2f 0%, #7e3625 100%);
-    color: white;
+    background: linear-gradient(135deg, rgba(0, 224, 176, 0.85) 0%, rgba(0, 180, 140, 0.9) 100%);
+    color: #050a0f;
 }
 #node-popup .popup-actions .btn-secondary {
     background: var(--panel-strong);
-    border: 1px solid var(--line);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--ink);
 }
 #node-popup .popup-close {
