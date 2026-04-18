@@ -170,3 +170,165 @@ You remain exactly where you are, kneeling among the luminous roots. The spores 
 google/gemma-4-e4b | 04/18 08:29 AM | run_mode=normal | choice_id=387
 ------------------------------------------------------------------------
 
+------------------------------------------------------------------------
+mock-model | 04/18 09:35 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=scene_plan | retry=1 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+mock-model | step=scene_plan | retry=2 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 09:36 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=scene_plan | retry=1 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+mock-model | step=scene_plan | retry=2 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 09:36 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=details | retry=1 | choice_id=4 | detail_target=character:Brass Patrol Member
+issues:
+- Missing required labels: CHARACTER_DETAILS, CHARACTER_ART_HINTS
+attempted output:
+```text
+END
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 09:36 AM | run_mode=planning
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+mock-model | 04/18 09:36 AM | run_mode=planning
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:01 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=scene_plan | retry=1 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+mock-model | step=scene_plan | retry=2 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:01 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=details | retry=1 | choice_id=4 | detail_target=character:Brass Patrol Member
+issues:
+- Missing required labels: CHARACTER_DETAILS, CHARACTER_ART_HINTS
+attempted output:
+```text
+END
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:01 AM | run_mode=planning
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:01 AM | run_mode=planning
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:18 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=scene_plan | retry=1 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+mock-model | step=scene_plan | retry=2 | choice_id=4
+issues:
+- Missing required labels: SCENE_TITLE, SCENE_SUMMARY, MATERIAL_CHANGE, OPENING_BEAT, LOCATION_STATUS, SCENE_CAST, NEW_CHARACTERS, NEW_LOCATION
+attempted output:
+```text
+{"branch_key": "default", "scene_summary": "A repetitive invalid scene.", "scene_text": "This scene intentionally repeats the same move without advancing anything.", "choices": [{"choice_text": "Follow the grooves beneath the velvet-marked mushroom", "notes": "NEXT_NODE: follow the grooves beneath the velvet-marked mushroom. FURTHER_GOALS: follow the grooves beneath the velvet-marked mushroom."}]}
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:18 AM | run_mode=normal | choice_id=4
+------------------------------------------------------------------------
+
+mock-model | step=details | retry=1 | choice_id=4 | detail_target=character:Brass Patrol Member
+issues:
+- Missing required labels: CHARACTER_DETAILS, CHARACTER_ART_HINTS
+attempted output:
+```text
+END
+```
+
+
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:18 AM | run_mode=planning
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+mock-model | 04/18 11:18 AM | run_mode=planning
+------------------------------------------------------------------------
+

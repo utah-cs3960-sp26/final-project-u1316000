@@ -1404,10 +1404,11 @@ def parse_labeled_sections(raw_text: str, labels: list[str]) -> dict[str, str]:
 
     for line in stripped.splitlines():
         match = re.match(r"^([A-Z0-9_]+):\s*(.*)$", line.rstrip())
-        if match and match.group(1) in label_set:
-            current_label = match.group(1)
-            seen_labels[current_label] = seen_labels.get(current_label, 0) + 1
-            sections[current_label] = [match.group(2).strip()] if match.group(2).strip() else []
+        matched_label = match.group(1) if match else None
+        if match and matched_label is not None and matched_label in label_set:
+            current_label = matched_label
+            seen_labels[matched_label] = seen_labels.get(matched_label, 0) + 1
+            sections[matched_label] = [match.group(2).strip()] if match.group(2).strip() else []
             continue
         if current_label is not None:
             sections[current_label].append(line.rstrip())
@@ -1811,47 +1812,14 @@ def parse_scene_inline_speaker_without_colon(
             # Allow omission or addition of leading "The "
             alt_candidate = low_candidate[4:] if low_candidate.startswith("the ") else "the " + low_candidate
             if low_candidate in known_names or alt_candidate in known_names:
+                if length == 1 and candidate_clean in INLINE_SPEAKER_PRONOUN_TOKENS:
+                    continue
                 rest = " ".join(words[length:]).strip()
-                rest = re.sub(r"""^[(\["']+\s*""", "", rest).strip()
                 if rest:
                     return candidate_clean, rest
         return None
 
-    words = stripped.split()
-    speaker_tokens: list[str] = []
-    rest_start_index = 0
-    for index, word in enumerate(words):
-        cleaned = re.sub(r"^[\"'“”‘’(\[]+|[\"'“”‘’)\],.!?;:]+$", "", word)
-        if not cleaned:
-            rest_start_index = index
-            break
-        if cleaned in INLINE_SPEAKER_PRONOUN_TOKENS:
-            rest_start_index = index
-            break
-        if re.fullmatch(r"[A-Z][A-Za-z'\\-]*", cleaned):
-            speaker_tokens.append(cleaned)
-            if len(speaker_tokens) == 4:
-                rest_start_index = index + 1
-                break
-            continue
-        rest_start_index = index
-        break
-    else:
-        rest_start_index = len(words)
-
-    if not speaker_tokens:
-        return None
-
-    if rest_start_index >= len(words):
-        return None
-
-    speaker_ref = " ".join(speaker_tokens).strip()
-    text = " ".join(words[rest_start_index:]).strip()
-    if not text:
-        return None
-    if len(speaker_ref) > 40:
-        return None
-    return speaker_ref, text
+    return None
 
 
 def parse_scene_standalone_speaker_header(
@@ -1885,8 +1853,6 @@ def parse_scene_standalone_speaker_header(
         if alt in known_names:
             return speaker_ref
         return None
-    if re.fullmatch(r"[A-Z][A-Za-z'\\-]*(?:\s+[A-Z][A-Za-z'\\-]*){0,3}", speaker_ref):
-        return speaker_ref
     return None
 
 
@@ -2903,7 +2869,7 @@ def resolve_normal_context(packet: dict[str, Any]) -> dict[str, Any]:
         current_visible_cast_names.append((character.get("name") or "").strip())
     current_location_id = int(current_location["entity_id"]) if current_location and current_location.get("entity_id") else None
     current_location_record = (
-        path_location_id_map.get(current_location_id)
+        path_location_id_map.get(current_location_id) if current_location_id is not None else None
         or (location_name_map.get((packet.get("parent_current_location") or {}).get("name", "").strip().lower()) if packet.get("parent_current_location") else None)
         or None
     )
@@ -3126,6 +3092,7 @@ def compile_scene_body_draft(
         if resolved_speaker is None:
             if re.fullmatch(r"\d+n?|\d+", textbox.speaker_ref.strip().lower()):
                 issues.append(f"SCENE_BODY speaker ref '{textbox.speaker_ref}' does not match the accepted scene cast.")
+                resolved_speaker = textbox.speaker_ref.strip()
             elif textbox.speaker_ref.strip().lower() in new_character_names:
                 resolved_speaker = new_character_names[textbox.speaker_ref.strip().lower()]
             else:

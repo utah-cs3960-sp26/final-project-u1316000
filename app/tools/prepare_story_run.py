@@ -1381,6 +1381,8 @@ def main() -> None:
         )
         runtime_after = record_run_mode(connection, run_mode)
 
+        context: dict[str, Any] | None = None
+
         if not frontier_items:
             revival_target = select_revival_candidate(story, branch_key=args.branch_key)
             selected = {

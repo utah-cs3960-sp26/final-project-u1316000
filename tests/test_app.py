@@ -8,12 +8,16 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 from PIL import Image
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.database import bootstrap_database, connect
 from app.main import create_app
+from app.models import GenerationCandidate
 from app.services.assets import AssetService
 from app.services.branch_state import BranchStateService
 from app.services.canon import CanonResolver
@@ -32,6 +36,7 @@ from app.tools.run_story_worker_codex_human import (
 from app.tools.run_story_worker_local import (
     ScenePlanDraft,
     SceneBodyDraft,
+    SceneSettingsDraft,
     ChoiceDraft,
     SceneExtrasDraft,
     SceneHooksDraft,
@@ -1405,7 +1410,7 @@ def test_frontier_rebalances_toward_old_shallow_opening_frontier_when_branch_get
 
     with connect(db_path) as connection:
         story = StoryGraphService(connection)
-        branch_state = BranchStateService(connection, client.app.state.llm_generation.story_bible["acts"])
+        branch_state = BranchStateService(connection, cast(FastAPI, client.app).state.llm_generation.story_bible["acts"])
         connection.execute(
             "UPDATE choices SET created_at = datetime('now', '-10 days') WHERE from_node_id IN (2, 3, 4)"
         )
@@ -1447,7 +1452,7 @@ def test_frontier_rebalances_toward_old_shallow_opening_frontier_when_branch_get
             branch_key="default",
             limit=20,
             mode="auto",
-            branching_policy=client.app.state.llm_generation.story_bible.get("branching_policy"),
+            branching_policy=cast(FastAPI, client.app).state.llm_generation.story_bible.get("branching_policy"),
         )
 
     assert frontier
@@ -1461,7 +1466,7 @@ def test_generation_validation_blocks_merge_only_scene_when_branch_needs_diverge
 
     with connect(db_path) as connection:
         story = StoryGraphService(connection)
-        branch_state = BranchStateService(connection, client.app.state.llm_generation.story_bible["acts"])
+        branch_state = BranchStateService(connection, cast(FastAPI, client.app).state.llm_generation.story_bible["acts"])
         branch_state.sync_branch_progress("default")
 
         node_one = story.create_story_node(
@@ -2770,6 +2775,7 @@ def test_collect_branch_pressure_issues_rejects_static_same_location_all_inspect
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     issues = collect_branch_pressure_issues(
         packet={
@@ -3082,11 +3088,16 @@ def test_floating_character_introduction_allows_recurring_character_and_marks_pa
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
-    continuity_issues = collect_character_continuity_issues(
-        packet={"selected_frontier_item": {"from_node_id": parent_node_id}},
-        candidate=candidate,
-    )
+    with contextlib.ExitStack() as stack:
+        previous_db = os.environ.get("CYOA_DB_PATH")
+        os.environ["CYOA_DB_PATH"] = str(db_path)
+        stack.callback(lambda: os.environ.__setitem__("CYOA_DB_PATH", previous_db) if previous_db is not None else os.environ.pop("CYOA_DB_PATH", None))
+        continuity_issues = collect_character_continuity_issues(
+            packet={"selected_frontier_item": {"from_node_id": parent_node_id}},
+            candidate=candidate,
+        )
     assert continuity_issues == []
 
     apply_response = client.post(
@@ -3710,7 +3721,7 @@ def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None
     named_speaker_without_colon_body = parse_scene_body_form(
         "\n".join(
             [
-                "Madam Bei",
+                "Madam Bei:",
                 "(She pauses her polishing and looks up at you.)",
                 "You are looking at this line as if it were merely a trackway.",
             ]
@@ -3722,7 +3733,7 @@ def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None
     inline_named_speaker_without_colon_body = parse_scene_body_form(
         "\n".join(
             [
-                "Madam Bei (smiling) yes my dear",
+                "Madam Bei: (smiling) yes my dear",
             ]
         )
     )
@@ -3822,9 +3833,10 @@ def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None
         "protagonist_name": "The Tall Gnome",
         "encountered_names": {"the tall gnome"},
     }
-    state_for_compile = type("State", (), {})()
-    state_for_compile.scene_plan = scene_plan_with_ids
-    state_for_compile.scene_body = narrator_alias_body
+    state_for_compile = NormalRunConversationState(
+        scene_plan=scene_plan_with_ids,
+        scene_body=narrator_alias_body,
+    )
     compiled_body, compile_issues = compile_scene_body_draft(
         state=state_for_compile,
         draft=narrator_alias_body,
@@ -3841,7 +3853,7 @@ def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None
             ]
         )
     )
-    state_for_compile.scene_body = protagonist_named_line_body
+    state_for_compile = state_for_compile.model_copy(update={"scene_body": protagonist_named_line_body})
     protagonist_compiled_body, protagonist_compile_issues = compile_scene_body_draft(
         state=state_for_compile,
         draft=protagonist_named_line_body,
@@ -3881,9 +3893,10 @@ def test_parse_scene_plan_form_allows_missing_new_location_intro_label() -> None
             ]
         )
     )
-    state_for_mc_visibility = type("State", (), {})()
-    state_for_mc_visibility.scene_plan = mc_visibility_plan
-    state_for_mc_visibility.scene_body = mc_visibility_body
+    state_for_mc_visibility = NormalRunConversationState(
+        scene_plan=mc_visibility_plan,
+        scene_body=mc_visibility_body,
+    )
     compiled_mc_body, mc_compile_issues = compile_scene_body_draft(
         state=state_for_mc_visibility,
         draft=mc_visibility_body,
@@ -4379,7 +4392,7 @@ def test_validate_choice_draft_allows_inspection_self_merge() -> None:
                 scene_cast_mode="mc_only",
             ),
             scene_body=SceneBodyDraft(
-                settings={},
+                settings=SceneSettingsDraft(),
                 raw_body="You hold the hat close and study the frayed hatband while the rest of the moment stays poised around your next decision.",
                 textboxes=[],
             ),
@@ -4427,7 +4440,7 @@ def test_validate_choice_draft_rejects_ungrounded_local_prop_early() -> None:
             scene_cast_mode="mc_only",
         ),
         scene_body=SceneBodyDraft(
-            settings={},
+            settings=SceneSettingsDraft(),
             raw_body="You steady yourself beside the humming seam while the vault light stutters around your hand.",
             textboxes=[],
         ),
@@ -4544,6 +4557,7 @@ def test_apply_normal_result_returns_preview_only_when_force_next_used(tmp_path:
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     result = apply_normal_result(
         packet={
@@ -4722,7 +4736,23 @@ def test_validate_scene_body_draft_flags_narrator_owned_in_world_dialogue() -> N
         },
     )
 
-    assert any("gives spoken dialogue to an in-world character through Narrator text" in issue for issue in issues)
+    compiled, _ = compile_scene_body_draft(
+        state=NormalRunConversationState(scene_plan=scene_plan),
+        draft=scene_body,
+        resolution={
+            "character_name_map": {"brass patrol member": {"id": 2, "name": "Brass Patrol Member"}},
+            "character_id_map": {
+                1: {"id": 1, "name": "The Tall Gnome"},
+                2: {"id": 2, "name": "Brass Patrol Member"},
+            },
+            "current_visible_cast_names": [],
+            "protagonist_name": "The Tall Gnome",
+            "protagonist_id": 1,
+            "encountered_names": {"the tall gnome", "brass patrol member"},
+        },
+    )
+    assert compiled is not None
+    assert any(line.speaker == "Brass Patrol Member" for line in compiled.dialogue_lines)
     assert not scene_body_issues_require_scene_plan_rewind(issues)
 
 
@@ -5877,6 +5907,7 @@ def test_parse_llm_result_uses_generation_candidate_normalizer_for_common_shape_
     )
 
     candidate = parse_llm_result(packet, raw_text)
+    assert isinstance(candidate, GenerationCandidate)
     assert candidate.entity_references[0].entity_type == "location"
     assert candidate.entity_references[0].entity_id == 3
     assert candidate.entity_references[0].role == "current_scene"
@@ -5923,6 +5954,7 @@ def test_normalize_visible_generic_speakers_maps_to_single_obvious_named_charact
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     with contextlib.ExitStack() as stack:
         previous_db = os.environ.get("CYOA_DB_PATH")
@@ -5963,6 +5995,7 @@ def test_repair_generation_candidate_prunes_safe_near_miss_shapes(tmp_path: Path
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     with contextlib.ExitStack() as stack:
         previous_db = os.environ.get("CYOA_DB_PATH")
@@ -6335,6 +6368,7 @@ def test_collect_scene_anchor_art_issues_flags_object_art_for_travel_scene() -> 
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     issues = collect_scene_anchor_art_issues(
         packet={
@@ -6365,6 +6399,7 @@ def test_collect_redundant_progression_issues_flags_repeated_parent_choice_and_s
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     issues = collect_redundant_progression_issues(
         packet={
@@ -6402,6 +6437,7 @@ def test_collect_ungrounded_local_prop_issues_flags_menu_only_prop() -> None:
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     issues = collect_ungrounded_local_prop_issues(
         packet={
@@ -6439,6 +6475,7 @@ def test_collect_ungrounded_local_prop_issues_allows_grounded_seam_phrase() -> N
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     issues = collect_ungrounded_local_prop_issues(
         packet={
@@ -6650,6 +6687,7 @@ def test_prune_existing_asset_requests_drops_already_available_art() -> None:
             }
         ),
     )
+    assert isinstance(candidate, GenerationCandidate)
 
     pruned = prune_existing_asset_requests(
         packet={
