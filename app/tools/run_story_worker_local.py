@@ -1778,7 +1778,10 @@ def parse_scene_inline_speaker_without_colon(
         for length in range(min(max_name_words, len(words)), 0, -1):
             candidate = " ".join(words[:length])
             candidate_clean = re.sub(r"""["'()\[\],.!?;:]+$""", "", candidate).strip()
-            if candidate_clean.lower() in known_names:
+            low_candidate = candidate_clean.lower()
+            # Allow omission or addition of leading "The "
+            alt_candidate = low_candidate[4:] if low_candidate.startswith("the ") else "the " + low_candidate
+            if low_candidate in known_names or alt_candidate in known_names:
                 rest = " ".join(words[length:]).strip()
                 rest = re.sub(r"""^[(\["']+\s*""", "", rest).strip()
                 if rest:
@@ -1845,7 +1848,12 @@ def parse_scene_standalone_speaker_header(
     if word_count > 4:
         return None
     if known_names is not None:
-        if speaker_ref.lower() in known_names:
+        low = speaker_ref.lower()
+        if low in known_names:
+            return speaker_ref
+        # Allow omission or addition of leading "The "
+        alt = low[4:] if low.startswith("the ") else "the " + low
+        if alt in known_names:
             return speaker_ref
         return None
     if re.fullmatch(r"[A-Z][A-Za-z'\\-]*(?:\s+[A-Z][A-Za-z'\\-]*){0,3}", speaker_ref):
@@ -2884,7 +2892,15 @@ def resolve_scene_reference_name(
     lowered = token.lower()
     if allow_narrator and lowered in {"narrator", "n"}:
         return "Narrator"
-    return exact_name_lookup.get(lowered)
+    hit = exact_name_lookup.get(lowered)
+    if hit is not None:
+        return hit
+    # Allow omission or addition of a leading "The "
+    if lowered.startswith("the "):
+        hit = exact_name_lookup.get(lowered[4:])
+    else:
+        hit = exact_name_lookup.get("the " + lowered)
+    return hit
 
 
 def compile_scene_body_draft(
@@ -4562,7 +4578,7 @@ def build_validation_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic wording changes.\n"
         "- If an inspection choice names a local prop, marker, or knot, establish that thing clearly in the scene text first. Do not invent unsupported focal objects in the menu.\n\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
@@ -4632,7 +4648,7 @@ def build_schema_retry_user_prompt(
         "- Do not repeat the parent scene summary with only cosmetic changes.\n"
         "- If a choice names a local prop or marker, establish it in the scene text first instead of inventing it only in the menu.\n"
         "- Feel free to act creatively. Make bold choices as long as they fit in the story.\n"
-        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.\n"
+        "- Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context.\n"
         "- This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.\n"
         "- Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.\n"
         "- For fit only, not as automatic canon for this run, think of whimsical-fantasy textures like Madam Bei the frog tram conductor, Pipkin the elf magic librarian, mushroom fields, and glass villages.\n"
@@ -6142,7 +6158,7 @@ def append_validation_attempt_log_record(*, log_path: Path, record: dict[str, An
 def build_log_timestamps() -> dict[str, str]:
     now = datetime.now().astimezone()
     return {
-        "timestamp": now.strftime("%Y-%m-%d %I:%M:%S %p"),
+        "time": now.strftime("%m/%d %I:%M %p"),
     }
 
 
@@ -6153,19 +6169,17 @@ def append_run_started_log(
     packet: dict[str, Any],
 ) -> None:
     timestamps = build_log_timestamps()
-    append_run_log_record(
-        log_path=log_path,
-        record={
-            **timestamps,
-            "status": "started",
-            "model": args.model,
-            "run_mode": packet.get("run_mode"),
-            "dry_run": args.dry_run,
-            "pre_change_url": packet.get("pre_change_url"),
-            "choice_id": (packet.get("selected_frontier_item") or {}).get("choice_id"),
-            "planning_reason": packet.get("planning_reason"),
-        },
-    )
+    record: dict[str, Any] = {
+        **timestamps,
+        "status": "started",
+        "mode": packet.get("run_mode"),
+        "model": args.model,
+        "pre_change_url": packet.get("pre_change_url") or "",
+        "choice_id": (packet.get("selected_frontier_item") or {}).get("choice_id"),
+    }
+    if packet.get("planning_reason"):
+        record["planning_reason"] = packet["planning_reason"]
+    append_run_log_record(log_path=log_path, record=record)
 
 
 def append_run_finished_log(
@@ -6180,10 +6194,10 @@ def append_run_finished_log(
         record={
             **timestamps,
             "status": "succeeded",
+            "mode": result.get("run_mode"),
             "model": args.model,
-            "run_mode": result.get("run_mode"),
-            "dry_run": result.get("dry_run"),
-            "result": result,
+            "pre_change_url": result.get("pre_change_url") or "",
+            "choice_id": result.get("expanded_choice_id"),
         },
     )
 
@@ -6196,20 +6210,18 @@ def append_run_failed_log(
     error: BaseException | str,
 ) -> None:
     timestamps = build_log_timestamps()
-    append_run_log_record(
-        log_path=log_path,
-        record={
-            **timestamps,
-            "status": "failed",
-            "model": args.model,
-            "run_mode": packet.get("run_mode") if packet else None,
-            "dry_run": args.dry_run,
-            "pre_change_url": packet.get("pre_change_url") if packet else None,
-            "choice_id": ((packet or {}).get("selected_frontier_item") or {}).get("choice_id"),
-            "planning_reason": (packet or {}).get("planning_reason"),
-            "error": str(error),
-        },
-    )
+    record: dict[str, Any] = {
+        **timestamps,
+        "status": "failed",
+        "mode": packet.get("run_mode") if packet else None,
+        "model": args.model,
+        "pre_change_url": (packet.get("pre_change_url") if packet else None) or "",
+        "choice_id": ((packet or {}).get("selected_frontier_item") or {}).get("choice_id"),
+        "error": str(error),
+    }
+    if (packet or {}).get("planning_reason"):
+        record["planning_reason"] = packet["planning_reason"]  # type: ignore[index]
+    append_run_log_record(log_path=log_path, record=record)
 
 
 def infer_missing_asset_requests(
@@ -6271,42 +6283,76 @@ def infer_missing_asset_requests(
                             }
                         )
 
+        # Collect entity IDs needing art from present_entities + newly created entities
+        character_ids_to_check: set[int] = set()
+        object_ids_to_check: set[int] = set()
         for present in node.get("present_entities", []):
             entity_type = present.get("entity_type")
-            if entity_type not in {"character", "object"}:
-                continue
-            entity_id = int(present["entity_id"])
-            preferred_kind = "portrait" if entity_type == "character" else "object_render"
-            if (preferred_kind, entity_type, entity_id) in explicit_pairs:
+            if entity_type == "character":
+                character_ids_to_check.add(int(present["entity_id"]))
+            elif entity_type == "object":
+                object_ids_to_check.add(int(present["entity_id"]))
+        for entity in node.get("entities", []):
+            role = entity.get("role") or ""
+            if role == "new_character" and entity.get("entity_type") == "character":
+                character_ids_to_check.add(int(entity["entity_id"]))
+
+        for character_id in character_ids_to_check:
+            if ("portrait", "character", character_id) in explicit_pairs:
                 continue
             preferred_asset = assets.get_preferred_asset(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                preferred_kinds=["cutout", preferred_kind],
+                entity_type="character",
+                entity_id=character_id,
+                preferred_kinds=["cutout", "portrait"],
             )
             if preferred_asset is not None:
                 continue
-            if entity_type == "character":
-                record = canon.get_character(entity_id)
-                width, height = 1024, 1536
-            else:
-                record = canon.get_object(entity_id)
-                width, height = 1024, 1024
+            record = canon.get_character(character_id)
             if record is None:
                 continue
             inferred.append(
                 {
-                    "asset_kind": preferred_kind,
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
+                    "asset_kind": "portrait",
+                    "entity_type": "character",
+                    "entity_id": character_id,
                     "prompt": build_asset_prompt(
-                        entity_type=entity_type,
+                        entity_type="character",
                         entity=record,
                         scene_summary=node.get("summary"),
                         scene_text=node.get("scene_text"),
                     ),
-                    "width": width,
-                    "height": height,
+                    "width": 1024,
+                    "height": 1536,
+                    "metadata": {"source": "inferred_post_apply"},
+                }
+            )
+
+        for object_id in object_ids_to_check:
+            if ("object_render", "object", object_id) in explicit_pairs:
+                continue
+            preferred_asset = assets.get_preferred_asset(
+                entity_type="object",
+                entity_id=object_id,
+                preferred_kinds=["cutout", "object_render"],
+            )
+            if preferred_asset is not None:
+                continue
+            record = canon.get_object(object_id)
+            if record is None:
+                continue
+            inferred.append(
+                {
+                    "asset_kind": "object_render",
+                    "entity_type": "object",
+                    "entity_id": object_id,
+                    "prompt": build_asset_prompt(
+                        entity_type="object",
+                        entity=record,
+                        scene_summary=node.get("summary"),
+                        scene_text=node.get("scene_text"),
+                    ),
+                    "width": 1024,
+                    "height": 1024,
                     "metadata": {"source": "inferred_post_apply"},
                 }
             )

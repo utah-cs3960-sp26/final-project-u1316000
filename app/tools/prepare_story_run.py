@@ -477,7 +477,7 @@ def build_validation_checklist(*, branch_shape: dict[str, Any] | None = None) ->
         "If you introduce a new unresolved mystery or unanswered question, create or extend a hook.",
         "Use a mix of lyrical narration and clearer spoken dialogue; the player voice should usually be one of the clearest in the scene.",
         "Feel free to act creatively. Make bold choices as long as they fit in the story.",
-        "Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context.",
+        "Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context.",
         "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible.",
         "This world is fantasy first. Outside the king's brass enumerators and their closely related royal systems, ordinary people, places, tools, and problems should feel magical, folkloric, handmade, organic, and mostly preindustrial rather than high-tech, industrial, or sci-fi.",
         "Treat advanced machinery, metallic infrastructure, survey engines, and technical bureaucracy as exceptional pressure textures, not the default texture of the world.",
@@ -1197,7 +1197,7 @@ def build_normal_packet(
             "Use frontier_budget_state to understand current branch pressure. If pressure is soft or hard, prefer merges, closures, and narrow continuation over multiple fresh leaves. "
             "Treat frontier_choice_constraints as hard validation rules for this run, not just soft advice. "
             "Feel free to act creatively. Make bold choices as long as they fit in the story. "
-            "Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, or anything whimsical as long as it fits the setting and/or context. "
+            "Introduce or reintroduce characters frequently. Characters make a story. Characters may be human, talking/anthropomorphic animals, mythical creatures, fantasy species, golems, dragons, vampires, trolls, ghosts, witches, or anything whimsical, magical, or mythical as long as it fits the setting and/or context. "
             "Introduce new locations frequently when appropriate, or deliberately route the story back to existing locations when the branch is naturally leading there. Places make motion, contrast, and consequence visible. "
             "Always evaluate whether the player is actually familiar with a character, object, location, title, faction, or system before simply naming it. Worldbuilding files, hooks, and other behind-the-scenes coherence trackers often name things the player is not aware of yet. "
             "Frequently use ideas from IDEAS.md when the current branch genuinely supports them. Treat IDEAS.md as a main source of fresh people, places, and whimsical turns. Planning runs occur specifically to make idea usage easier during normal worker runs like this one. "
