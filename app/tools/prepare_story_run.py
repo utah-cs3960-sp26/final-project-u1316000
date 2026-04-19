@@ -20,8 +20,8 @@ from app.services.story_graph import StoryGraphService
 from app.services.worldbuilding import WorldbuildingService
 
 SAME_LOCATION_PRESSURE_THRESHOLD = 4
-ISOLATION_PRESSURE_THRESHOLD = 6
-NEW_CHARACTER_PRESSURE_THRESHOLD = 6
+ISOLATION_PRESSURE_THRESHOLD = 5
+NEW_CHARACTER_PRESSURE_THRESHOLD = 8
 
 
 def build_parser() -> argparse.ArgumentParser:

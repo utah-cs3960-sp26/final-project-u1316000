@@ -17,8 +17,8 @@ class StoryGraphService:
     """Owns story nodes, choices, and their links to canonical entities."""
 
     SAME_LOCATION_PRESSURE_THRESHOLD = 4
-    ISOLATION_PRESSURE_THRESHOLD = 6
-    NEW_CHARACTER_PRESSURE_THRESHOLD = 6
+    ISOLATION_PRESSURE_THRESHOLD = 5
+    NEW_CHARACTER_PRESSURE_THRESHOLD = 8
 
     NONVISUAL_SPEAKER_PATTERNS = (
         re.compile(r"\bunseen\b", re.IGNORECASE),
@@ -312,7 +312,8 @@ class StoryGraphService:
                 json.dumps(dialogue_lines or []),
             ),
         )
-        node_id = cursor.lastrowid
+        assert cursor.lastrowid is not None
+        node_id: int = cursor.lastrowid
         for entity in referenced_entities or []:
             self.link_entity(
                 story_node_id=node_id,
@@ -1776,7 +1777,9 @@ class StoryGraphService:
             f"INSERT INTO {table_name} (slug, name) VALUES (?, ?)",
             (slug, name.strip()),
         )
-        return int(cursor.lastrowid)
+        row_id = cursor.lastrowid
+        assert row_id is not None
+        return int(row_id)
 
     def _apply_inventory_change(
         self,
